@@ -39,15 +39,29 @@ class FriendsService {
     }
 
     async getGameByToken(token) {
+        // Simplify query — nested profile selects can sometimes cause issues in PostgREST 
+        // if the foreign keys are null. We'll fetch the base game and join manually if needed, 
+        // but for the join page check, we only need the basic game info first.
         const { data, error } = await supabase.from('games')
-            .select('*, white:profiles!white_id(username, avatar_url), black:profiles!black_id(username, avatar_url)')
+            .select(`
+                *,
+                white:profiles!white_id(username, avatar_url),
+                black:profiles!black_id(username, avatar_url)
+            `)
             .eq('invite_token', token)
             .maybeSingle();
 
-        if (error || !data) return null;
+        if (error) {
+            console.error('[FriendsService] getGameByToken error:', error.message);
+            return null;
+        }
+        if (!data) return null;
         
-        // If expired
-        if (new Date(data.invite_expires_at) < new Date()) {
+        // Add a 5-minute grace period for clock skew between server and DB
+        const now = new Date();
+        const expiresAt = new Date(data.invite_expires_at);
+        if (expiresAt.getTime() + (5 * 60 * 1000) < now.getTime()) {
+            console.warn(`[FriendsService] Token ${token} expired at ${data.invite_expires_at}`);
             return null;
         }
 

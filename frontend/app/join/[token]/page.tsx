@@ -27,15 +27,34 @@ export default function JoinPage({ params }: { params: { token: string } }) {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://127.0.0.1:3001'
 
     useEffect(() => {
-        Promise.all([
-            fetch(`${socketUrl}/api/games/join/${params.token}`).then(r => r.ok ? r.json() : null),
-            fetch('/api/profile/me').then(r => r.ok ? r.json() : null),
-        ]).then(([g, m]) => {
+        const fetchGame = async () => {
+            try {
+                const res = await fetch(`${socketUrl}/api/games/join/${params.token}`)
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}))
+                    console.warn('[JoinPage] Game fetch failed:', res.status, d.error)
+                    return null
+                }
+                return await res.json()
+            } catch (err) {
+                console.error('[JoinPage] Game fetch network error:', err)
+                return null
+            }
+        }
+
+        const fetchMe = async () => {
+            try {
+                const res = await fetch('/api/profile/me')
+                return res.ok ? await res.json() : null
+            } catch { return null }
+        }
+
+        Promise.all([fetchGame(), fetchMe()]).then(([g, m]) => {
             setGame(g)
             setMe(m)
             setLoading(false)
         })
-    }, [params.token])
+    }, [params.token, socketUrl])
 
     // Creator: join game room via socket and listen for friend to accept
     useEffect(() => {

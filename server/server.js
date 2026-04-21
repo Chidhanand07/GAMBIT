@@ -13,17 +13,37 @@ const { startGlobalClock, parseIncrement } = require('./services/clock');
 
 const app = express();
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
+  origin: (origin, callback) => {
+    const allowed = [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      process.env.FRONTEND_URL,
+    ].filter(Boolean);
+    // Allow any vercel.app subdomain
+    if (!origin || allowed.includes(origin) || /\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: process.env.FRONTEND_URL || '*' } });
+const io = socketIo(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || /\.vercel\.app$/.test(origin) || origin === process.env.FRONTEND_URL) {
+        callback(null, true);
+      } else {
+        callback(null, true); // permissive fallback for WS
+      }
+    },
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'], // prefer WebSocket, fall back to polling
+});
 
 const matchmaking = new MatchmakingService(io);
 
@@ -106,9 +126,8 @@ app.post('/api/auth/register-profile', async (req, res) => {
 app.post('/api/analysis/engine', async (req, res) => {
     try {
         const { fen, depth } = req.body;
-        // Proxy to local python service port 8001
-        // Fetch is available natively in Node 18+
-        const response = await fetch('http://localhost:8001/analyze', {
+        const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
+        const response = await fetch(`${engineUrl}/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fen, depth: depth || 18 })
@@ -478,10 +497,10 @@ io.on('connection', (socket) => {
         const expectedId = game.activeSide === 'w' ? game.whiteId : game.blackId;
         if (!movingUserId || movingUserId !== expectedId) return;
 
-        // Validate move via Python engine before accepting
         if (game.fen && data.move) {
             try {
-                const validationRes = await fetch('http://localhost:8001/validate-move', {
+                const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
+                const validationRes = await fetch(`${engineUrl}/validate-move`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fen: game.fen, move: data.move }),

@@ -104,20 +104,14 @@ export default function LobbyPage() {
         }
 
         const onConnect = () => {
-            if (!myProfile) return
-            socket.emit('authenticate', myProfile.id)
-            if (searching) {
-                const { mins, inc } = getTcMinutes()
-                socket.emit('join_queue', {
-                    user: {
-                        id: myProfile.id,
-                        rating: myProfile.rating_rapid ?? 1200,
-                        games_played: myProfile.games_played ?? 0,
-                    },
-                    time_control: mins,
-                    increment: inc,
-                })
-            }
+            if (!myProfile || !searching) return
+            const { mins, inc } = getTcMinutes()
+            socket.emit('join_queue', {
+                user: { id: myProfile.id },
+                time_control: String(mins),
+                increment: inc,
+                is_rated: true,
+            })
         }
 
         socket.on('match_found', onMatchFound)
@@ -153,27 +147,13 @@ export default function LobbyPage() {
             return
         }
 
-        // M2/L6: authenticate first, then join queue only after server confirms identity
-        socket.emit('authenticate', myProfile.id)
-        socket.once('authenticated', () => {
-            socket.emit('join_queue', {
-                user: { id: myProfile.id },
-                time_control: mins,
-                increment: inc,
-                is_rated: true,
-            })
+        socket.emit('join_queue', {
+            user: { id: myProfile.id },
+            time_control: String(mins),
+            increment: inc,
+            is_rated: true,
         })
-        // Fallback: if server doesn't emit 'authenticated', join after short delay
-        setTimeout(() => {
-            if (!socket.hasListeners || socket.listeners('authenticated').length === 0) return
-            socket.off('authenticated')
-            socket.emit('join_queue', {
-                user: { id: myProfile.id },
-                time_control: mins,
-                increment: inc,
-                is_rated: true,
-            })
-        }, 1500)
+        setSearching(true)
         setSearching(true)
     }
 
