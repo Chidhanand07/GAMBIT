@@ -1,0 +1,15 @@
+{
+  "name": "gambit",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:engine": "cd chess-engine && ./venv/bin/uvicorn main:app --port 8001 --reload",
+    "dev:server": "cd server && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:engine\" \"npm run dev:server\" \"npm run dev:frontend\"",
+    "install:all": "npm install && cd server && npm install && cd ../frontend && npm install"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

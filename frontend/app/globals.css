@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --bg-page:      #0F0D0B;
+    --bg-surface:   #1A1714;
+    --bg-elevated:  #231F1B;
+    --bg-hover:     #2A2520;
+    --bg-active:    #332D28;
+
+    /* Accent */
+    --accent:       #C4965A;
+    --accent-hover: #D4A96A;
+    --accent-dim:   rgba(196,150,90,0.12);
+    --accent-glow:  rgba(196,150,90,0.06);
+
+    /* Board */
+    --board-light:  #F0D9B5;
+    --board-dark:   #B58863;
+    --frame-outer:  #3D2B1A;
+    --frame-inner:  #2A1D10;
+
+    /* Text */
+    --text-primary:   #F2EDE6;
+    --text-secondary: #9A8E84;
+    --text-tertiary:  #5E534C;
+
+    /* Borders */
+    --border:        rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.12);
+    --border-accent: rgba(196,150,90,0.3);
+
+    /* Semantic */
+    --green:  #4FA85A;
+    --red:    #C0392B;
+    --amber:  #D4A017;
+    --indicator-green: #4FA85A;
+    --green-indicator: #4FA85A;
+
+    /* Board highlight */
+    --last-move: rgba(196, 150, 90, 0.35);
+    --selected:  rgba(250, 250, 100, 0.45);
+    --valid-dot: rgba(242, 237, 230, 0.22);
+    --check-highlight: #C0392B;
+
+    /* Spacing scale */
+    --space-xs:  4px;
+    --space-sm:  8px;
+    --space-md:  16px;
+    --space-lg:  24px;
+    --space-xl:  32px;
+    --space-2xl: 48px;
+    --space-3xl: 64px;
+  }
+
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    overflow-x: hidden;
+  }
+
+  body {
+    background-color: var(--bg-page);
+    color: var(--text-primary);
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+  }
+
+  .font-mono, code, pre, [class*="tabular"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Thin scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+}
+
+@layer components {
+  .board-outer-frame {
+    border: 4px solid var(--frame-outer);
+    border-radius: 6px;
+    background: var(--frame-outer);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+  }
+  .board-inner-frame {
+    border: 2px solid var(--frame-inner);
+    position: relative;
+    overflow: hidden;
+  }
+  .board-coordinate {
+    position: absolute;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+    user-select: none;
+    cursor: default;
+  }
+}
+
+@layer utilities {
+  /* Shimmer skeleton animation */
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--bg-elevated) 25%,
+      var(--bg-hover) 50%,
+      var(--bg-elevated) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+  }
+
+  /* Page fade-in on mount */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .page-enter {
+    animation: fadeUp 200ms ease forwards;
+  }
+
+  /* Toast slide-up */
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .toast-enter {
+    animation: toastIn 200ms ease forwards;
+  }
+
+  /* Clock pulse when < 30s */
+  @keyframes clockPulse {
+    0%, 100% { border-color: rgba(192,57,43,0.4); }
+    50%       { border-color: rgba(192,57,43,0.8); }
+  }
+  .clock-critical {
+    animation: clockPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes shudder {
+    0%,100% { transform: translate(0,0) rotate(0deg); }
+    20%      { transform: translate(-3px, 2px) rotate(-0.5deg); }
+    40%      { transform: translate(3px, -2px) rotate(0.5deg); }
+    60%      { transform: translate(-2px, 3px) rotate(-0.3deg); }
+    80%      { transform: translate(2px, -1px) rotate(0.3deg); }
+  }
+
+  .shudder {
+    animation: shudder 0.35s ease-in-out;
+  }
+
+  #page-container {
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+
+  #page-container.page-reveal {
+    opacity: 1;
+  }
+
+  /* Button press */
+  .btn-press:active { transform: scale(0.97); transition: transform 100ms; }
+}

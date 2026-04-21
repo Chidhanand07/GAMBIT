@@ -1,0 +1,6 @@
+ALTER TABLE public.profiles
+ADD COLUMN display_name TEXT,
+ADD COLUMN bio TEXT,
+ADD COLUMN country TEXT,
+ADD COLUMN sex TEXT,
+ADD COLUMN is_public BOOLEAN DEFAULT true;

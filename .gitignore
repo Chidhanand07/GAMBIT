@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+server/node_modules/
+
+# Python
+chess-engine/venv/
+chess-engine/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+
+# Next.js
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Env files (contain secrets)
+frontend/.env.local
+server/.env
+chess-engine/.env
+
+# Build artifacts
+frontend/tsconfig.tsbuildinfo
+frontend/.vercel/
+
+# OS
+.DS_Store
