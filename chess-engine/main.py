@@ -75,75 +75,76 @@ def run_full_game_analysis(game_id: str, pgn: str):
         return
     # Note: sf is already acquired from pool; release in finally below
 
-    import io
-    import chess.pgn
-    pgn_io = io.StringIO(pgn)
-    game = chess.pgn.read_game(pgn_io)
+    try:
+        import io
+        import chess.pgn
+        pgn_io = io.StringIO(pgn)
+        game = chess.pgn.read_game(pgn_io)
     
-    if not game:
-        return
+        if not game:
+            return
         
-    board = game.board()
+        board = game.board()
     
-    white_cp_losses = []
-    black_cp_losses = []
-    white_classifications = []
-    black_classifications = []
-    critical_moments = []
+        white_cp_losses = []
+        black_cp_losses = []
+        white_classifications = []
+        black_classifications = []
+        critical_moments = []
     
-    move_number = 1
-    for move in game.mainline_moves():
-        player_color = board.turn
-        current_fen = board.fen()
+        move_number = 1
+        for move in game.mainline_moves():
+            player_color = board.turn
+            current_fen = board.fen()
         
-        cp_loss, classification, eb, ea, ebest, best_uci, played_uci = analyze_move_cp(
-            sf, current_fen, move.uci(), player_color
-        )
+            cp_loss, classification, eb, ea, ebest, best_uci, played_uci = analyze_move_cp(
+                sf, current_fen, move.uci(), player_color
+            )
         
-        move_entry = {
-            "move": played_uci,
-            "classification": classification,
-            "cp_loss": cp_loss,
-            "eval_before": eb,
-            "eval_after": ea,
-        }
-        
-        if player_color == chess.WHITE:
-            white_cp_losses.append(cp_loss)
-            white_classifications.append(move_entry)
-        else:
-            black_cp_losses.append(cp_loss)
-            black_classifications.append(move_entry)
-            
-        if classification in ["Blunder", "Mistake", "Brilliant", "Great move"]:
-            critical_moments.append({
-                "move_number": move_number,
-                "type": classification,
-                "best_move": best_uci,
-                "played_move": played_uci,
+            move_entry = {
+                "move": played_uci,
+                "classification": classification,
+                "cp_loss": cp_loss,
                 "eval_before": eb,
                 "eval_after": ea,
-                "description": f"{'White' if player_color == chess.WHITE else 'Black'} played a {classification}"
-            })
+            }
+        
+            if player_color == chess.WHITE:
+                white_cp_losses.append(cp_loss)
+                white_classifications.append(move_entry)
+            else:
+                black_cp_losses.append(cp_loss)
+                black_classifications.append(move_entry)
             
-        board.push(move)
-        if player_color == chess.BLACK:
-            move_number += 1
+            if classification in ["Blunder", "Mistake", "Brilliant", "Great move"]:
+                critical_moments.append({
+                    "move_number": move_number,
+                    "type": classification,
+                    "best_move": best_uci,
+                    "played_move": played_uci,
+                    "eval_before": eb,
+                    "eval_after": ea,
+                    "description": f"{'White' if player_color == chess.WHITE else 'Black'} played a {classification}"
+                })
             
-    white_acc = compute_game_accuracy(white_cp_losses)
-    black_acc = compute_game_accuracy(black_cp_losses)
+            board.push(move)
+            if player_color == chess.BLACK:
+                move_number += 1
+            
+        white_acc = compute_game_accuracy(white_cp_losses)
+        black_acc = compute_game_accuracy(black_cp_losses)
     
-    if supabase:
-        try:
-            supabase.table('games').update({
-                'white_accuracy': white_acc,
-                'black_accuracy': black_acc,
-                'white_move_classifications': white_classifications,
-                'black_move_classifications': black_classifications,
-                'critical_moments': critical_moments
-            }).eq('id', game_id).execute()
-        except Exception as e:
-            print("Failed to save analysis to supabase:", e)
+        if supabase:
+            try:
+                supabase.table('games').update({
+                    'white_accuracy': white_acc,
+                    'black_accuracy': black_acc,
+                    'white_move_classifications': white_classifications,
+                    'black_move_classifications': black_classifications,
+                    'critical_moments': critical_moments
+                }).eq('id', game_id).execute()
+            except Exception as e:
+                print("Failed to save analysis to supabase:", e)
     finally:
         release_stockfish_instance(sf)
 
