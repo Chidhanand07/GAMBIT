@@ -11,6 +11,35 @@ const { supabase } = require('./supabase');
 const { getGame, setGame, updateGame, addActiveGame, removeActiveGame } = require('./lib/gameStore');
 const { startGlobalClock, parseIncrement } = require('./services/clock');
 
+// ── Game Review trigger ──────────────────────────────────────────────────────
+// Build a PGN movetext string from a game's move log (each entry has a `san`).
+function buildPgnFromMoveLog(moveLog) {
+  const sans = (moveLog || []).map(m => m && m.san).filter(Boolean);
+  if (!sans.length) return null;
+  let movetext = '';
+  for (let i = 0; i < sans.length; i++) {
+    if (i % 2 === 0) movetext += `${i / 2 + 1}. `;
+    movetext += `${sans[i]} `;
+  }
+  // Minimal headers so python-chess parses it as a game.
+  return `[Event "GAMBIT"]\n[Site "GAMBIT"]\n\n${movetext.trim()} *`;
+}
+
+// Ask the engine to analyse a finished game (fire-and-forget; engine runs it async
+// and writes accuracy/classifications/eval_graph back to the games row).
+function triggerGameReview(gameId, moveLog, timeControl) {
+  const pgn = buildPgnFromMoveLog(moveLog);
+  if (!pgn) return;
+  const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
+  fetch(`${engineUrl}/analyse-game`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ game_id: gameId, pgn, time_control: String(timeControl ?? '10') }),
+  })
+    .then(res => { if (!res.ok) console.warn('[game_review] engine returned', res.status); })
+    .catch(e => console.warn('[game_review] trigger failed:', e.message));
+}
+
 const app = express();
 app.use(cors({
   origin: (origin, callback) => {
@@ -634,6 +663,11 @@ io.on('connection', (socket) => {
         }).eq('id', data.game_id).eq('status', 'active').select('id').maybeSingle();
 
         if (!updated) return;
+
+        // Fire off a full chess.com-style Game Review (depth-18 Stockfish per move).
+        // Runs in the engine as a background task and writes accuracy / per-move
+        // classifications / eval graph back to the games row. Fire-and-forget.
+        triggerGameReview(data.game_id, game.moveLog, game.timeControl ?? data.time_control ?? '10');
 
         const changes = await ratingService.processGameEnd(
             data.game_id, whiteId, blackId, outcome,

@@ -5,6 +5,8 @@ import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from engine import get_engine, get_stockfish_instance, release_stockfish_instance, analyze_move_cp, compute_game_accuracy
+from style_engine import get_style_move, style_model_loaded
+from computer_engine import get_computer_move
 
 # Setup Supabase client
 from supabase import create_client, Client
@@ -86,37 +88,54 @@ def run_full_game_analysis(game_id: str, pgn: str):
         
         board = game.board()
     
-        white_cp_losses = []
-        black_cp_losses = []
+        white_accuracies = []
+        black_accuracies = []
         white_classifications = []
         black_classifications = []
         critical_moments = []
-    
+        eval_graph = []   # white-perspective centipawns per ply, for the advantage chart
+
         move_number = 1
+        ply = 0
         for move in game.mainline_moves():
             player_color = board.turn
             current_fen = board.fen()
-        
-            cp_loss, classification, eb, ea, ebest, best_uci, played_uci = analyze_move_cp(
+
+            cp_loss, classification, eb, ea, ebest, best_uci, played_uci, move_acc = analyze_move_cp(
                 sf, current_fen, move.uci(), player_color
             )
-        
+
+            # Book: early, sound moves are opening theory rather than "found" moves.
+            # Heuristic (no polyglot book on the server): first 8 plies with low loss.
+            if ply < 8 and classification in ("Best", "Excellent", "Good") and cp_loss <= 40:
+                classification = "Book"
+
+            # White-perspective eval after this move, for the eval graph.
+            eval_white = ea if player_color == chess.WHITE else -ea
+            eval_graph.append(eval_white)
+
             move_entry = {
+                "move_number": move_number,
+                "ply": ply,
                 "move": played_uci,
+                "san": board.san(move),
                 "classification": classification,
                 "cp_loss": cp_loss,
+                "accuracy": move_acc,
+                "best_move": best_uci,
                 "eval_before": eb,
                 "eval_after": ea,
+                "eval_white": eval_white,
             }
-        
+
             if player_color == chess.WHITE:
-                white_cp_losses.append(cp_loss)
+                white_accuracies.append(move_acc)
                 white_classifications.append(move_entry)
             else:
-                black_cp_losses.append(cp_loss)
+                black_accuracies.append(move_acc)
                 black_classifications.append(move_entry)
-            
-            if classification in ["Blunder", "Mistake", "Brilliant", "Great move"]:
+
+            if classification in ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]:
                 critical_moments.append({
                     "move_number": move_number,
                     "type": classification,
@@ -126,13 +145,14 @@ def run_full_game_analysis(game_id: str, pgn: str):
                     "eval_after": ea,
                     "description": f"{'White' if player_color == chess.WHITE else 'Black'} played a {classification}"
                 })
-            
+
             board.push(move)
+            ply += 1
             if player_color == chess.BLACK:
                 move_number += 1
-            
-        white_acc = compute_game_accuracy(white_cp_losses)
-        black_acc = compute_game_accuracy(black_cp_losses)
+
+        white_acc = round(sum(white_accuracies) / len(white_accuracies), 1) if white_accuracies else 100.0
+        black_acc = round(sum(black_accuracies) / len(black_accuracies), 1) if black_accuracies else 100.0
     
         if supabase:
             try:
@@ -141,8 +161,10 @@ def run_full_game_analysis(game_id: str, pgn: str):
                     'black_accuracy': black_acc,
                     'white_move_classifications': white_classifications,
                     'black_move_classifications': black_classifications,
-                    'critical_moments': critical_moments
+                    'critical_moments': critical_moments,
                 }).eq('id', game_id).execute()
+                # Note: the eval graph is derived client-side from each move entry's
+                # `eval_white`, so no separate `eval_graph` column is required.
             except Exception as e:
                 print("Failed to save analysis to supabase:", e)
     finally:
@@ -185,7 +207,44 @@ def classify_move(req: MoveClassifyReq):
         if not sf:
             raise HTTPException(status_code=503, detail="Engine unavailable")
         board = chess.Board(req.fen)
-        cp_loss, classification, eb, ea, ebest, best_uci, played_uci = analyze_move_cp(
+        cp_loss, classification, eb, ea, ebest, best_uci, played_uci, move_acc = analyze_move_cp(
             sf, req.fen, req.move, board.turn
         )
         return {"classification": classification, "cp_loss": cp_loss, "best_move": best_uci}
+
+
+class StyleMoveReq(BaseModel):
+    fen: str
+    top_k: int = 3
+
+@app.get("/style-move/health")
+def style_move_health():
+    return {"model_loaded": style_model_loaded()}
+
+@app.post("/style-move")
+def style_move(req: StyleMoveReq):
+    try:
+        result = get_style_move(req.fen, top_k=req.top_k)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=422,
+                             detail="Style model not loaded or no legal moves in position.")
+    return result
+
+
+class ComputerMoveReq(BaseModel):
+    fen: str
+    difficulty: str = "medium"
+
+@app.post("/computer-move")
+def computer_move(req: ComputerMoveReq):
+    """MAVERICK's move for a computer game — style bot supervised by Stockfish per difficulty."""
+    try:
+        result = get_computer_move(req.fen, req.difficulty)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=422,
+                             detail="No move available (game over or no legal moves).")
+    return result

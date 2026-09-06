@@ -4,3 +4,6 @@ python-chess==1.999
 stockfish==3.28.0
 supabase==2.0.2
 httpx==0.24.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+numpy
