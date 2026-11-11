@@ -33,9 +33,9 @@ export function useGameController(gameId: string) {
     const { profile: myProfile } = useProfile();
     const [state, dispatch] = useReducer(gameReducer, undefined, createInitialGameState);
     const { moveListRef, ...refs } = useGameRefs();
-    const { chessRef, gameDataRef, clockSyncedRef, lastProcessedFenRef } = refs;
+    const { chessRef, clockSyncedRef, lastProcessedFenRef } = refs;
     const disconnect = useOpponentDisconnect();
-    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, gameDataRef });
+    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef });
     const { myColor, soundOn, gameOver, gameData } = state;
     const { markDisconnected, markReconnected, opponentDisconnected } = disconnect;
 

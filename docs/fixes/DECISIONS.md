@@ -22,6 +22,8 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-005](#f-005) | `join_game`: non-participants are spectators and are never linked to the game | 1 | S9 |
 | [F-006](#f-006) | Rematch/challenge: requests stored in Redis for 60 s; answers consume them and use stored terms | 1 | S4 (+F1, G16) |
 | [F-007](#f-007) | Moves are validated on the server with chess.js; FEN is the authority, UCI history adds repetition | 1 | S1, S10 |
+| [F-008](#f-008) | The server decides results; one finalizer; `games.result` = `white` / `black` / `draw` | 1 | S3 (+G1) |
+| [F-009](#f-009) | No draw-offer or abort events: the UI has neither | 1 | S3 |
 
 ---
 
@@ -251,3 +253,76 @@ instead of one file per ADR under `docs/refactor/adr/`.
     (NODE-17), which is out of scope here and listed for the next phase.
   - `engineClient.validateMove` and the engine's `/validate-move` endpoint are now unused by the
     game server; they are left in place (PR 2 protects the endpoint) and listed as dead code.
+
+## F-008
+
+**Results are decided by the server through one finalizer (S3).**
+
+- **Context.** The page ran chess.js, decided the game was over and emitted `game_end` with a
+  result string. The server accepted that event from any socket (no participant check), parsed
+  the winner by substring (`includes('white')` first, so "black beat white" was a white win),
+  rated the game, and fell back to the client's `time_control` / `is_rated`. Resignation was
+  the same event with a different reason.
+- **Options.**
+  1. Who ends a game: (a) keep the client event but verify the claim; (b) the server
+     adjudicates after each move, plus a `resign` event.
+  2. Finalization code: (a) leave it inside `gameService`; (b) one `endGame(gameId, {winner, reason})`
+     module used by move endings and resignation.
+  3. `games.result` for a decisive game: (a) keep writing `null`; (b) `white_wins` / `black_wins`
+     (the schema comment); (c) `white` / `black` / `draw` (the server's own vocabulary).
+  4. Clock and abandonment endings: (a) leave untouched; (b) route through `endGame`;
+     (c) keep their code but share the atomic active → completed transition.
+- **Decision.** 1b, 2b, 3c, 4c.
+  - `server/src/domain/adjudication.js` (pure): an ordered rule table — checkmate, stalemate,
+    insufficient material, threefold repetition, fifty-move rule. `gameService.makeMove`
+    adjudicates the position after every accepted move.
+  - `server/src/services/gameFinalizer.js`: `endGame` moves Redis active → completed with
+    `mutateGame` (only one caller wins), removes the game from the active set, broadcasts
+    `game_end`, clears session links, updates the row with the existing `status = 'active'`
+    guard, then triggers the review and the rating update once. Time control and rated flag come
+    from server state, with fixed defaults.
+  - `resign { game_id }`: active participant only; the opponent wins by "Resignation".
+  - The client `game_end` handler and schema are deleted. `parseOutcome` is deleted.
+  - Frontend: resign emits `resign`; the page no longer detects game over or emits `game_end`;
+    the only source of a result is the server's `game_end`.
+- **Why.**
+  - *Adjudicate on the server*: verifying a client's claim needs the same rules as deciding, so
+    the claim adds nothing but an attack surface (NODE-16).
+  - *`white` / `black` / `draw`*: every reader was checked (`grep` for `result` / `winner_id`):
+    `frontend/features/profile/format.ts` and `frontend/lib/server/profileStats.ts` only test
+    `result === 'draw'` and otherwise use `winner_id`; the server's restore path calls
+    `resultLabel(row.result)`, which already expects `white` / `black`. So writing the outcome is
+    safe for all of them and makes the restore correct. `white_wins` / `black_wins` exists only in
+    a schema comment and no code reads it.
+  - *Clock path shares the transition, keeps its code*: the brief asked not to change timeout /
+    abandonment behaviour. But while the clock wrote `status: 'completed'` with a plain `setGame`,
+    a flag fall racing a mate or a resignation could broadcast a second, contradictory `game_end`.
+    Using the same `mutateGame` guard there is a three-line change with no behaviour difference
+    when there is no race; it is what makes "only one finalizer wins" true.
+- **Side effect — G1 fixed.** Finished games used to come back as "Draw" when re-joined after a
+  restart (wins were stored with `result: null`, and the restore query did not select the
+  column). New rows carry the outcome; for old rows the restore now falls back to `winner_id`
+  (`outcomeOfRow`). The restore query selects `result, winner_id`.
+- **Behaviour users will notice.** The reason on a finished game is the real one after a
+  re-join (it is stored now) instead of "Game over". Draws by insufficient material, threefold
+  repetition and the fifty-move rule are detected and end the game; before, only checkmate and
+  stalemate ended it, and the two boards could disagree about repetition. "You Lost" after
+  resigning appears when the server confirms it (a network round trip) rather than instantly.
+- **Not changed (still open).** Timeout / abandonment payloads, the missing review trigger for
+  those endings (G3), clocks persisted without the elapsed deduction (G11), a move accepted
+  between flag fall and the next tick (G7).
+
+## F-009
+
+**No `offer_draw` / `accept_draw` / `decline_draw` / `abort` events were added.**
+
+- **Context.** The brief says: if the current UI has any other way to end a game (draw offer,
+  abort), implement it server-side so no feature is lost.
+- **What the UI has.** `features/game/components/ActionBar.tsx` and `SidebarActions.tsx` offer
+  sound, flip, step back and **Resign**. There is no draw-offer or abort control anywhere in
+  `frontend/` (`grep -ri "draw offer\|offer_draw\|abort"` finds only the `aborted` status type
+  and profile-history labels).
+- **Decision.** Nothing to port, so nothing was added.
+- **Why.** Adding events with no UI would be new, untested product surface in a security PR
+  (YAGNI, SOLID-09). `resign` covers the one existing manual ending. The adjudication rule table
+  and the single finalizer are the extension points a draw offer would use later.

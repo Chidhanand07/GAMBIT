@@ -269,14 +269,18 @@ describe('server events', () => {
         expect(clockTexts()).toEqual(['05:00', '05:00'])
     })
 
-    test('move_made that delivers checkmate shows the game-over result locally (no game_end emit)', async () => {
+    test('move_made that delivers checkmate plays the mate sound; the result appears only with the server’s game_end [S3]', async () => {
         await renderGame()
         const mated = 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3'
         socket.serverSends('move_made', { game_id: 'g1', from: 'd8', to: 'h4', fen: mated, san: 'Qh4#' })
         expect(sounds.playCheckmateSound).toHaveBeenCalled()
+        // Nothing is inferred from the local board...
+        expect(screen.queryByText('by Checkmate')).not.toBeInTheDocument()
+        expect(socket.emitted('game_end')).toEqual([])
+        // ...the server's verdict is what the page shows.
+        socket.serverSends('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Checkmate', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Lost')).toBeInTheDocument()
         expect(screen.getByText('by Checkmate')).toBeInTheDocument()
-        expect(socket.emitted('game_end')).toEqual([])
     })
 
     test('clock_sync without serverTs overrides both clocks', async () => {
@@ -517,7 +521,7 @@ describe('making moves', () => {
         expect(screen.queryByText('Choose promotion')).not.toBeInTheDocument()
     })
 
-    test('my checkmating move emits make_move then game_end with the full payload', async () => {
+    test('my checkmating move emits make_move only; I never report the result, the server announces it [S3]', async () => {
         await renderGame()
         socket.serverSends('game_state_sync', {
             fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4', moveLog: [],
@@ -525,12 +529,11 @@ describe('making moves', () => {
         })
         click(square('h5'))
         click(square('f7'))
-        expect(socket.emit.mock.calls.filter(([e]) => e === 'make_move' || e === 'game_end').map(([e]) => e)).toEqual(['make_move', 'game_end'])
+        // Was: ['make_move', 'game_end'] — the client told the server who won.
+        expect(socket.emit.mock.calls.filter(([e]) => e === 'make_move' || e === 'game_end').map(([e]) => e)).toEqual(['make_move'])
         expect(socket.emitted('make_move')[0]).toMatchObject({ from: 'h5', to: 'f7' })
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'White wins', reason: 'Checkmate',
-            white_id: 'me', black_id: 'opp', is_rated: true, time_control: '5',
-        }])
+        expect(screen.queryByText('by Checkmate')).not.toBeInTheDocument()
+        socket.serverSends('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Win!')).toBeInTheDocument()
         expect(screen.getByText('by Checkmate')).toBeInTheDocument()
     })
@@ -649,34 +652,37 @@ describe('resign', () => {
         click(screen.getAllByTitle('Resign')[0])
         expect(screen.getAllByText('Resign?').length).toBeGreaterThan(0)
         click(screen.getByTitle('Cancel'))
+        expect(socket.emitted('resign')).toEqual([])
         expect(socket.emitted('game_end')).toEqual([])
         expect(screen.queryByText('Resign?')).not.toBeInTheDocument()
     })
 
-    test('confirming as white emits game_end with this exact payload and shows "You Lost"', async () => {
+    test('confirming emits `resign` { game_id } (no result, no ids); "You Lost" shows when the server ends the game [S3]', async () => {
         await renderGame()
         click(screen.getAllByTitle('Resign')[0])
         click(screen.getByTitle('Confirm resign'))
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'Black wins', reason: 'Resignation',
-            white_id: 'me', black_id: 'opp', is_rated: true, time_control: '5',
-        }])
+        // Was: game_end with a client-chosen result, player ids, rated flag and time control.
+        expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
+        expect(socket.emitted('game_end')).toEqual([])
+        expect(screen.queryByText('Resign?')).not.toBeInTheDocument()
+        expect(screen.queryByText('by Resignation')).not.toBeInTheDocument()
+        expect(sounds.playGameEndSound).not.toHaveBeenCalled()
+
+        socket.serverSends('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Resignation', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Lost')).toBeInTheDocument()
         expect(screen.getByText('by Resignation')).toBeInTheDocument()
         expect(sounds.playGameEndSound).toHaveBeenCalledWith(false)
     })
 
-    test('resigning as black reports "White wins"; missing is_rated/time_control default to false/"10"', async () => {
+    test('resigning as black sends the same `resign` { game_id }: the server works out the winner [S3]', async () => {
         profile = { ...ME, id: 'opp' }
         delete gameRow.is_rated
         delete gameRow.time_control
         await renderGame()
         click(screen.getAllByTitle('Resign')[0])
         click(screen.getByTitle('Confirm resign'))
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'White wins', reason: 'Resignation',
-            white_id: 'me', black_id: 'opp', is_rated: false, time_control: '10',
-        }])
+        expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
+        expect(socket.emitted('game_end')).toEqual([])
     })
 
     test('spectators get no resign button', async () => {

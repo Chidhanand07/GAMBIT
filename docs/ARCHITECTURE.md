@@ -19,14 +19,18 @@ server.js            5-line shim: require('./src/index'), listen only when run d
 src/index.js         composition root: wires config, clients, repositories, services, http, sockets
 src/config/env.js    the only reader of process.env (call-time accessors)
 src/domain/          pure functions: timeControl, clock, gameState, result, pgn,
+                     chessRules (legality, chess.js), moveAuthorization, adjudication,
                      rating/glicko, matchmaking/pairing  (no I/O, 100% unit-tested)
 src/clients/         engineClient (fetch), supabaseClient, redisClient
-src/repositories/    gameState (Redis + per-game lock), games, moves, messages,
-                     profiles, notifications — return raw Supabase queries
-src/services/        game, moveRecorder, clock, matchmaking, rating, privateGame,
-                     social, chat, review, analysis, profile; emitter port over io
+src/repositories/    gameState (Redis + per-game lock, atomic mutateGame), pendingRequests
+                     (Redis, 60 s TTL), games, moves, messages, profiles, notifications
+src/services/        game, moveRecorder, gameFinalizer, tokenVerifier, clock, matchmaking,
+                     rating, privateGame, social, chat, review, analysis, profile;
+                     emitter port over io
 src/http/            app.js (express + cors), routes/*, middleware/requireUser.js
-src/sockets/         index.js, handlers/{session,lobby,game,chat,social}.js,
+src/sockets/         index.js, auth.js (handshake token → socket.data.userId),
+                     schemas.js (zod per event), wrap.js (validate, catch, ack),
+                     handlers/{session,lobby,game,chat,social}.js,
                      sessionRegistry.js (userSockets, socketUsers, userActiveGame)
 supabase.js, lib/redis.js, lib/gameStore.js, services/*.js
                      legacy module paths kept as thin facades: the test suites
@@ -51,6 +55,19 @@ repositories/, clients/ ──▶ @supabase/supabase-js, ioredis, fetch
 - `http/` and `sockets/` call services only (NODE-03, SIZE-05).
 - No import cycles (SOLID-12).
 
+### Trust boundary (docs/fixes/DECISIONS.md)
+
+- **Identity:** `io.use` verifies the Supabase access token from the handshake; every handler
+  acts as `socket.data.userId`. No event or payload names the acting user (NODE-10).
+- **Input:** every event payload is parsed by its zod schema inside `wrap()`; handlers cannot
+  throw an unhandled rejection (NODE-07, NODE-08).
+- **Moves and results:** the server validates each move with chess.js against its own state,
+  adjudicates the position, and is the only thing that can end a game (NODE-11, NODE-16).
+  `gameFinalizer.endGame` and the clock both move a game active → completed through one
+  atomic transition, so a game is finalized and rated once (NODE-18).
+- **Rematch / challenge:** requests are stored in Redis for 60 s; an accept or decline must
+  match one, and the game is built from the stored terms.
+
 ## Frontend (`frontend/`)
 
 ```
@@ -63,6 +80,7 @@ features/<feature>/   components/, hooks/, state/, utils — one folder per feat
 lib/server/           server-only (`import 'server-only'`): Supabase client
                       factories, caller identity, per-entity data functions (NX-05)
 lib/api/              typed client-side fetch helpers per feature
+lib/socket/           the realtime connection (handshake token, reconnect)
 lib/chess/            pure chess helpers (board coords, clock format, time controls)
 types/                shared domain and socket payload types (no runtime code)
 components/           app-wide providers (Socket, Profile, Presence), Navbar entry, ui/

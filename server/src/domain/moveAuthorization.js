@@ -40,15 +40,40 @@ function sideToMove(game) {
 }
 
 /**
- * The checks a move must pass before its legality is even looked at, in order.
- * Each entry is [fails(game, userId), reason]; a new rule is a new entry.
- * @type {ReadonlyArray<[(game: MoveGame, userId: string | null | undefined) => boolean, string]>}
+ * @typedef {[(game: MoveGame, userId: string | null | undefined) => boolean, string]} Check
+ *   [fails(game, userId), reason]
  */
-const CHECKS = [
+
+/**
+ * What any game action by a player needs: an active game the caller plays in.
+ * @type {ReadonlyArray<Check>}
+ */
+const PLAYER_CHECKS = [
     [(game) => game.status !== 'active', REJECTION.GAME_NOT_ACTIVE],
     [(game, userId) => !isParticipant(game, userId), REJECTION.NOT_A_PLAYER],
+];
+
+/**
+ * The checks a move must pass before its legality is even looked at, in order.
+ * A new rule is a new entry.
+ * @type {ReadonlyArray<Check>}
+ */
+const MOVE_CHECKS = [
+    ...PLAYER_CHECKS,
     [(game, userId) => playerIdOf(sideToColor(sideToMove(game)), game) !== userId, REJECTION.NOT_YOUR_TURN],
 ];
+
+/**
+ * @param {ReadonlyArray<Check>} checks
+ * @param {MoveGame | null | undefined} game
+ * @param {string | null | undefined} userId
+ * @returns {string | null}
+ */
+function firstRejection(checks, game, userId) {
+    if (!game) return REJECTION.GAME_NOT_FOUND;
+    const failed = checks.find(([fails]) => fails(game, userId));
+    return failed ? failed[1] : null;
+}
 
 /**
  * Why `userId` may not move in `game` right now; null when they may.
@@ -56,10 +81,15 @@ const CHECKS = [
  * @param {string | null | undefined} userId
  * @returns {string | null}
  */
-function moveRejection(game, userId) {
-    if (!game) return REJECTION.GAME_NOT_FOUND;
-    const failed = CHECKS.find(([fails]) => fails(game, userId));
-    return failed ? failed[1] : null;
-}
+const moveRejection = (game, userId) => firstRejection(MOVE_CHECKS, game, userId);
 
-module.exports = { REJECTION, isParticipant, sideToMove, moveRejection };
+/**
+ * Why `userId` may not act as a player in `game` at all (resign, for example,
+ * is allowed on either side's turn); null when they may.
+ * @param {MoveGame | null | undefined} game
+ * @param {string | null | undefined} userId
+ * @returns {string | null}
+ */
+const playerRejection = (game, userId) => firstRejection(PLAYER_CHECKS, game, userId);
+
+module.exports = { REJECTION, isParticipant, sideToMove, moveRejection, playerRejection };

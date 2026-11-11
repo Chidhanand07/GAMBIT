@@ -242,41 +242,90 @@ describe('makeMove: the server is the authority [S1][S10]', () => {
     });
 });
 
-describe('endGame', () => {
-    test('completes, broadcasts the client payload, unlinks users, finalizes, reviews and rates', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g', moveLog: [{ san: 'e4' }] }) });
-        ctx.sessions.setActiveGame('white-user', 'g');
-        ctx.ratingService.processGameEnd.mockResolvedValue({ white: { change: 8 } });
-        await ctx.svc.endGame({ game_id: 'g', result: 'Black wins', note: 'x' });
+describe('results are decided by the server [S3]', () => {
+    const MATE_IN_ONE = 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2';
 
-        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black' });
-        expect(ctx.sessions.hasActiveGame('white-user')).toBe(false);
+    test('a checkmating move ends the game: move_made, then game_end, then finalization', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: MATE_IN_ONE, startFen: MATE_IN_ONE, activeSide: 'b' }) });
+        expect(await ctx.svc.makeMove({ game_id: 'g', from: 'd8', to: 'h4' }, 'black-user', fakeClient())).toEqual({ ok: true });
+        await flush();
+
+        expect(ctx.emitter.sent.map((e) => e.event)).toEqual(['move_made', 'game_end']);
         expect(ctx.emitter.named('game_end')[0].args[0]).toEqual({
             game_id: 'g',
             result: 'Black wins',
-            note: 'x',
+            reason: 'Checkmate',
             white_id: 'white-user',
             black_id: 'black-user',
         });
-        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: null, winner_id: 'black-user' });
-        expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledWith('g', [{ san: 'e4' }], '10');
-        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith(
-            'g',
-            'white-user',
-            'black-user',
-            'black',
-            '10',
-            true,
-        );
-        expect(ctx.emitter.named('rating_updated')).toHaveLength(1);
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black', reason: 'Checkmate' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: 'black', winner_id: 'black-user' });
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith('g', 'white-user', 'black-user', 'black', '10', true);
     });
 
-    test('already finalized in the DB → no review, no rating', async () => {
+    test('a stalemating move ends the game as a draw', async () => {
+        // White: Kg6, Qe7 → Qf7 stalemates the king on h8.
+        const fen = '7k/4Q3/6K1/8/8/8/8/8 w - - 0 1';
+        const ctx = setup({ g: makeGame({ id: 'g', fen, startFen: fen }) });
+        await ctx.svc.makeMove({ game_id: 'g', from: 'e7', to: 'f7' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'Draw', reason: 'Stalemate' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: 'draw', winner_id: null });
+    });
+
+    test('an ordinary move does not end the game', async () => {
         const ctx = setup({ g: makeGame({ id: 'g' }) });
-        ctx.gamesRepo.finishIfActive.mockReturnValue(result(null));
-        await ctx.svc.endGame({ game_id: 'g', result: 'Draw' });
-        expect(ctx.reviewService.triggerGameReview).not.toHaveBeenCalled();
-        expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
+        await ctx.svc.makeMove({ game_id: 'g', from: 'e2', to: 'e4' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('game_end')).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('there is no client-facing endGame: a result can only come from a move, a resignation or the clock', () => {
+        const ctx = setup();
+        expect(ctx.svc.endGame).toBeUndefined();
+    });
+});
+
+describe('resign [S3]', () => {
+    test.each([
+        ['white-user', 'Black wins', 'black'],
+        ['black-user', 'White wins', 'white'],
+    ])('%s resigning → %s by Resignation', async (userId, label, stored) => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        expect(await ctx.svc.resign({ game_id: 'g' }, userId)).toEqual({ ok: true });
+        expect(ctx.emitter.named('game_end')[0].args[0]).toEqual({
+            game_id: 'g',
+            result: label,
+            reason: 'Resignation',
+            white_id: 'white-user',
+            black_id: 'black-user',
+        });
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: stored, reason: 'Resignation' });
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
+    });
+
+    test('resigning is allowed on the opponent’s turn', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) }); // white to move
+        expect(await ctx.svc.resign({ game_id: 'g' }, 'black-user')).toEqual({ ok: true });
+    });
+
+    test.each([
+        ['a spectator', 'g', 'stranger', 'not_a_player'],
+        ['an unknown game', 'nope', 'white-user', 'game_not_found'],
+    ])('%s cannot resign a game', async (_name, gameId, userId, reason) => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        expect(await ctx.svc.resign({ game_id: gameId }, userId)).toEqual({ ok: false, error: reason });
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('a finished game cannot be resigned (no second result, no second rating)', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        await ctx.svc.resign({ game_id: 'g' }, 'white-user');
+        expect(await ctx.svc.resign({ game_id: 'g' }, 'black-user')).toEqual({ ok: false, error: 'game_not_active' });
+        expect(ctx.emitter.named('game_end')).toHaveLength(1);
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
     });
 });
 

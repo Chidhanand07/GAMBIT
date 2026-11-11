@@ -32,7 +32,11 @@ describe('gamesRepository', () => {
         const { table, ops } = await run(repo.findForRestore('g1'));
         expect(table).toBe('games');
         expect(ops).toEqual([
-            ['select', 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms'],
+            // result + winner_id: so a finished game restores with its real outcome (G1).
+            [
+                'select',
+                'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id',
+            ],
             ['eq', 'id', 'g1'],
             ['maybeSingle'],
         ]);

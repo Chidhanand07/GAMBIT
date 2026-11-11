@@ -455,31 +455,42 @@ The frontend listens for exact event names: `move_made`, `game_end`, `rating_upd
 
 ## 11. SOCKET EVENTS REFERENCE
 
+> **Updated by the high-risk fix phase (docs/fixes/DECISIONS.md).** Identity is no longer an
+> event: the client sends its Supabase access token in the Socket.IO handshake
+> (`auth: { token }`), the server verifies it and uses that user for every event. No payload
+> carries the acting user's id. Every payload is validated (zod); an invalid one is dropped and,
+> if the client passed an ack callback, acknowledged with `{ ok: false, error: 'invalid_payload' }`.
+> Sections 12–15 below describe the older design in places; this table is the current protocol.
+
 ### Client → Server
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `authenticate` | `userId: string` | Link socket to userId. Must be called after connect and on reconnect. |
-| `join_queue` | `{ user: {id, rating, games_played}, time_control, increment }` | Enter matchmaking |
-| `leave_queue` | `userId: string` | Exit matchmaking |
-| `join_game` | `gameId: string` | Join a game room. Server inits clock and sends clock_sync. |
+| *(handshake)* | `auth: { token: <Supabase access token> }` | Verified on every (re)connect. Missing/invalid → `connect_error` "unauthorized". Replaces `authenticate`. |
+| `join_queue` | `{ time_control, increment, is_rated }` | Enter matchmaking as the connected user |
+| `leave_queue` | — | Exit matchmaking (only yourself) |
+| `join_game` | `gameId: string` | Join a game room and receive `game_state_sync`. Non-players join as spectators. |
 | `spectate_game` | `gameId: string` | Join as spectator |
-| `make_move` | `{ game_id, from, to, promotion, fen, san, captured }` | Submit a move |
+| `make_move` | `{ game_id, from, to, promotion? }` | Submit a move. The server validates it and computes FEN/SAN/UCI. |
+| `resign` | `{ game_id }` | Resign your side; the server names the winner |
 | `send_message` | `{ game_id, from (username), text }` | Send chat message |
-| `game_end` | `{ game_id, result, reason, white_id, black_id, is_rated, time_control }` | Report game over (checkmate/resign) |
-| `rematch_request` | `{ from_user_id, to_user_id, time_control, is_rated, from_username }` | Ask for rematch |
-| `rematch_accept` | `{ from_user_id, to_user_id, time_control, is_rated }` | Accept rematch |
-| `rematch_decline` | `{ to_user_id }` | Decline rematch |
-| `challenge_request` | `{ from_user_id, to_user_id, from_username, time_control, is_rated, color }` | Challenge a user |
-| `challenge_accept` | `{ from_user_id, to_user_id, time_control, is_rated, color }` | Accept challenge |
-| `challenge_decline` | `{ from_user_id, by_username }` | Decline challenge |
+| `rematch_request` | `{ to_user_id, time_control, is_rated, from_username }` | Ask for rematch (stored 60 s) |
+| `rematch_accept` | `{ from_user_id }` | Accept the pending rematch from that user |
+| `rematch_decline` | `{ from_user_id }` | Decline the pending rematch from that user |
+| `challenge_request` | `{ to_user_id, from_username, time_control, is_rated, color }` | Challenge a user (stored 60 s) |
+| `challenge_accept` | `{ from_user_id }` | Accept the pending challenge from that user |
+| `challenge_decline` | `{ from_user_id, by_username }` | Decline the pending challenge from that user |
+
+There is no client `game_end`: clients cannot report a result.
 
 ### Server → Client
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `match_found` | `{ id, white_id, black_id }` | Matchmaking found a game |
 | `game_start` | `{ id, ...game }` | Private game started (second player joined) |
-| `move_made` | `{ game_id, from, to, fen, san, captured, whiteMs, blackMs }` | Move broadcast to all in room |
-| `game_end` | `{ game_id, result, reason, white_id, black_id }` | Game ended (can be server-initiated for time/disconnect) |
+| `move_made` | `{ game_id, from, to, promotion?, move (UCI), fen, san, captured, flags, whiteMs, blackMs }` | Accepted move, all values computed by the server |
+| `move_rejected` | `{ game_id, reason }` | To the mover only (`illegal_move`, `not_your_turn`, `not_a_player`, `game_not_active`, `game_not_found`), followed by `game_state_sync` |
+| `game_state_sync` | `{ fen, moveLog, whiteMs, blackMs, activeSide, clockActive, whiteId, blackId }` | Authoritative state on join and after a rejected move |
+| `game_end` | `{ game_id, result, reason, white_id, black_id }` | Game ended; always decided and sent by the server |
 | `clock_sync` | `{ whiteMs, blackMs }` | Server sends current remaining times (on join or reconnect) |
 | `rating_updated` | `{ white: {oldRating, newRating, change}, black: {...} }` | After rated game ends |
 | `chat_message` | `{ game_id, from, text }` | Chat broadcast |
@@ -606,13 +617,13 @@ Now: server fires `game_end` to the entire game room — both players see it sim
 ### Game end conditions
 | Condition | Who detects | How |
 |-----------|------------|-----|
-| Checkmate / Stalemate | Frontend (chess.js) | `commitMove` calls `chess.isGameOver()`, emits `game_end` socket event |
-| Resignation | Frontend | Resign button emits `game_end` with reason='Resignation' |
+| Checkmate / Stalemate / Insufficient material / Threefold repetition / Fifty-move rule | Server (chess.js) | After every accepted move the server adjudicates the position (`server/src/domain/adjudication.js`) and ends the game |
+| Resignation | Server | Resign button emits `resign { game_id }`; the server ends the game for the opponent |
 | Time expiry | Server | `startClockTimer` setTimeout fires, server emits `game_end` |
 | Abandonment | Server | 30s disconnect timer fires, server emits `game_end` |
 
-After `game_end` is emitted (by whoever), the server:
-1. Idempotently updates `games` row: `status=completed`, `winner_id`, `ended_at` (`.eq('status', 'active')` guard prevents double processing)
+Every ending goes through the server (`gameFinalizer.endGame` for moves and resignation, the clock service for time/abandonment). It then:
+1. Idempotently updates `games` row: `status=completed`, `result` (`white` / `black` / `draw`), `winner_id`, `ended_at` (`.eq('status', 'active')` guard prevents double processing)
 2. Calls `ratingService.processGameEnd` → updates profiles
 3. Emits `rating_updated` to the game room
 

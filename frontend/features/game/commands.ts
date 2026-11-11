@@ -3,9 +3,8 @@
 // player. A rematch accept/decline names the requester; the server answers the request it stored.
 import type { Dispatch } from 'react';
 import type { Socket } from 'socket.io-client';
-import { playGameEndSound } from '@/lib/sounds';
 import type { Profile } from '@/types/profile';
-import { gameEndPayload, rematchTerms } from './payloads';
+import { rematchTerms } from './payloads';
 import type { GameAction, GameState } from './state/gameReducer';
 
 export interface CommandContext {
@@ -23,13 +22,14 @@ export function sendChat({ socket, myProfile, gameId, state, dispatch }: Command
     dispatch({ type: 'chatDraftChanged', text: '' });
 }
 
+/**
+ * Asks the server to resign this player's side. The page does not declare the result itself:
+ * the server ends the game and its `game_end` (to both players) is what shows "You Lost".
+ */
 export function resign({ socket, myProfile, gameId, state, dispatch }: CommandContext): void {
     if (!socket || !myProfile || state.gameOver) return;
-    const info = { result: state.myColor === 'white' ? 'Black wins' : 'White wins', reason: 'Resignation' };
-    dispatch({ type: 'gameEnded', info });
     dispatch({ type: 'resignConfirmSet', value: false });
-    socket.emit('game_end', gameEndPayload(gameId, info, state.gameData));
-    if (state.soundOn) playGameEndSound(false);
+    socket.emit('resign', { game_id: gameId });
 }
 
 const opponentIdOf = ({ myColor, gameData }: GameState) =>

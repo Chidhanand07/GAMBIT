@@ -1,6 +1,7 @@
 // @ts-check
 /**
- * Game room events: join, spectate, move, client-reported end.
+ * Game room events: join, spectate, move, resign. There is no `game_end`
+ * handler: results are decided by the server (NODE-16).
  */
 
 const { schemas } = require('../schemas');
@@ -12,7 +13,7 @@ const { wrap } = require('../wrap');
  * @property {(gameId: string, client: ClientPort, userId: string) => Promise<void>} joinGame
  * @property {(gameId: string, client: ClientPort) => Promise<void>} spectate
  * @property {(data: any, userId: string, client: ClientPort) => Promise<unknown>} makeMove
- * @property {(data: any) => Promise<void>} endGame
+ * @property {(data: any, userId: string) => Promise<unknown>} resign
  */
 
 /**
@@ -28,7 +29,7 @@ function registerGameHandlers(socket, client, { gameService }) {
         join_game: (gameId) => gameService.joinGame(gameId, client, userId),
         spectate_game: (gameId) => gameService.spectate(gameId, client),
         make_move: (data) => gameService.makeMove(data, userId, client),
-        game_end: (data) => gameService.endGame(data),
+        resign: (data) => gameService.resign(data, userId),
     };
     for (const [event, handler] of Object.entries(handlers)) {
         socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler));

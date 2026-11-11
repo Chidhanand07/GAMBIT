@@ -33,7 +33,7 @@ function deps() {
             joinGame: fn(),
             spectate: fn(),
             makeMove: fn(),
-            endGame: fn(),
+            resign: fn(),
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
@@ -53,7 +53,7 @@ afterEach(() => jest.restoreAllMocks());
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-test('registers the handshake middleware and exactly the supported events (no `authenticate`)', () => {
+test('registers the handshake middleware and exactly the supported events (no `authenticate`, no client `game_end`)', () => {
     const { handlers, middlewares } = connect(deps());
     expect(middlewares).toHaveLength(1);
     expect(Object.keys(handlers).sort()).toEqual(
@@ -64,7 +64,7 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'spectate_game',
             'make_move',
             'send_message',
-            'game_end',
+            'resign',
             'rematch_request',
             'rematch_accept',
             'rematch_decline',
@@ -118,13 +118,13 @@ test('validated payloads go to the services; the actor is always the verified us
     await handlers.join_game('g');
     await handlers.make_move({ ...move, fen: 'client-fen', san: 'e4' });
     await handlers.send_message(data);
-    await handlers.game_end(data);
+    await handlers.resign({ ...data, result: 'White wins' });
     await handlers.leave_queue('victim');
     expect(d.matchmaking.requestMatch).toHaveBeenCalledWith({ time_control: '10', user: { id: 'u1' } }, 'sock-1');
     expect(d.gameService.joinGame).toHaveBeenCalledWith('g', expect.objectContaining({ id: 'sock-1' }), 'u1');
     expect(d.gameService.makeMove).toHaveBeenCalledWith(move, 'u1', expect.objectContaining({ id: 'sock-1' }));
     expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
-    expect(d.gameService.endGame).toHaveBeenCalledWith(data);
+    expect(d.gameService.resign).toHaveBeenCalledWith(data, 'u1');
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
 });
 
@@ -158,10 +158,10 @@ test('an invalid payload never reaches a service and is acked as invalid_payload
     const { handlers } = connect(d);
     const ack = jest.fn();
     await handlers.make_move(null, ack);
-    await handlers.game_end({ game_id: 'g', result: 123 }, ack);
+    await handlers.resign({ game_id: 123 }, ack);
     await handlers.send_message('not an object', ack);
     expect(d.gameService.makeMove).not.toHaveBeenCalled();
-    expect(d.gameService.endGame).not.toHaveBeenCalled();
+    expect(d.gameService.resign).not.toHaveBeenCalled();
     expect(d.chatService.sendMessage).not.toHaveBeenCalled();
     expect(ack.mock.calls).toEqual(Array(3).fill([{ ok: false, error: 'invalid_payload' }]));
 });

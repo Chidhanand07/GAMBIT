@@ -20,7 +20,8 @@ const { useServer, once, record, recordAll, sleep, opsFor, makeGame, uniqueId, A
 
 const ctx = useServer();
 
-const GAME_COLUMNS = 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms';
+const GAME_COLUMNS =
+    'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id';
 const CLIENT_FEN = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
 
 describe('join_game: game in Redis', () => {
@@ -192,14 +193,18 @@ describe('join_game: restore from the database (Redis empty)', () => {
     });
 
     test.each([
-        ['white', 'White wins'],
-        ['black', 'Black wins'],
-        ['draw', 'Draw'],
-        // game_end writes result:null for decisive games, so they come back as "Draw" (BUG pinned).
-        [null, 'Draw'],
-    ])('completed game in DB with result %p → game_end %p', async (result, text) => {
+        // [result column, winner_id, label]
+        ['white', 'w', 'White wins'],
+        ['black', 'b', 'Black wins'],
+        ['draw', null, 'Draw'],
+        // Rows written before S3 stored result null for a decisive game; the winner column
+        // now decides, so they no longer come back as "Draw" (G1).
+        [null, 'w', 'White wins'],
+        [null, 'b', 'Black wins'],
+        [null, null, 'Draw'],
+    ])('completed game in DB with result %p, winner %p → game_end %p', async (result, winnerId, text) => {
         supabase.queue('games', {
-            data: { id: 'db-c', status: 'completed', result, winner_id: 'w', white_id: 'w', black_id: 'b' },
+            data: { id: 'db-c', status: 'completed', result, winner_id: winnerId, white_id: 'w', black_id: 'b' },
             error: null,
         });
         const s = await ctx.connect();

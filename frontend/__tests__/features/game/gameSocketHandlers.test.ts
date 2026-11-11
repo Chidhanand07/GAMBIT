@@ -72,10 +72,15 @@ test('move_made with an invalid FEN still activates the clock (legacy order) and
     expect(dispatched()).toEqual([{ type: 'clockActivated' }])
 })
 
-test('move_made checkmate: game over from the side that just moved; end sound reflects my colour', () => {
+test('move_made checkmate: the page does NOT declare the result; the server’s game_end does [S3]', () => {
     const { fire, dispatched } = makeCtx({ myColor: 'black' })
     const mated = 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3'
     fire('move_made', { game_id: 'g1', from: 'd8', to: 'h4', fen: mated, san: 'Qh4#' })
+    expect(dispatched().map((a) => a.type)).toEqual(['clockActivated', 'moveReceived'])
+    expect(sounds.playCheckmateSound).toHaveBeenCalledTimes(1)
+    expect(sounds.playGameEndSound).not.toHaveBeenCalled()
+
+    fire('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Checkmate', white_id: 'w', black_id: 'b' })
     expect(dispatched()).toContainEqual({ type: 'gameEnded', info: { result: 'Black wins', reason: 'Checkmate' } })
     expect(sounds.playGameEndSound).toHaveBeenCalledWith(true)
 })

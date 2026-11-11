@@ -13,7 +13,7 @@ test('there is a schema for every client → server event (and none for `authent
             'join_game',
             'spectate_game',
             'make_move',
-            'game_end',
+            'resign',
             'send_message',
             'rematch_request',
             'rematch_accept',
@@ -66,10 +66,11 @@ describe('make_move', () => {
     });
 });
 
-describe('game_end', () => {
-    test('a non-string result is rejected (it used to throw inside the handler)', () => {
-        expect(ok('game_end', { game_id: 'g1', result: 123 })).toBe(false);
-        expect(ok('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate' })).toBe(true);
+describe('resign (there is no game_end schema: clients cannot report results) [S3]', () => {
+    test('needs only the game id; a claimed result is stripped', () => {
+        expect(schemas.game_end).toBeUndefined();
+        expect(schemas.resign.parse({ game_id: 'g1', result: 'White wins', winner_id: 'me' })).toEqual({ game_id: 'g1' });
+        expect(ok('resign', {})).toBe(false);
     });
 });
 

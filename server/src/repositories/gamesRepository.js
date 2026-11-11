@@ -7,7 +7,8 @@
  */
 
 /** Columns needed to rebuild Redis state after a server restart (join_game). */
-const RESTORE_COLUMNS = 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms';
+const RESTORE_COLUMNS =
+    'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id';
 
 /** Invite lookup with both players' profiles; whitespace kept as originally written. */
 const INVITE_COLUMNS = `

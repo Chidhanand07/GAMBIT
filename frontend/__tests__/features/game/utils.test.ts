@@ -1,10 +1,12 @@
 import { Chess } from 'chess.js'
 import * as sounds from '@/lib/sounds'
-import { detectGameOver, isPromotionMove, playMoveSoundFor } from '@/features/game/utils/moveEffects'
+import * as moveEffects from '@/features/game/utils/moveEffects'
+import { isPromotionMove, playMoveSoundFor } from '@/features/game/utils/moveEffects'
 import { historyStorageKey, saveHistory, stepBackIndex, stepForwardIndex } from '@/features/game/utils/history'
 import { seatFor } from '@/features/game/utils/seat'
 import { deriveGameView } from '@/features/game/utils/gameView'
-import { gameEndPayload, rematchTerms } from '@/features/game/payloads'
+import * as payloads from '@/features/game/payloads'
+import { rematchTerms } from '@/features/game/payloads'
 import { createInitialGameState } from '@/features/game/state/gameReducer'
 
 jest.mock('@/lib/sounds', () => ({
@@ -15,12 +17,9 @@ jest.mock('@/lib/sounds', () => ({
 beforeEach(() => jest.clearAllMocks())
 
 describe('moveEffects', () => {
-    test('detectGameOver: checkmate names the winner; stalemate; ongoing returns null', () => {
-        expect(detectGameOver(new Chess('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3')))
-            .toEqual({ result: 'Black wins', reason: 'Checkmate' })
-        expect(detectGameOver(new Chess('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1'))).toEqual({ result: 'Draw', reason: 'Stalemate' })
-        expect(detectGameOver(new Chess('8/8/8/8/8/8/8/K6k w - - 0 1'))).toEqual({ result: 'Draw', reason: 'Draw' })
-        expect(detectGameOver(new Chess())).toBeNull()
+    test('the client has no game-over detector: results are decided by the server [S3]', () => {
+        // Was `detectGameOver`, whose verdict the page showed and reported to the server.
+        expect(moveEffects).not.toHaveProperty('detectGameOver')
     })
 
     test('playMoveSoundFor priority: mate > check > castle > promotion > capture > move', () => {
@@ -71,10 +70,11 @@ test('seatFor: white wins a tie, unknown ids spectate', () => {
 })
 
 describe('payloads', () => {
-    test('game_end defaults is_rated=false and time_control="10" when the row lacks them', () => {
-        expect(gameEndPayload('g', { result: 'Draw', reason: 'Stalemate' }, null)).toEqual({
-            game_id: 'g', result: 'Draw', reason: 'Stalemate', white_id: undefined, black_id: undefined, is_rated: false, time_control: '10',
-        })
+    test('there is no game_end payload builder: the client cannot report a result [S3]', () => {
+        expect(payloads).not.toHaveProperty('gameEndPayload')
+    })
+
+    test('rematch terms default to time_control="10", is_rated=false when the row lacks them', () => {
         expect(rematchTerms(undefined)).toEqual({ time_control: '10', is_rated: false })
     })
 })

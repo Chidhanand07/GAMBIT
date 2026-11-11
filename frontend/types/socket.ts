@@ -40,15 +40,9 @@ export interface SendMessagePayload {
     message?: string;
 }
 
-export interface GameEndPayload {
+/** Resign this player's side of the game. The server names the winner. */
+export interface ResignPayload {
     game_id: string;
-    /** 'White wins' | 'Black wins' | 'Draw'; the server only checks for 'white'/'black' substrings. */
-    result: string;
-    reason: string;
-    white_id?: string | null;
-    black_id?: string | null;
-    is_rated?: boolean | null;
-    time_control?: TimeControl;
 }
 
 /**
@@ -103,7 +97,8 @@ export interface ClientToServerEvents {
     spectate_game: (gameId: string) => void;
     make_move: (payload: MakeMovePayload) => void;
     send_message: (payload: SendMessagePayload) => void;
-    game_end: (payload: GameEndPayload) => void;
+    /** There is no client `game_end`: results are decided by the server. */
+    resign: (payload: ResignPayload) => void;
     rematch_request: (payload: RematchRequestPayload) => void;
     rematch_accept: (payload: RematchAcceptPayload) => void;
     rematch_decline: (payload: RematchDeclinePayload) => void;
@@ -181,12 +176,21 @@ export interface ChatMessagePayload extends SendMessagePayload {
 }
 
 /**
- * Server-built on join/clock expiry/abandonment; on resign/checkmate it is the
- * client's `game_end` payload echoed with server player ids.
+ * The result of a game, always built by the server: after a move that ends it (checkmate,
+ * stalemate, insufficient material, threefold repetition, fifty-move rule), a resignation,
+ * a flag fall or an abandonment, and when joining a game that is already over.
  */
-export interface GameEndBroadcast extends GameEndPayload {
+export interface GameEndBroadcast {
+    game_id: string;
+    /** 'White wins' | 'Black wins' | 'Draw'. */
+    result: string;
+    /** e.g. 'Checkmate', 'Stalemate', 'Resignation', 'Time', 'Abandonment', 'Game over'. */
+    reason: string;
     white_id: string;
     black_id: string;
+    /** Only on flag fall. */
+    is_rated?: boolean | null;
+    time_control?: TimeControl;
 }
 
 export interface RatingChange {

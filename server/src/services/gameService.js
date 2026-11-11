@@ -1,19 +1,22 @@
 // @ts-check
 /**
- * Live game flow: joining, moves, client-reported endings, disconnects and
- * reconnects. The handlers pass the validated payload, the verified user id
- * and a ClientPort.
+ * Live game flow: joining, moves, resignation, disconnects and reconnects.
+ * The handlers pass the validated payload, the verified user id and a
+ * ClientPort.
  *
- * Moves are validated here on the server (see moveRecorder); no engine call
- * and no client FEN is involved. Known bugs still kept (see the refactor
- * report): `game_end` trusts the client's result text, and the disconnect
- * snapshot writes `white_time_ms`/`black_time_ms`.
+ * The server is the authority: moves are validated here (moveRecorder), the
+ * position after each move is adjudicated here (domain/adjudication), and a
+ * game ends only through gameFinalizer. Clients cannot report a result.
+ * Known bug still kept (see the refactor report): the disconnect snapshot
+ * writes `white_time_ms`/`black_time_ms`.
  */
 const { clocksAt } = require('../domain/clock');
+const { adjudicate, REASON } = require('../domain/adjudication');
 const { gameStateFromRow } = require('../domain/gameState');
-const { isParticipant } = require('../domain/moveAuthorization');
-const { resultLabel, parseOutcome, colorOfPlayer, winnerIdFor } = require('../domain/result');
+const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
+const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom } = require('./emitter');
+const { createGameFinalizer } = require('./gameFinalizer');
 const { createMoveRecorder } = require('./moveRecorder');
 
 const DISCONNECT_TIMEOUT_SECONDS = 20;
@@ -39,7 +42,8 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  */
 
 /**
- * @typedef {GameServiceDeps & { now: () => number, moves: ReturnType<typeof createMoveRecorder> }} GameCtx
+ * @typedef {GameServiceDeps & { now: () => number, moves: ReturnType<typeof createMoveRecorder>,
+ *   finalizer: ReturnType<typeof createGameFinalizer> }} GameCtx
  */
 
 /**
@@ -64,7 +68,7 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
     if (dbGame && dbGame.status === 'completed') {
         client.emit('game_end', {
             game_id: gameId,
-            result: resultLabel(dbGame.result),
+            result: resultLabel(outcomeOfRow(dbGame)),
             reason: 'Game over',
             white_id: dbGame.white_id,
             black_id: dbGame.black_id,
@@ -151,9 +155,11 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
 }
 
 /**
- * `make_move`: apply the move if it is the caller's legal move. Otherwise tell
- * the sender why (`move_rejected`) and resend the authoritative state so its
- * board snaps back. Nothing from the payload except `from`/`to`/`promotion`
+ * `make_move`: apply the move if it is the caller's legal move, then let the
+ * server decide whether that move ended the game (checkmate, stalemate,
+ * insufficient material, threefold repetition, fifty-move rule). Otherwise
+ * tell the sender why (`move_rejected`) and resend the authoritative state so
+ * its board snaps back. Nothing from the payload except `from`/`to`/`promotion`
  * is used.
  * @param {GameCtx} ctx
  * @param {import('./moveRecorder').MoveRequest} data
@@ -163,7 +169,11 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
  */
 async function makeMove(ctx, data, userId, client) {
     const outcome = await ctx.moves.submit(data, userId);
-    if (outcome.accepted) return { ok: true };
+    if (outcome.accepted) {
+        const verdict = adjudicate(outcome.played.position);
+        if (verdict) await ctx.finalizer.endGame(data.game_id, verdict);
+        return { ok: true };
+    }
 
     client.emit('move_rejected', { game_id: data.game_id, reason: outcome.reason });
     if (outcome.game) sendState(ctx, outcome.game, client);
@@ -171,74 +181,22 @@ async function makeMove(ctx, data, userId, client) {
 }
 
 /**
- * Time control and rated flag for rating: Redis state first, then the client payload.
- * @param {any} game
- * @param {Record<string, any>} data
- */
-function settingsOf(game, data) {
-    return {
-        timeControl: game.timeControl ?? data.time_control ?? '10',
-        isRated: game.isRated ?? data.is_rated ?? false,
-    };
-}
-
-/**
- * Idempotent DB update, then review and rating for the call that won it.
+ * `resign`: the caller, an active participant, loses; the opponent wins by
+ * Resignation. Allowed on either side's turn.
  * @param {GameCtx} ctx
- * @param {{ data: Record<string, any>, game: any, outcome: 'white' | 'black' | 'draw' }} p
+ * @param {{ game_id: string }} data
+ * @param {string} userId the connection's verified user
+ * @returns {Promise<{ ok: boolean, error?: string }>}
  */
-async function finalize({ gamesRepo, reviewService, ratingService, emitter }, { data, game, outcome }) {
-    const { whiteId, blackId } = game;
-    // Idempotent DB update — only applies if game is still marked active
-    const { data: updated } = await gamesRepo.finishIfActive(data.game_id, {
-        status: 'completed',
-        result: outcome === 'draw' ? 'draw' : null,
-        winner_id: winnerIdFor(outcome, { whiteId, blackId }),
-        ended_at: new Date().toISOString(),
-        final_fen: game.fen ?? null,
-        white_clock_ms: Math.round(game.whiteClockMs ?? 0),
-        black_clock_ms: Math.round(game.blackClockMs ?? 0),
-    });
+async function resign(ctx, { game_id: gameId }, userId) {
+    const game = await ctx.gameStore.getGame(gameId);
+    const reason = playerRejection(game, userId);
+    if (reason) return { ok: false, error: reason };
 
-    if (!updated) return;
-
-    const { timeControl, isRated } = settingsOf(game, data);
-    // Full Game Review in the engine (depth-18 Stockfish per move); fire-and-forget.
-    reviewService.triggerGameReview(data.game_id, game.moveLog, timeControl);
-
-    const changes = await ratingService.processGameEnd(data.game_id, whiteId, blackId, outcome, timeControl, isRated);
-    if (changes) {
-        emitter.toRoom(gameRoom(data.game_id), 'rating_updated', changes);
-    }
-}
-
-/**
- * `game_end` reported by a client. Players come from Redis (C1); the result
- * text comes from the client.
- * @param {GameCtx} ctx
- * @param {Record<string, any>} data
- */
-async function endGame(ctx, data) {
-    // C1 fix: always read player IDs and game state from Redis — never trust client payload
-    const game = await ctx.gameStore.getGame(data.game_id);
-    if (!game || game.status !== 'active') return; // reject if not active or already ended
-
-    const whiteId = game.whiteId;
-    const blackId = game.blackId;
-    if (!whiteId || !blackId) return;
-
-    const outcome = parseOutcome(data.result);
-
-    await ctx.gameStore.setGame(data.game_id, { ...game, status: 'completed', result: outcome });
-    await ctx.gameStore.removeActiveGame(data.game_id);
-
-    // Broadcast with server-verified player IDs
-    ctx.emitter.toRoom(gameRoom(data.game_id), 'game_end', { ...data, white_id: whiteId, black_id: blackId });
-
-    // Clean up active game tracking
-    ctx.sessions.clearGame(data.game_id);
-
-    await finalize(ctx, { data, game, outcome });
+    const winner = opponentColor(colorOfPlayer(userId, game.whiteId));
+    const ended = await ctx.finalizer.endGame(gameId, { winner, reason: REASON.RESIGNATION });
+    // Lost a race with another ending (mate, flag fall): that result stands.
+    return ended ? { ok: true } : { ok: false, error: REJECTION.GAME_NOT_ACTIVE };
 }
 
 /**
@@ -284,7 +242,7 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
 function createGameService(deps) {
     const now = deps.now ?? (() => Date.now());
     /** @type {GameCtx} */
-    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }) };
+    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }), finalizer: createGameFinalizer(deps) };
     return {
         /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<void>} */
         joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),
@@ -301,8 +259,8 @@ function createGameService(deps) {
         reconnect: (userId, client) => reconnect(ctx, userId, client),
         /** @type {(data: import('./moveRecorder').MoveRequest, userId: string, client: ClientPort) => Promise<{ ok: boolean, error?: string }>} */
         makeMove: (data, userId, client) => makeMove(ctx, data, userId, client),
-        /** @type {(data: Record<string, any>) => Promise<void>} */
-        endGame: (data) => endGame(ctx, data),
+        /** @type {(data: { game_id: string }, userId: string) => Promise<{ ok: boolean, error?: string }>} */
+        resign: (data, userId) => resign(ctx, data, userId),
         /** @type {(userId: string | undefined) => Promise<void>} */
         handleDisconnect: (userId) => handleDisconnect(ctx, userId),
     };

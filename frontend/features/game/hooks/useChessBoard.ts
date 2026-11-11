@@ -6,11 +6,8 @@
 import { useMemo, type Dispatch, type MutableRefObject } from 'react';
 import { Chess, type Color, type Square } from 'chess.js';
 import type { Socket } from 'socket.io-client';
-import { playGameEndSound } from '@/lib/sounds';
-import type { GameWithPlayers } from '@/types/game';
-import { gameEndPayload } from '../payloads';
 import type { GameAction, GameState } from '../state/gameReducer';
-import { detectGameOver, isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
+import { isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
 
 interface Options {
     gameId: string;
@@ -18,7 +15,6 @@ interface Options {
     state: GameState;
     dispatch: Dispatch<GameAction>;
     chessRef: MutableRefObject<Chess>;
-    gameDataRef: MutableRefObject<GameWithPlayers | null>;
 }
 
 export interface ChessBoardControls {
@@ -45,22 +41,17 @@ function useDisplayChess(state: GameState): Chess {
 
 /**
  * Plays the move locally and emits make_move with the squares only; the server computes the
- * resulting position, SAN and capture flag. Then (if it ended the game) emits game_end.
+ * resulting position, SAN and capture flag. If the move ends the game, the server says so with
+ * `game_end`: the page never declares or reports a result.
  */
 function commitMoveWith(opts: Options, from: Square, to: Square, promotion: string): void {
     const { gameId, socket, dispatch, state } = opts;
     const chess = opts.chessRef.current;
     const moveObj = chess.move({ from, to, promotion });
     if (!moveObj) return;
-    const newFen = chess.fen();
-    dispatch({ type: 'moveCommitted', fen: newFen, from, to });
+    dispatch({ type: 'moveCommitted', fen: chess.fen(), from, to });
     socket?.emit('make_move', { game_id: gameId, from, to, promotion });
     if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
-    const outcome = detectGameOver(chess);
-    if (!outcome) return;
-    dispatch({ type: 'gameEnded', info: outcome });
-    socket?.emit('game_end', gameEndPayload(gameId, outcome, opts.gameDataRef.current));
-    if (state.soundOn) playGameEndSound(outcome.result.toLowerCase().startsWith(state.myColor));
 }
 
 export function useChessBoard(opts: Options): ChessBoardControls {

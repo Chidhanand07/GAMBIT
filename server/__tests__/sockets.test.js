@@ -280,55 +280,80 @@ describe('making moves', () => {
 });
 
 describe('ending a game', () => {
-    test('game_end uses server-side player ids, finalizes once, and rates the game', async () => {
+    /** Answer the "finish if still active" update; any other games write gets an empty result. */
+    function dbFinishAnswers(finished = { data: { id: 'game-1' }, error: null }) {
+        const answer = (call) => (supabase.op(call, 'update')?.[0]?.status ? finished : { data: null, error: null });
+        supabase.queue('games', answer, answer, answer);
+    }
+    const finishUpdate = () => supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
+    const emitAck = (socket, event, payload) => new Promise(resolve => socket.emit(event, payload, resolve));
+
+    test('resign: the server names the winner, finalizes once, and rates the game [S3]', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
-        rating.processGameEnd.mockResolvedValueOnce({ white: { change: 8 }, black: { change: -8 } });
+        dbFinishAnswers();
+        rating.processGameEnd.mockResolvedValueOnce({ white: { change: -8 }, black: { change: 8 } });
 
         const ended = once(black, 'game_end');
         const rated = once(black, 'rating_updated');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins', reason: 'Resignation', white_id: 'evil', black_id: 'evil' });
+        // White resigns; anything else in the payload (a claimed result, player ids) is dropped.
+        white.emit('resign', { game_id: 'game-1', result: 'White wins', white_id: 'evil', black_id: 'evil' });
 
-        expect(await ended).toMatchObject({ result: 'White wins', white_id: 'white-user', black_id: 'black-user' });
+        expect(await ended).toEqual({
+            game_id: 'game-1', result: 'Black wins', reason: 'Resignation', white_id: 'white-user', black_id: 'black-user',
+        });
         await rated;
 
-        expect(await getGame('game-1')).toMatchObject({ status: 'completed', result: 'white' });
+        expect(await getGame('game-1')).toMatchObject({ status: 'completed', result: 'black', reason: 'Resignation' });
         expect(await getActiveGameIds()).not.toContain('game-1');
 
-        const update = supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
-        expect(supabase.op(update, 'update')[0]).toMatchObject({ winner_id: 'white-user', result: null });
+        const update = finishUpdate();
+        expect(supabase.op(update, 'update')[0]).toMatchObject({ winner_id: 'black-user', result: 'black' });
         expect(update.ops).toContainEqual(['eq', 'status', 'active']);
-        expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'white', '10', true);
+        expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'black', '10', true);
     });
 
-    test('a draw has no winner', async () => {
-        const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
+    test('a draw (stalemate) has no winner', async () => {
+        const fen = '7k/4Q3/6K1/8/8/8/8/8 w - - 0 1';
+        const { white, black } = await seatedGame({ fen, startFen: fen });
+        dbFinishAnswers();
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'Draw', reason: 'Agreement' });
-        await p;
+        white.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'f7' });
+        expect(await p).toMatchObject({ result: 'Draw', reason: 'Stalemate' });
         await sleep(20);
-        const update = supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
-        expect(supabase.op(update, 'update')[0]).toMatchObject({ result: 'draw', winner_id: null });
+        expect(supabase.op(finishUpdate(), 'update')[0]).toMatchObject({ result: 'draw', winner_id: null });
     });
 
-    test('a second game_end for the same game is ignored', async () => {
+    test('a client `game_end` is ignored: clients cannot report results [S3]', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
         const ends = record(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins' });
+        white.emit('game_end', { game_id: 'game-1', result: 'White wins', reason: 'Checkmate' });
         black.emit('game_end', { game_id: 'game-1', result: 'Black wins' });
         await sleep(150);
+        expect(ends).toHaveLength(0);
+        expect(rating.processGameEnd).not.toHaveBeenCalled();
+        expect(await getGame('game-1')).toMatchObject({ status: 'active', result: null });
+        expect(finishUpdate()).toBeUndefined();
+    });
+
+    test('a second ending for the same game is ignored', async () => {
+        const { white, black } = await seatedGame();
+        dbFinishAnswers();
+        const ends = record(black, 'game_end');
+        const acks = await Promise.all([
+            emitAck(white, 'resign', { game_id: 'game-1' }),
+            emitAck(black, 'resign', { game_id: 'game-1' }),
+        ]);
+        await sleep(100);
+        expect(acks.filter(a => a.ok)).toHaveLength(1);
         expect(ends).toHaveLength(1);
         expect(rating.processGameEnd).toHaveBeenCalledTimes(1);
-        expect((await getGame('game-1')).result).toBe('white');
     });
 
     test('the game is not rated twice if the database says it was already finalized', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: null, error: null });
+        dbFinishAnswers({ data: null, error: null });
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins' });
+        white.emit('resign', { game_id: 'game-1' });
         await p;
         await sleep(50);
         expect(rating.processGameEnd).not.toHaveBeenCalled();
@@ -336,16 +361,24 @@ describe('ending a game', () => {
 
     test('a finished game with moves is sent to the engine for review', async () => {
         const { white, black } = await seatedGame({ moveLog: [{ san: 'e4' }, { san: 'e5' }] });
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
+        dbFinishAnswers();
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'Draw' });
+        white.emit('resign', { game_id: 'game-1' });
         await p;
         await sleep(30);
         const review = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/analyse-game'));
         expect(JSON.parse(review[1].body)).toMatchObject({ game_id: 'game-1', pgn: expect.stringContaining('1. e4 e5') });
     });
 
-    test.todo('game_end is accepted from any socket, including non-players and the losing claim of the winner (verify sender + result server-side)');
+    test('only a participant can end a game, and only by resigning their own side [S3]', async () => {
+        const { white } = await seatedGame();
+        const stranger = await connect('stranger');
+        const ends = record(white, 'game_end');
+        expect(await emitAck(stranger, 'resign', { game_id: 'game-1' })).toEqual({ ok: false, error: 'not_a_player' });
+        await sleep(50);
+        expect(ends).toHaveLength(0);
+        expect((await getGame('game-1')).status).toBe('active');
+    });
 });
 
 describe('chat', () => {

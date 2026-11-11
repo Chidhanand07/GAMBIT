@@ -16,8 +16,6 @@ const MAX_TIME_CONTROL_LENGTH = 16;
 const MAX_INCREMENT_SECONDS = 180;
 const MAX_NAME_LENGTH = 64;
 const MAX_CHAT_LENGTH = 500;
-const MAX_RESULT_LENGTH = 32;
-const MAX_REASON_LENGTH = 64;
 
 /**
  * A user or game id. Production ids are UUIDs; the charset also admits short
@@ -59,12 +57,7 @@ const schemas = {
         to: square,
         promotion: promotion.optional(),
     }),
-    game_end: z.object({
-        game_id: id,
-        result: z.string().max(MAX_RESULT_LENGTH).nullish(),
-        reason: z.string().max(MAX_REASON_LENGTH).optional(),
-        ...matchTerms,
-    }),
+    resign: z.object({ game_id: id }),
     send_message: z.object({
         game_id: id,
         from: name.optional(),

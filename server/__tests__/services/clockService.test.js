@@ -87,3 +87,20 @@ test('a ticker-level failure is logged', async () => {
     await svc.tick();
     expect(console.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
 });
+
+test('a flag fall that loses the race to another ending does nothing (one finalizer wins) [S3]', async () => {
+    const game = makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' });
+    const { svc, emitter, gameStore, rating, gamesRepo } = setup(game);
+    // The tick reads the game as active, but a resignation completes it before the tick's transition.
+    gameStore.getGame.mockImplementationOnce(async () => {
+        const stale = structuredClone(gameStore.state.get(game.id));
+        gameStore.state.set(game.id, { ...stale, status: 'completed', result: 'black', reason: 'Resignation' });
+        return stale;
+    });
+    await svc.tick();
+
+    expect(gameStore.state.get(game.id)).toMatchObject({ result: 'black', reason: 'Resignation' });
+    expect(emitter.named('game_end')).toEqual([]);
+    expect(gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    expect(rating.processGameEnd).not.toHaveBeenCalled();
+});

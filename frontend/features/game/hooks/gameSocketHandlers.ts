@@ -18,7 +18,7 @@ import type {
     RematchRequestPayload,
 } from '@/types/socket';
 import type { GameAction } from '../state/gameReducer';
-import { detectGameOver, playMoveSoundFor } from '../utils/moveEffects';
+import { playMoveSoundFor } from '../utils/moveEffects';
 
 /** Clocks and flags are optional here so older payloads (and tests) without them still type-check. */
 type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs' | 'flags' | 'captured' | 'move'> & {
@@ -79,15 +79,6 @@ function onGameStateSync(ctx: SocketHandlerContext) {
     };
 }
 
-function announceRemoteGameOver(ctx: SocketHandlerContext): void {
-    const c = ctx.chessRef.current;
-    const outcome = detectGameOver(c);
-    if (!outcome) return;
-    ctx.dispatch({ type: 'gameEnded', info: outcome });
-    if (ctx.soundOn)
-        playGameEndSound(ctx.myColor !== 'spectator' && (c.turn() === 'w' ? 'black' : 'white') === ctx.myColor);
-}
-
 function onMoveMade(ctx: SocketHandlerContext) {
     return (data: MoveMadeEvent) => {
         if (data.game_id !== ctx.gameId) return;
@@ -106,7 +97,7 @@ function onMoveMade(ctx: SocketHandlerContext) {
             blackMs: data.blackMs,
         });
         if (ctx.soundOn) playMoveSoundFor(ctx.chessRef.current, data.flags, data.captured);
-        announceRemoteGameOver(ctx);
+        // A move that ends the game is followed by the server's `game_end`; nothing is inferred here.
     };
 }
 
@@ -117,6 +108,7 @@ function onChatMessage(ctx: SocketHandlerContext) {
     };
 }
 
+/** The only place a result is shown from: the server decides every ending. */
 function onGameEnd(ctx: SocketHandlerContext) {
     return (data: GameEndBroadcast) => {
         if (data.game_id !== ctx.gameId) return;

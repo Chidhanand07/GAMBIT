@@ -16,7 +16,7 @@ const { gameRoom } = require('./emitter');
 /**
  * @typedef {object} ClockGameStorePort
  * @property {(id: string) => Promise<any>} getGame
- * @property {(id: string, game: object) => Promise<unknown>} setGame
+ * @property {(id: string, mutate: (game: any) => any) => Promise<any>} mutateGame
  * @property {(id: string) => Promise<void>} removeActiveGame
  * @property {() => Promise<string[]>} getActiveGameIds
  */
@@ -72,6 +72,9 @@ async function finalizeExpiredGame({ gamesRepo, getRatingService, emitter }, { g
 
 /**
  * End a game won by `winnerColor`: Redis state, active set, broadcast, finalize.
+ * The active → completed transition is atomic and shared with gameFinalizer,
+ * so a flag fall that races a mate or a resignation cannot produce a second,
+ * contradictory `game_end` (NODE-18).
  * @param {ClockDeps} deps
  * @param {{ gameId: string, game: GameState, winnerColor: 'white' | 'black', reason: string,
  *   payloadExtra: object }} p
@@ -80,7 +83,10 @@ async function endOnClock(deps, { gameId, game, winnerColor, reason, payloadExtr
     const winnerId = playerIdOf(winnerColor, game);
     const result = resultLabel(winnerColor);
 
-    await deps.gameStore.setGame(gameId, { ...game, status: 'completed', result: winnerColor });
+    const finished = await deps.gameStore.mutateGame(gameId, (current) =>
+        current && current.status === 'active' ? { ...current, status: 'completed', result: winnerColor } : null,
+    );
+    if (!finished) return; // another ending won the race
     await deps.gameStore.removeActiveGame(gameId);
 
     deps.emitter.toRoom(gameRoom(gameId), 'game_end', {
