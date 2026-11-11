@@ -11,6 +11,7 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
  * @typedef {object} GameState
  * @property {string} id
  * @property {string} fen
+ * @property {string} startFen position the move log starts from (the rules replay from here)
  * @property {string | null} whiteId
  * @property {string | null} blackId
  * @property {number} whiteClockMs
@@ -60,6 +61,7 @@ function createInitialGameState({
     return {
         id,
         fen,
+        startFen: fen,
         whiteId,
         blackId,
         whiteClockMs,

@@ -55,9 +55,14 @@ describe('make_move', () => {
         ['square off the board', { ...move, to: 'e9' }],
         ['square not a string', { ...move, from: 12 }],
         ['unknown promotion piece', { ...move, promotion: 'k' }],
-        ['oversized fen', { ...move, fen: 'x'.repeat(200) }],
+        ['no from/to (the old `move`-only shape)', { game_id: 'g1', move: 'e2e4' }],
     ])('rejects: %s', (_name, payload) => {
         expect(ok('make_move', payload)).toBe(false);
+    });
+
+    test('client-computed fields never reach the service: fen, san, move and captured are stripped [S1]', () => {
+        const parsed = schemas.make_move.parse({ ...move, fen: 'client-fen', san: 'Qxf7#', move: 'd1f7', captured: true });
+        expect(parsed).toEqual(move);
     });
 });
 

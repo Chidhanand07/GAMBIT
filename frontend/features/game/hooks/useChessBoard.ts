@@ -1,7 +1,8 @@
 'use client';
 
 // Board interaction: the displayed position (live or history), turn check, square clicks,
-// promotion, and committing a move (optimistic local update + make_move / game_end emits).
+// promotion, and committing a move. The local board is only an optimistic preview: the server
+// validates the move and its `move_made` (or `move_rejected` + resync) is what the page keeps.
 import { useMemo, type Dispatch, type MutableRefObject } from 'react';
 import { Chess, type Color, type Square } from 'chess.js';
 import type { Socket } from 'socket.io-client';
@@ -42,7 +43,10 @@ function useDisplayChess(state: GameState): Chess {
     }, [displayFen]);
 }
 
-/** Plays the move locally, emits make_move, then (if it ended the game) game_end. */
+/**
+ * Plays the move locally and emits make_move with the squares only; the server computes the
+ * resulting position, SAN and capture flag. Then (if it ended the game) emits game_end.
+ */
 function commitMoveWith(opts: Options, from: Square, to: Square, promotion: string): void {
     const { gameId, socket, dispatch, state } = opts;
     const chess = opts.chessRef.current;
@@ -50,15 +54,7 @@ function commitMoveWith(opts: Options, from: Square, to: Square, promotion: stri
     if (!moveObj) return;
     const newFen = chess.fen();
     dispatch({ type: 'moveCommitted', fen: newFen, from, to });
-    socket?.emit('make_move', {
-        game_id: gameId,
-        from,
-        to,
-        promotion,
-        fen: newFen,
-        san: moveObj.san,
-        captured: !!moveObj.captured,
-    });
+    socket?.emit('make_move', { game_id: gameId, from, to, promotion });
     if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
     const outcome = detectGameOver(chess);
     if (!outcome) return;

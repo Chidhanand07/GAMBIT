@@ -43,6 +43,13 @@ function fakeGameStore(games = {}) {
             state.set(id, merged);
             return merged;
         }),
+        /** Same contract as the Redis repository: null in for unknown, null out = no write. */
+        mutateGame: jest.fn(async (id, mutate) => {
+            const next = await mutate(state.has(id) ? structuredClone(state.get(id)) : null);
+            if (!next) return null;
+            state.set(id, structuredClone(next));
+            return next;
+        }),
         addActiveGame: jest.fn(async (id) => {
             active.add(id);
         }),

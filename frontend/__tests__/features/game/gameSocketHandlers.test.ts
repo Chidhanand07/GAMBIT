@@ -31,11 +31,12 @@ function makeCtx(over: Partial<SocketHandlerContext> = {}) {
 
 beforeEach(() => jest.clearAllMocks())
 
-test('registers the 13 events in the legacy order', () => {
+test('registers the legacy 13 events in order, plus move_rejected [S1]', () => {
     const { handlers } = makeCtx()
     expect([...handlers.keys()]).toEqual([
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
+        'move_rejected',
     ])
 })
 
@@ -44,6 +45,14 @@ test('connect marks connected then re-emits join_game only (no authenticate) [S2
     fire('connect')
     expect(dispatched()).toEqual([{ type: 'connectionChanged', connected: true }])
     expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['join_game', 'g1']])
+})
+
+test('move_rejected: clears the optimistic move for this game only [S1]', () => {
+    const { fire, dispatched } = makeCtx()
+    fire('move_rejected', { game_id: 'other', reason: 'illegal_move' })
+    expect(dispatched()).toEqual([])
+    fire('move_rejected', { game_id: 'g1', reason: 'not_your_turn' })
+    expect(dispatched()).toEqual([{ type: 'moveRejected' }])
 })
 
 test('move_made: activates the clock before loading the FEN, de-duplicates, ignores other games', () => {

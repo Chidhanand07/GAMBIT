@@ -9,7 +9,7 @@ const { makeGame } = require('../helpers/fixtures');
 const T = 2_000_000;
 const NEXT_FEN = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 
-function setup(games = {}, { engine } = {}) {
+function setup(games = {}) {
     const gameStore = fakeGameStore(games);
     const emitter = fakeEmitter();
     const sessions = createSessionRegistry();
@@ -20,14 +20,9 @@ function setup(games = {}, { engine } = {}) {
         finishIfActive: jest.fn(() => result({ id: 'g' })),
     };
     const movesRepo = { insert: jest.fn(() => result()) };
-    const engineClient = {
-        validateMove: jest.fn(
-            engine ?? (async () => ({ ok: true, json: async () => ({ valid: true, new_fen: NEXT_FEN }) })),
-        ),
-    };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const deps = { gameStore, gamesRepo, movesRepo, engineClient, ratingService, reviewService, sessions, emitter };
+    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter };
     const svc = createGameService({ ...deps, now: () => T });
     return { svc, ...deps };
 }
@@ -109,12 +104,14 @@ describe('joinGame', () => {
     });
 });
 
-describe('makeMove', () => {
-    test('validated move: engine FEN, clocks charged, broadcast, then persisted', async () => {
+describe('makeMove: the server is the authority [S1][S10]', () => {
+    const E4 = { game_id: 'g', from: 'e2', to: 'e4' };
+
+    test('legal move: server-computed fen/san/uci, clocks charged, broadcast, then persisted', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 3000, incrementMs: 2000 }) });
-        ctx.sessions.register('white-user', 's1');
-        const data = { game_id: 'g', move: 'e2e4', fen: 'client-fen', san: 'e4', extra: 1 };
-        await ctx.svc.makeMove(data, 's1');
+        // Everything a cheating client might add is ignored.
+        const data = { ...E4, promotion: 'q', fen: 'client-fen', san: 'Qxf7#', move: 'd1f7', captured: true };
+        expect(await ctx.svc.makeMove(data, 'white-user', fakeClient())).toEqual({ ok: true });
         await flush();
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
@@ -122,38 +119,126 @@ describe('makeMove', () => {
             activeSide: 'b',
             whiteClockMs: 599000,
             lastMoveAt: T,
+            moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
         });
         expect(ctx.emitter.sent).toEqual([
             {
                 room: 'game_g',
                 event: 'move_made',
-                args: [{ ...data, fen: NEXT_FEN, whiteMs: 599000, blackMs: 600000 }],
+                args: [
+                    {
+                        game_id: 'g',
+                        from: 'e2',
+                        to: 'e4',
+                        move: 'e2e4',
+                        san: 'e4',
+                        fen: NEXT_FEN,
+                        captured: false,
+                        flags: 'b',
+                        whiteMs: 599000,
+                        blackMs: 600000,
+                    },
+                ],
             },
         ]);
-        expect(ctx.movesRepo.insert).toHaveBeenCalledWith(
-            expect.objectContaining({ move_number: 1, color: 'white', uci: 'e2e4', clock_ms_remaining: 599000 }),
-        );
+        expect(ctx.movesRepo.insert).toHaveBeenCalledWith({
+            game_id: 'g',
+            move_number: 1,
+            color: 'white',
+            uci: 'e2e4',
+            san: 'e4',
+            fen_after: NEXT_FEN,
+            clock_ms_remaining: 599000,
+        });
         expect(ctx.gamesRepo.updateById).toHaveBeenCalledWith('g', { fen: NEXT_FEN });
     });
 
-    test('wrong player, illegal move → nothing happens', async () => {
-        const ctx = setup(
-            { g: makeGame({ id: 'g' }) },
-            { engine: async () => ({ ok: true, json: async () => ({ valid: false }) }) },
-        );
-        ctx.sessions.register('black-user', 'sb');
-        ctx.sessions.register('white-user', 'sw');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e7e5' }, 'sb');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e2e5' }, 'sw');
-        expect(ctx.emitter.sent).toHaveLength(0);
-        expect(console.warn).toHaveBeenCalledWith('[make_move] illegal move rejected:', 'e2e5', 'from', makeGame().fen);
+    test('a promotion reports the promoted piece', async () => {
+        const fen = '8/P6k/8/8/8/8/7K/8 w - - 0 1';
+        const ctx = setup({ g: makeGame({ id: 'g', fen, startFen: fen }) });
+        await ctx.svc.makeMove({ game_id: 'g', from: 'a7', to: 'a8', promotion: 'r' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('move_made')[0].args[0]).toMatchObject({ move: 'a7a8r', san: 'a8=R', promotion: 'r' });
     });
 
-    test('engine unreachable → the client FEN is accepted (known bug, pinned)', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g' }) }, { engine: async () => Promise.reject(new Error('down')) });
-        ctx.sessions.register('white-user', 'sw');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e2e4', fen: 'client-fen' }, 'sw');
-        expect(ctx.gameStore.state.get('g').fen).toBe('client-fen');
+    test('illegal move: rejected to the sender with a fresh sync; nothing stored, broadcast or persisted', async () => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        const client = fakeClient('sw');
+        const out = await ctx.svc.makeMove({ game_id: 'g', from: 'e2', to: 'e5', fen: 'client-fen' }, 'white-user', client);
+        await flush();
+        expect(out).toEqual({ ok: false, error: 'illegal_move' });
+        expect(client.emitted).toEqual([
+            { event: 'move_rejected', args: [{ game_id: 'g', reason: 'illegal_move' }] },
+            { event: 'game_state_sync', args: [expect.objectContaining({ fen: game.fen, moveLog: [], activeSide: 'w' })] },
+        ]);
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(ctx.movesRepo.insert).not.toHaveBeenCalled();
+        expect(ctx.gamesRepo.updateById).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['out of turn', 'black-user', { game_id: 'g', from: 'e7', to: 'e5' }, 'not_your_turn'],
+        ['by a spectator', 'stranger', E4, 'not_a_player'],
+    ])('a move %s is rejected and changes nothing', async (_name, userId, data, reason) => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove(data, userId, client)).toEqual({ ok: false, error: reason });
+        expect(client.emitted[0]).toEqual({ event: 'move_rejected', args: [{ game_id: 'g', reason }] });
+        expect(client.emitted[1].event).toBe('game_state_sync');
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+    });
+
+    test('a move on a finished game is rejected and the sender is told the result', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', status: 'completed', result: 'black', reason: 'Checkmate' }) });
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove(E4, 'white-user', client)).toEqual({ ok: false, error: 'game_not_active' });
+        expect(client.emitted.map((e) => e.event)).toEqual(['move_rejected', 'game_end']);
+        expect(ctx.emitter.sent).toEqual([]);
+    });
+
+    test('a move for a game the server does not hold is rejected (no client state is adopted)', async () => {
+        const ctx = setup();
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove({ ...E4, fen: NEXT_FEN }, 'white-user', client)).toEqual({
+            ok: false,
+            error: 'game_not_found',
+        });
+        expect(client.emitted).toEqual([{ event: 'move_rejected', args: [{ game_id: 'g', reason: 'game_not_found' }] }]);
+        expect(ctx.gameStore.state.has('g')).toBe(false);
+    });
+
+    test('the same move submitted twice is applied once', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        // The fake store has no lock; serialise like the real per-game lock does.
+        let chain = Promise.resolve();
+        const mutate = ctx.gameStore.mutateGame.getMockImplementation();
+        ctx.gameStore.mutateGame.mockImplementation((id, fn) => (chain = chain.then(() => mutate(id, fn))));
+        const results = await Promise.all([
+            ctx.svc.makeMove(E4, 'white-user', fakeClient()),
+            ctx.svc.makeMove(E4, 'white-user', fakeClient()),
+        ]);
+        expect(results).toEqual([{ ok: true }, { ok: false, error: 'not_your_turn' }]);
+        expect(ctx.emitter.named('move_made')).toHaveLength(1);
+        expect(ctx.gameStore.state.get('g').moveLog).toHaveLength(1);
+    });
+
+    test('there is no engine dependency to fall back on [S10]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        expect(ctx.engineClient).toBeUndefined();
+        const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('engine down'));
+        expect(await ctx.svc.makeMove(E4, 'white-user', fakeClient())).toEqual({ ok: true });
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test('an unusable stored position fails closed (throws; nothing is written)', async () => {
+        const game = makeGame({ id: 'g', fen: 'garbage w - - 0 1' });
+        const ctx = setup({ g: game });
+        await expect(ctx.svc.makeMove(E4, 'white-user', fakeClient())).rejects.toThrow();
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
     });
 });
 

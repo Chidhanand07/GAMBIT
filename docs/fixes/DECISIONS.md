@@ -21,6 +21,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-004](#f-004) | Socket identity: handshake token verified by Supabase Auth; no socket for signed-out users | 1 | S2, G13 |
 | [F-005](#f-005) | `join_game`: non-participants are spectators and are never linked to the game | 1 | S9 |
 | [F-006](#f-006) | Rematch/challenge: requests stored in Redis for 60 s; answers consume them and use stored terms | 1 | S4 (+F1, G16) |
+| [F-007](#f-007) | Moves are validated on the server with chess.js; FEN is the authority, UCI history adds repetition | 1 | S1, S10 |
 
 ---
 
@@ -194,3 +195,59 @@ instead of one file per ADR under `docs/refactor/adr/`.
   client (length-capped by the schema); the ids next to them are verified. A rematch request's
   terms come from the requester's payload rather than from the finished game, exactly like a
   fresh challenge; the target still has to accept.
+
+## F-007
+
+**The game server validates every move itself with chess.js (S1, S10).**
+
+- **Context.** `make_move` asked the engine to validate only when the payload had a `move`
+  field. The frontend never sent one, so validation was skipped on every move and the client's
+  FEN was stored as the position. When the engine was unreachable the client FEN was accepted
+  too, and with no client FEN the stored FEN was deleted. `moves.uci` (NOT NULL) was written as
+  `undefined`, so move rows very likely never persisted.
+- **Options.**
+  1. Where legality is decided: (a) keep the engine call but make it mandatory; (b) chess.js in
+     the game server.
+  2. What the server trusts as the position: (a) the stored FEN only; (b) the UCI history
+     replayed from the start; (c) the stored FEN, upgraded to the replayed history when the
+     history reproduces exactly that FEN.
+  3. Concurrency: (a) keep `getGame` → validate → `updateGame`; (b) one atomic
+     read–decide–write per game.
+  4. Rejections: (a) drop silently; (b) `move_rejected { game_id, reason }` to the sender plus a
+     fresh `game_state_sync`.
+- **Decision.** 1b, 2c, 3b, 4b.
+  - `server/src/domain/chessRules.js` (pure): `positionOf(game)` and `playMove(game, {from,to,promotion})`
+    return server-computed `uci`, `san`, `fen`, `flags`, `captured`.
+  - `server/src/domain/moveAuthorization.js` (pure): game exists → active → caller is a player →
+    it is their turn (side to move read from the FEN). Reasons are an ordered table.
+  - `gameStateRepository.mutateGame(gameId, fn)`: read, decide and write under the per-game
+    lock. `moveRecorder.submit` uses it, so the same move sent twice is applied once.
+  - The state gains `startFen`; `moveLog` entries are `{ move: <uci>, fen, san }`, all computed
+    by the server. The schema accepts only `game_id`, `from`, `to`, `promotion`; a client `fen`,
+    `san`, `move` or `captured` is stripped before the service runs.
+  - `move_made` keeps the field names the page reads (`from`, `to`, `fen`, `san`, `captured`,
+    `flags`, `whiteMs`, `blackMs`) and adds `move` (UCI); `promotion` appears only on a promotion.
+  - The engine is no longer a dependency of `gameService`. There is no fallback path.
+  - Frontend: `make_move` sends squares only; `move_rejected` clears the optimistic markers and
+    the resync restores the board.
+- **Why.**
+  - *chess.js in-process*: legality must not depend on a second service being up (S10), and a
+    network hop per move is latency for nothing. The library is pure, so the rules live in
+    `domain/` and are unit-tested without mocks (SOLID-07, TEST-03).
+  - *FEN as authority, history as an upgrade*: games already in Redis at deploy time have move
+    logs without UCI, and games restored from the database after a restart have no log at all.
+    Requiring a replayable history would brick them. The FEN alone gives full legality; the
+    history only adds what a FEN cannot carry (threefold repetition, needed by S3). A history
+    that is missing, corrupt or inconsistent is ignored rather than trusted.
+  - *Atomic transition*: two rapid `make_move` events could both pass validation against the
+    same position. The existing lock only covered the write.
+  - *Tell the sender*: the page updates optimistically; without a rejection plus resync a
+    refused move would leave the two boards different.
+- **Trade-offs / limits.**
+  - Replaying the history is O(moves) per move (well under a millisecond for a normal game).
+  - Repetition history is lost across a server restart (the restore starts a new history at the
+    restored FEN). Legality is unaffected.
+  - The lock is per process. A multi-instance deployment needs a Redis-side transition
+    (NODE-17), which is out of scope here and listed for the next phase.
+  - `engineClient.validateMove` and the engine's `/validate-move` endpoint are now unused by the
+    game server; they are left in place (PR 2 protects the endpoint) and listed as dead code.

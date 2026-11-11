@@ -3,7 +3,16 @@
 const redis = require('./redis')
 const { createGameStateRepository } = require('../src/repositories/gameStateRepository')
 
-const { getGame, setGame, updateGame, deleteGame, addActiveGame, removeActiveGame, getActiveGameIds } =
+const { getGame, setGame, updateGame, mutateGame, deleteGame, addActiveGame, removeActiveGame, getActiveGameIds } =
     createGameStateRepository(redis)
 
-module.exports = { getGame, setGame, updateGame, deleteGame, addActiveGame, removeActiveGame, getActiveGameIds }
+module.exports = {
+    getGame,
+    setGame,
+    updateGame,
+    mutateGame,
+    deleteGame,
+    addActiveGame,
+    removeActiveGame,
+    getActiveGameIds,
+}

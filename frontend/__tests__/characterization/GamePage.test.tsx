@@ -122,14 +122,14 @@ describe('mount', () => {
         await renderGame()
         expect(socket.listenedEvents()).toEqual([
             'chat_message', 'clock_sync', 'connect', 'disconnect', 'game_end', 'game_state_sync',
-            'move_made', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
+            'move_made', 'move_rejected', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
             'rematch_declined', 'rematch_ready', 'rematch_request',
         ])
     })
 
     test('unmount removes every handler it registered', async () => {
         const { unmount } = await renderGame()
-        const registered = socket.on.mock.calls.slice(-13)
+        const registered = socket.on.mock.calls.slice(-14)
         unmount()
         expect(socket.listenedEvents()).toEqual([])
         for (const [event, handler] of registered) {
@@ -425,17 +425,39 @@ describe('clock tick', () => {
 // ── Making moves ────────────────────────────────────────────────────────────
 
 describe('making moves', () => {
-    test('click own pawn then a legal square emits make_move with this exact payload', async () => {
+    test('click own pawn then a legal square emits make_move with squares only — no fen/san/captured [S1]', async () => {
         await renderGame()
         click(square('e2'))
         click(square('e4'))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'e2', to: 'e4', promotion: 'q',
-            fen: AFTER_E4, san: 'e4', captured: false,
-        }])
+        // The server computes the position, SAN and capture flag itself; the client only names the move.
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e2', to: 'e4', promotion: 'q' }])
         expect(pieceOn('e4')).toBe('wp')
         // optimistic update does NOT add to the move list; the server echo does
         expect(screen.getByText('No moves yet')).toBeInTheDocument()
+    })
+
+    test('move_rejected + the resync that follows snap the board back to the server position [S1]', async () => {
+        await renderGame()
+        click(square('e2'))
+        click(square('e4'))
+        expect(pieceOn('e4')).toBe('wp') // optimistic
+        socket.serverSends('move_rejected', { game_id: 'g1', reason: 'illegal_move' })
+        socket.serverSends('game_state_sync', { fen: START_FEN, moveLog: [], whiteMs: 300_000, blackMs: 300_000, clockActive: false })
+        expect(pieceOn('e4')).toBeNull()
+        expect(pieceOn('e2')).toBe('wp')
+        expect(screen.getByText('No moves yet')).toBeInTheDocument()
+        // ...and the player can move again from the real position.
+        click(square('d2'))
+        click(square('d4'))
+        expect(socket.emitted('make_move')).toHaveLength(2)
+    })
+
+    test('a move_rejected for another game is ignored', async () => {
+        await renderGame()
+        click(square('e2'))
+        click(square('e4'))
+        socket.serverSends('move_rejected', { game_id: 'other', reason: 'illegal_move' })
+        expect(pieceOn('e4')).toBe('wp')
     })
 
     test('clicking an illegal destination deselects without emitting', async () => {
@@ -467,13 +489,10 @@ describe('making moves', () => {
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         click(square('e7', true))
         click(square('e5', true))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'e7', to: 'e5', promotion: 'q',
-            fen: AFTER_E4_E5, san: 'e5', captured: false,
-        }])
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e7', to: 'e5', promotion: 'q' }])
     })
 
-    test('a capture reports captured: true', async () => {
+    test('a capture is sent like any other move (the server reports `captured`)', async () => {
         await renderGame()
         socket.serverSends('game_state_sync', {
             fen: 'rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2', moveLog: [],
@@ -481,7 +500,7 @@ describe('making moves', () => {
         })
         click(square('e4'))
         click(square('d5'))
-        expect(socket.emitted('make_move')[0]).toMatchObject({ from: 'e4', to: 'd5', san: 'exd5', captured: true })
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e4', to: 'd5', promotion: 'q' }])
     })
 
     test('pawn reaching the last rank opens the promotion picker and emits the chosen piece', async () => {
@@ -494,10 +513,7 @@ describe('making moves', () => {
         const options = screen.getAllByRole('button', { name: /Queen|Rook|Bishop|Knight/ }).map(b => b.textContent)
         expect(options).toEqual(['Queen', 'Rook', 'Bishop', 'Knight'])
         click(screen.getByRole('button', { name: /Knight/ }))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'a7', to: 'a8', promotion: 'n',
-            fen: 'N6k/8/8/8/8/8/8/4K3 b - - 0 1', san: 'a8=N', captured: false,
-        }])
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'a7', to: 'a8', promotion: 'n' }])
         expect(screen.queryByText('Choose promotion')).not.toBeInTheDocument()
     })
 
@@ -510,7 +526,7 @@ describe('making moves', () => {
         click(square('h5'))
         click(square('f7'))
         expect(socket.emit.mock.calls.filter(([e]) => e === 'make_move' || e === 'game_end').map(([e]) => e)).toEqual(['make_move', 'game_end'])
-        expect(socket.emitted('make_move')[0]).toMatchObject({ san: 'Qxf7#', captured: true })
+        expect(socket.emitted('make_move')[0]).toMatchObject({ from: 'h5', to: 'f7' })
         expect(socket.emitted('game_end')).toEqual([{
             game_id: 'g1', result: 'White wins', reason: 'Checkmate',
             white_id: 'me', black_id: 'opp', is_rated: true, time_control: '5',

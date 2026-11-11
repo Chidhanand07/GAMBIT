@@ -69,7 +69,6 @@ const gameService = createGameService({
     gameStore,
     gamesRepo,
     movesRepo: createMovesRepository(supabase),
-    engineClient,
     ratingService,
     reviewService: createReviewService({ engineClient }),
     sessions,

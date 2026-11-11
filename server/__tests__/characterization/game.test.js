@@ -1,6 +1,11 @@
 /**
- * Characterization: join_game (Redis / DB restore / completed games),
- * spectate_game and make_move (engine validation, clocks, persistence).
+ * join_game (Redis / DB restore / completed games), spectate_game and
+ * make_move through the real server.
+ *
+ * make_move was rewritten for S1 + S10: the server validates every move with
+ * its own chess rules, computes uci/san/fen itself, never calls the engine and
+ * never reads a client FEN. The cases that pinned the old engine-validation
+ * and client-FEN bugs now assert the corrected behaviour.
  */
 jest.mock('../../supabase', () => ({
     supabase: require('../helpers/mockSupabase').createSupabaseMock(),
@@ -119,6 +124,7 @@ describe('join_game: restore from the database (Redis empty)', () => {
         expect(await getGame('db-1')).toEqual({
             id: 'db-1',
             fen: AFTER_E4,
+            startFen: AFTER_E4,
             whiteId: 'w',
             blackId: 'b',
             whiteClockMs: 250000,
@@ -231,41 +237,52 @@ describe('spectate_game', () => {
         await sleep(50);
         const seen = once(spectator, 'move_made');
         const notSeen = record(lost, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: game.id, from: 'e2', to: 'e4' });
         expect(await seen).toMatchObject({ move: 'e2e4' });
         expect(notSeen).toEqual([]);
         expect(opsFor('games').filter((ops) => ops[0][0] === 'select')).toEqual([]);
     });
 });
 
+/** Emit with an ack callback and resolve with what the server acknowledged. */
+const emitAck = (socket, event, payload) => new Promise((resolve) => socket.emit(event, payload, resolve));
+
+const AFTER_E4_E5 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2';
+const E4 = { from: 'e2', to: 'e4' };
+
 describe('make_move', () => {
-    test('valid move: engine call, exact move_made payload, Redis state, and DB writes', async () => {
+    test('valid move: exact server-computed move_made payload, Redis state and DB writes; no engine call', async () => {
         const { game, white, black } = await ctx.seatedGame();
         const seenByBlack = once(black, 'move_made');
         const seenByWhite = once(white, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4', fen: CLIENT_FEN, extra: 'dropped by the schema' });
+        // What the frontend used to send, plus lies: all but from/to/promotion is dropped.
+        white.emit('make_move', {
+            game_id: game.id,
+            ...E4,
+            promotion: 'q',
+            fen: CLIENT_FEN,
+            san: 'Qxf7#',
+            move: 'd1f7',
+            captured: true,
+            extra: 'dropped by the schema',
+        });
 
         const expected = {
             game_id: game.id,
+            from: 'e2',
+            to: 'e4',
             move: 'e2e4',
             san: 'e4',
             fen: AFTER_E4,
+            captured: false,
+            flags: 'b',
             whiteMs: 600000,
             blackMs: 600000,
         };
         expect(await seenByBlack).toEqual(expected);
         expect(await seenByWhite).toEqual(expected);
 
-        expect(ctx.fetch.mock.calls).toEqual([
-            [
-                'http://localhost:8001/validate-move',
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fen: START_FEN, move: 'e2e4' }),
-                },
-            ],
-        ]);
+        expect(ctx.fetch).not.toHaveBeenCalled();
         expect(await getGame(game.id)).toEqual({
             ...game,
             fen: AFTER_E4,
@@ -283,6 +300,7 @@ describe('make_move', () => {
                         game_id: game.id,
                         move_number: 1,
                         color: 'white',
+                        // Was `undefined` (NOT NULL column) because the client never sent `move` [S1].
                         uci: 'e2e4',
                         san: 'e4',
                         fen_after: AFTER_E4,
@@ -291,15 +309,6 @@ describe('make_move', () => {
                 ],
             ],
         ]);
-    });
-
-    test('ENGINE_URL overrides the validation endpoint', async () => {
-        process.env.ENGINE_URL = 'http://engine.test:9000';
-        const { game, white, black } = await ctx.seatedGame();
-        const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4' });
-        await p;
-        expect(ctx.fetch.mock.calls[0][0]).toBe('http://engine.test:9000/validate-move');
     });
 
     test('black move: color black, move_number counts the move log, black clock decremented', async () => {
@@ -314,12 +323,16 @@ describe('make_move', () => {
         await setGame(game.id, { ...(await getGame(game.id)), lastMoveAt: T - 7000 });
         jest.spyOn(Date, 'now').mockReturnValue(T);
         const p = once(white, 'move_made');
-        black.emit('make_move', { game_id: game.id, move: 'e7e5', san: 'e5' });
+        black.emit('make_move', { game_id: game.id, from: 'e7', to: 'e5' });
         expect(await p).toEqual({
             game_id: game.id,
+            from: 'e7',
+            to: 'e5',
             move: 'e7e5',
             san: 'e5',
-            fen: AFTER_E4,
+            fen: AFTER_E4_E5,
+            captured: false,
+            flags: 'b',
             whiteMs: 600000,
             blackMs: 294000,
         });
@@ -330,7 +343,7 @@ describe('make_move', () => {
             color: 'black',
             uci: 'e7e5',
             san: 'e5',
-            fen_after: AFTER_E4,
+            fen_after: AFTER_E4_E5,
             clock_ms_remaining: 294000,
         });
         expect((await getGame(game.id)).lastMoveAt).toBe(T);
@@ -342,19 +355,19 @@ describe('make_move', () => {
         await setGame(game.id, { ...(await getGame(game.id)), lastMoveAt: T - 4000 });
         jest.spyOn(Date, 'now').mockReturnValue(T);
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: game.id, ...E4 });
         expect(await p).toMatchObject({ whiteMs: 58000.6, blackMs: 600000 });
         await sleep(20);
         expect(supabase.op(supabase.callsFor('moves')[0], 'insert')[0].clock_ms_remaining).toBe(58001);
     });
 
-    test('a flagged player who moves before the ticker fires gets 0 + increment (pinned)', async () => {
+    test('a flagged player who moves before the ticker fires gets 0 + increment (pinned, G7)', async () => {
         const T = Date.now();
         const { game, white, black } = await ctx.seatedGame({ whiteClockMs: 60000, incrementMs: 2000 });
         await setGame(game.id, { ...(await getGame(game.id)), lastMoveAt: T - 70000 });
         jest.spyOn(Date, 'now').mockReturnValue(T);
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: game.id, ...E4 });
         expect((await p).whiteMs).toBe(2000);
     });
 
@@ -380,79 +393,151 @@ describe('make_move', () => {
         black.emit('join_game', 'inc-1');
         await once(black, 'game_state_sync');
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'inc-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'inc-1', ...E4 });
         expect(await p).toMatchObject({ whiteMs: 605000, blackMs: 600000 });
     });
 
-    test('engine says invalid → nothing emitted, persisted or changed', async () => {
-        ctx.fetch.mockImplementation(async () => ({ ok: true, json: async () => ({ valid: false }) }));
+    test('illegal move → move_rejected + a fresh game_state_sync to the sender only; nothing persisted or changed [S1]', async () => {
         const { game, white, black } = await ctx.seatedGame();
         const before = await getGame(game.id);
-        const moves = [...record(white, 'move_made'), ...record(black, 'move_made')];
-        white.emit('make_move', { game_id: game.id, move: 'e2e5', san: 'e5' });
-        await sleep(100);
-        expect(moves).toEqual([]);
+        const moves = [record(white, 'move_made'), record(black, 'move_made')];
+        const blackGot = recordAll(black);
+        const rejected = once(white, 'move_rejected');
+        const resync = once(white, 'game_state_sync');
+        // A "pawn to e5 in one move", with a FEN that claims it happened.
+        const ack = await emitAck(white, 'make_move', {
+            game_id: game.id,
+            from: 'e2',
+            to: 'e5',
+            fen: 'rnbqkbnr/pppppppp/8/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
+            san: 'e5',
+        });
+        expect(ack).toEqual({ ok: false, error: 'illegal_move' });
+        expect(await rejected).toEqual({ game_id: game.id, reason: 'illegal_move' });
+        expect(await resync).toMatchObject({ fen: START_FEN, moveLog: [], activeSide: 'w' });
+        await sleep(50);
+        expect(moves).toEqual([[], []]);
+        expect(blackGot.filter(([e]) => e !== 'queue_status')).toEqual([]);
         expect(await getGame(game.id)).toEqual(before);
         expect(opsFor('games').filter((ops) => ops[0][0] === 'update')).toEqual([]);
         expect(opsFor('moves')).toEqual([]);
     });
 
-    test('engine unreachable → move accepted with the CLIENT fen (BUG pinned)', async () => {
+    test('engine unreachable → moves are still validated by the server; the client FEN is never used [S10]', async () => {
         ctx.fetch.mockRejectedValue(new Error('ECONNREFUSED'));
         const { game, white, black } = await ctx.seatedGame();
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4', fen: CLIENT_FEN });
-        expect(await p).toEqual({
-            game_id: game.id,
-            move: 'e2e4',
-            san: 'e4',
-            fen: CLIENT_FEN,
-            whiteMs: 600000,
-            blackMs: 600000,
+        white.emit('make_move', { game_id: game.id, ...E4, fen: CLIENT_FEN, san: 'e4' });
+        expect((await p).fen).toBe(AFTER_E4);
+        expect((await getGame(game.id)).fen).toBe(AFTER_E4);
+        // ...and an illegal move is still refused with the engine down.
+        expect(await emitAck(black, 'make_move', { game_id: game.id, from: 'e7', to: 'e4', fen: 'anything' })).toEqual({
+            ok: false,
+            error: 'illegal_move',
         });
-        expect((await getGame(game.id)).fen).toBe(CLIENT_FEN);
         await sleep(20);
-        expect(supabase.op(supabase.callsFor('moves')[0], 'insert')[0].fen_after).toBe(CLIENT_FEN);
+        expect(supabase.op(supabase.callsFor('moves')[0], 'insert')[0].fen_after).toBe(AFTER_E4);
+        expect(ctx.fetch).not.toHaveBeenCalled();
     });
 
-    test('engine non-ok response → client fen used and the body is never read', async () => {
-        const json = jest.fn(async () => ({ valid: false }));
-        ctx.fetch.mockImplementation(async () => ({ ok: false, status: 503, json }));
-        const { game, white, black } = await ctx.seatedGame();
-        const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4', fen: CLIENT_FEN });
-        expect((await p).fen).toBe(CLIENT_FEN);
-        expect(json).not.toHaveBeenCalled();
-    });
-
-    test('engine down + no client fen → Redis loses its fen and later moves skip validation (BUG pinned)', async () => {
-        ctx.fetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    test('the stored FEN survives any payload: a move without a client fen keeps Redis intact [S10]', async () => {
         const { game, white, black } = await ctx.seatedGame();
         const first = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4' });
-        expect(await first).not.toHaveProperty('fen');
-        expect(await getGame(game.id)).not.toHaveProperty('fen');
+        white.emit('make_move', { game_id: game.id, ...E4 });
+        expect(await first).toHaveProperty('fen', AFTER_E4);
+        expect(await getGame(game.id)).toHaveProperty('fen', AFTER_E4);
 
-        const second = once(white, 'move_made');
-        black.emit('make_move', { game_id: game.id, move: 'zzzz', san: '??', fen: 'anything' });
-        expect(await second).toMatchObject({ move: 'zzzz', fen: 'anything' });
-        expect(ctx.fetch).toHaveBeenCalledTimes(1);
+        // The follow-up nonsense move that used to sail through is rejected.
+        const moves = record(white, 'move_made');
+        expect(await emitAck(black, 'make_move', { game_id: game.id, from: 'a1', to: 'h8', fen: 'anything' })).toEqual({
+            ok: false,
+            error: 'illegal_move',
+        });
+        expect(moves).toEqual([]);
+        expect((await getGame(game.id)).fen).toBe(AFTER_E4);
     });
 
-    test('a move without `move` skips engine validation entirely (pinned)', async () => {
+    test('a payload without from/to is invalid: the old "no `move` → skip validation" hole is closed [S1]', async () => {
         const { game, white, black } = await ctx.seatedGame();
-        const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, san: 'e4', fen: CLIENT_FEN });
-        expect(await p).toEqual({ game_id: game.id, san: 'e4', fen: CLIENT_FEN, whiteMs: 600000, blackMs: 600000 });
-        expect(ctx.fetch).not.toHaveBeenCalled();
+        const moves = record(black, 'move_made');
+        expect(await emitAck(white, 'make_move', { game_id: game.id, san: 'e4', fen: CLIENT_FEN })).toEqual({
+            ok: false,
+            error: 'invalid_payload',
+        });
+        expect(await emitAck(white, 'make_move', { game_id: game.id, move: 'e2e4' })).toEqual({
+            ok: false,
+            error: 'invalid_payload',
+        });
+        await sleep(50);
+        expect(moves).toEqual([]);
+        expect((await getGame(game.id)).fen).toBe(START_FEN);
     });
 
-    test('out-of-turn / unknown game: no engine call, no DB writes', async () => {
+    test('out-of-turn / unknown game: rejected with a reason, no DB writes', async () => {
         const { game, black } = await ctx.seatedGame();
-        black.emit('make_move', { game_id: game.id, move: 'e7e5', san: 'e5' });
-        black.emit('make_move', { game_id: 'no-such-game', move: 'e7e5', san: 'e5' });
-        await sleep(100);
+        expect(await emitAck(black, 'make_move', { game_id: game.id, from: 'e7', to: 'e5' })).toEqual({
+            ok: false,
+            error: 'not_your_turn',
+        });
+        expect(await emitAck(black, 'make_move', { game_id: 'no-such-game', from: 'e7', to: 'e5' })).toEqual({
+            ok: false,
+            error: 'game_not_found',
+        });
+        await sleep(50);
         expect(ctx.fetch).not.toHaveBeenCalled();
         expect(opsFor('moves')).toEqual([]);
+    });
+
+    test('a spectator in the room cannot move either side', async () => {
+        const { game, white } = await ctx.seatedGame();
+        const spectator = await ctx.connect('stranger');
+        spectator.emit('join_game', game.id);
+        await once(spectator, 'game_state_sync');
+        const moves = record(white, 'move_made');
+        expect(await emitAck(spectator, 'make_move', { game_id: game.id, ...E4 })).toEqual({
+            ok: false,
+            error: 'not_a_player',
+        });
+        await sleep(50);
+        expect(moves).toEqual([]);
+    });
+
+    test('the same move sent twice in one tick is applied once (atomic transition)', async () => {
+        const { game, white, black } = await ctx.seatedGame();
+        const moves = record(black, 'move_made');
+        const acks = await Promise.all([
+            emitAck(white, 'make_move', { game_id: game.id, ...E4 }),
+            emitAck(white, 'make_move', { game_id: game.id, ...E4 }),
+        ]);
+        await sleep(50);
+        expect(acks).toEqual([{ ok: true }, { ok: false, error: 'not_your_turn' }]);
+        expect(moves).toHaveLength(1);
+        expect((await getGame(game.id)).moveLog).toHaveLength(1);
+    });
+
+    test('a full legal sequence: castling and a capture are computed by the server', async () => {
+        const { game, white, black } = await ctx.seatedGame();
+        const seen = record(black, 'move_made');
+        const line = [
+            [white, 'e2', 'e4'],
+            [black, 'e7', 'e5'],
+            [white, 'g1', 'f3'],
+            [black, 'b8', 'c6'],
+            [white, 'f1', 'c4'],
+            [black, 'd7', 'd5'],
+            [white, 'e4', 'd5'],
+            [black, 'g8', 'f6'],
+            [white, 'e1', 'g1'],
+        ];
+        for (const [socket, from, to] of line) {
+            expect(await emitAck(socket, 'make_move', { game_id: game.id, from, to })).toEqual({ ok: true });
+        }
+        await sleep(30);
+        expect(seen.map((m) => m.san)).toEqual(['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'd5', 'exd5', 'Nf6', 'O-O']);
+        expect(seen[6]).toMatchObject({ captured: true, move: 'e4d5' });
+        expect(seen[8].flags).toContain('k');
+        expect((await getGame(game.id)).moveLog.map((m) => m.move)).toEqual([
+            'e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'd7d5', 'e4d5', 'g8f6', 'e1g1',
+        ]);
     });
 });

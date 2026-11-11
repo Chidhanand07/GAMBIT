@@ -16,8 +16,6 @@ const MAX_TIME_CONTROL_LENGTH = 16;
 const MAX_INCREMENT_SECONDS = 180;
 const MAX_NAME_LENGTH = 64;
 const MAX_CHAT_LENGTH = 500;
-const MAX_FEN_LENGTH = 100;
-const MAX_SAN_LENGTH = 16;
 const MAX_RESULT_LENGTH = 32;
 const MAX_REASON_LENGTH = 64;
 
@@ -53,15 +51,13 @@ const schemas = {
     leave_queue: z.unknown(),
     join_game: id,
     spectate_game: id,
+    // Only the squares and the promotion piece are read. A client `fen`, `san`,
+    // `move` or `captured` is stripped: the server computes all of them (S1).
     make_move: z.object({
         game_id: id,
-        from: square.optional(),
-        to: square.optional(),
+        from: square,
+        to: square,
         promotion: promotion.optional(),
-        move: z.string().max(MAX_SAN_LENGTH).optional(),
-        fen: z.string().max(MAX_FEN_LENGTH).optional(),
-        san: z.string().max(MAX_SAN_LENGTH).optional(),
-        captured: z.boolean().optional(),
     }),
     game_end: z.object({
         game_id: id,

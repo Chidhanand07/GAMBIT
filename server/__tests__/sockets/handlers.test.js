@@ -113,15 +113,16 @@ test('validated payloads go to the services; the actor is always the verified us
     const d = deps();
     const { handlers } = connect(d, 'u1');
     const data = { game_id: 'g' };
+    const move = { game_id: 'g', from: 'e2', to: 'e4' };
     await handlers.join_queue({ user: { id: 'victim' }, time_control: '10' });
     await handlers.join_game('g');
-    await handlers.make_move(data);
+    await handlers.make_move({ ...move, fen: 'client-fen', san: 'e4' });
     await handlers.send_message(data);
     await handlers.game_end(data);
     await handlers.leave_queue('victim');
     expect(d.matchmaking.requestMatch).toHaveBeenCalledWith({ time_control: '10', user: { id: 'u1' } }, 'sock-1');
     expect(d.gameService.joinGame).toHaveBeenCalledWith('g', expect.objectContaining({ id: 'sock-1' }), 'u1');
-    expect(d.gameService.makeMove).toHaveBeenCalledWith(data, 'sock-1');
+    expect(d.gameService.makeMove).toHaveBeenCalledWith(move, 'u1', expect.objectContaining({ id: 'sock-1' }));
     expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
     expect(d.gameService.endGame).toHaveBeenCalledWith(data);
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
@@ -172,7 +173,7 @@ test('a failing service is logged and acked, not thrown [S15]', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     const { handlers } = connect(d);
     const ack = jest.fn();
-    await expect(handlers.make_move({ game_id: 'g' }, ack)).resolves.toBeUndefined();
+    await expect(handlers.make_move({ game_id: 'g', from: 'e2', to: 'e4' }, ack)).resolves.toBeUndefined();
     await expect(handlers.disconnect()).resolves.toBeUndefined();
     expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
 });

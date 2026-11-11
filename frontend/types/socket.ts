@@ -20,19 +20,16 @@ export interface JoinQueuePayload {
     is_rated?: boolean;
 }
 
+/**
+ * A move is only its squares (+ promotion piece). The server validates it against its own
+ * position and computes the FEN, SAN, UCI and capture flag; anything else sent here is dropped.
+ */
 export interface MakeMovePayload {
     game_id: string;
     from: string;
     to: string;
+    /** The page sends 'q' on every move; the server reads it only when the move promotes. */
     promotion?: string;
-    fen: string;
-    san: string;
-    captured: boolean;
-    /**
-     * UCI move the server validates against the engine. The game page never sends it,
-     * so engine validation is skipped and the client FEN is trusted.
-     */
-    move?: string;
 }
 
 export interface SendMessagePayload {
@@ -153,10 +150,29 @@ export interface GameStateSyncPayload {
     blackId: string;
 }
 
-/** The mover's `make_move` payload echoed to the room with server clocks (fen may be the engine's). */
-export interface MoveMadePayload extends MakeMovePayload {
+/** An accepted move, broadcast to the room. Every field is computed by the server. */
+export interface MoveMadePayload {
+    game_id: string;
+    from: string;
+    to: string;
+    /** Present only when the move promoted. */
+    promotion?: string;
+    /** UCI, e.g. "e2e4" or "a7a8q". */
+    move: string;
+    san: string;
+    /** Position after the move. */
+    fen: string;
+    captured: boolean;
+    /** chess.js move flags ('k'/'q' castle, 'p' promotion, 'e' en passant, …). */
+    flags: string;
     whiteMs: number;
     blackMs: number;
+}
+
+/** Sent to the mover only, followed by a fresh `game_state_sync`. */
+export interface MoveRejectedPayload {
+    game_id: string;
+    reason: 'illegal_move' | 'not_your_turn' | 'not_a_player' | 'game_not_active' | 'game_not_found';
 }
 
 /** The sender's `send_message` payload echoed with the server-verified sender id. */
@@ -198,6 +214,7 @@ export interface ServerToClientEvents {
     game_state_sync: (payload: GameStateSyncPayload) => void;
     clock_sync: (payload: ClockSyncPayload) => void;
     move_made: (payload: MoveMadePayload) => void;
+    move_rejected: (payload: MoveRejectedPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;
     rating_updated: (payload: RatingUpdatedPayload) => void;

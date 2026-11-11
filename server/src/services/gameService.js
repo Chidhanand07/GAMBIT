@@ -1,15 +1,17 @@
 // @ts-check
 /**
  * Live game flow: joining, moves, client-reported endings, disconnects and
- * reconnects. Moved out of the `server.js` socket handlers; the handlers now
- * only pass the payload, the socket id and a ClientPort.
+ * reconnects. The handlers pass the validated payload, the verified user id
+ * and a ClientPort.
  *
- * Known bugs kept on purpose (see the refactor playbook): the client FEN is
- * accepted when the engine is unreachable, `game_end` trusts the client's
- * result text, and the disconnect snapshot writes `white_time_ms`/`black_time_ms`.
+ * Moves are validated here on the server (see moveRecorder); no engine call
+ * and no client FEN is involved. Known bugs still kept (see the refactor
+ * report): `game_end` trusts the client's result text, and the disconnect
+ * snapshot writes `white_time_ms`/`black_time_ms`.
  */
 const { clocksAt } = require('../domain/clock');
 const { gameStateFromRow } = require('../domain/gameState');
+const { isParticipant } = require('../domain/moveAuthorization');
 const { resultLabel, parseOutcome, colorOfPlayer, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
 const { createMoveRecorder } = require('./moveRecorder');
@@ -24,12 +26,11 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
 
 /**
  * @typedef {object} GameServiceDeps
- * @property {{ getGame: Function, setGame: Function, updateGame: Function, addActiveGame: Function,
+ * @property {{ getGame: Function, setGame: Function, mutateGame: Function, addActiveGame: Function,
  *   removeActiveGame: Function }} gameStore
  * @property {{ findForRestore: Function, updateById: Function, updateIfActive: Function,
  *   finishIfActive: Function }} gamesRepo
  * @property {{ insert: Function }} movesRepo
- * @property {{ validateMove: (p: { fen: string, move: string }) => Promise<any> }} engineClient
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {Pick<SessionRegistry, 'userIdOf' | 'activeGameOf' | 'hasActiveGame' | 'setActiveGame' | 'clearGame'>} sessions
@@ -73,15 +74,6 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
 }
 
 /**
- * True when `userId` plays white or black in `game`.
- * @param {{ whiteId?: string | null, blackId?: string | null }} game
- * @param {string | undefined} userId
- */
-function isParticipant(game, userId) {
-    return Boolean(userId) && (userId === game.whiteId || userId === game.blackId);
-}
-
-/**
  * `join_game`: enter the room and send the current state (or the result of a
  * finished game). Only the white and black players are linked to the game;
  * the link is what lets a disconnect start the abandonment countdown, so
@@ -98,11 +90,21 @@ async function joinGame(ctx, gameId, client, userId) {
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
     if (isParticipant(game, userId)) ctx.sessions.setActiveGame(userId, gameId);
+    sendState(ctx, game, client);
+}
 
+/**
+ * Send `client` the authoritative view of `game`: the result when it is over,
+ * otherwise position, move log and clocks (`game_state_sync`).
+ * @param {GameCtx} ctx
+ * @param {any} game
+ * @param {ClientPort} client
+ */
+function sendState(ctx, game, client) {
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
         client.emit('game_end', {
-            game_id: gameId,
+            game_id: game.id,
             result: resultLabel(game.result),
             reason: game.reason || 'Game over',
             white_id: game.whiteId,
@@ -149,24 +151,23 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
 }
 
 /**
- * `make_move` from the player whose turn it is (C2). `data` is mutated and
- * re-broadcast, as before.
+ * `make_move`: apply the move if it is the caller's legal move. Otherwise tell
+ * the sender why (`move_rejected`) and resend the authoritative state so its
+ * board snaps back. Nothing from the payload except `from`/`to`/`promotion`
+ * is used.
  * @param {GameCtx} ctx
- * @param {Record<string, any>} data
- * @param {string} socketId
+ * @param {import('./moveRecorder').MoveRequest} data
+ * @param {string} userId the connection's verified user
+ * @param {ClientPort} client
+ * @returns {Promise<{ ok: boolean, error?: string }>}
  */
-async function makeMove({ gameStore, sessions, moves }, data, socketId) {
-    const game = await gameStore.getGame(data.game_id);
-    if (!game || game.status !== 'active') return;
+async function makeMove(ctx, data, userId, client) {
+    const outcome = await ctx.moves.submit(data, userId);
+    if (outcome.accepted) return { ok: true };
 
-    // C2 fix: verify the moving socket is the player whose turn it is
-    const movingUserId = sessions.userIdOf(socketId);
-    const expectedId = game.activeSide === 'w' ? game.whiteId : game.blackId;
-    if (!movingUserId || movingUserId !== expectedId) return;
-
-    if (game.fen && data.move && !(await moves.validate(game, data))) return;
-
-    await moves.apply(game, data);
+    client.emit('move_rejected', { game_id: data.game_id, reason: outcome.reason });
+    if (outcome.game) sendState(ctx, outcome.game, client);
+    return { ok: false, error: outcome.reason };
 }
 
 /**
@@ -298,8 +299,8 @@ function createGameService(deps) {
         },
         /** @type {(userId: string, client: ClientPort) => Promise<void>} */
         reconnect: (userId, client) => reconnect(ctx, userId, client),
-        /** @type {(data: Record<string, any>, socketId: string) => Promise<void>} */
-        makeMove: (data, socketId) => makeMove(ctx, data, socketId),
+        /** @type {(data: import('./moveRecorder').MoveRequest, userId: string, client: ClientPort) => Promise<{ ok: boolean, error?: string }>} */
+        makeMove: (data, userId, client) => makeMove(ctx, data, userId, client),
         /** @type {(data: Record<string, any>) => Promise<void>} */
         endGame: (data) => endGame(ctx, data),
         /** @type {(userId: string | undefined) => Promise<void>} */

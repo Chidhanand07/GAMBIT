@@ -76,7 +76,7 @@ export interface Move {
 
 /** Entry of the realtime server's in-memory move log (`game_state_sync.moveLog`). */
 export interface MoveLogEntry {
-    /** UCI from the client's `move` field; the current client never sends it, so it is undefined. */
+    /** UCI computed by the server (absent on entries written before server-side validation). */
     move?: string;
     fen: string;
     san: string;

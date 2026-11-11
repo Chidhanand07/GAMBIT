@@ -1,4 +1,5 @@
-// Handlers for the 13 server events the game page listens to, in the legacy registration order.
+// Handlers for the server events the game page listens to: the 13 legacy ones in their original
+// registration order, then `move_rejected` (the server refused our move; a resync follows).
 // Built fresh on every run of the socket effect, so they close over that run's myColor/soundOn.
 import type { Dispatch, MutableRefObject } from 'react';
 import type { Socket } from 'socket.io-client';
@@ -12,14 +13,17 @@ import type {
     GameIdPayload,
     GameStateSyncPayload,
     MoveMadePayload,
+    MoveRejectedPayload,
     RatingUpdatedPayload,
     RematchRequestPayload,
 } from '@/types/socket';
 import type { GameAction } from '../state/gameReducer';
 import { detectGameOver, playMoveSoundFor } from '../utils/moveEffects';
 
-/** The echo never carries `flags` today (the client does not send it), but the page reads it. */
-type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs'> & {
+/** Clocks and flags are optional here so older payloads (and tests) without them still type-check. */
+type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs' | 'flags' | 'captured' | 'move'> & {
+    move?: string;
+    captured?: boolean;
     flags?: string;
     whiteMs?: number;
     blackMs?: number;
@@ -129,6 +133,14 @@ function onRematchRequest(ctx: SocketHandlerContext) {
     };
 }
 
+/** The server refused our move. Drop the optimistic markers; its game_state_sync restores the board. */
+function onMoveRejected(ctx: SocketHandlerContext) {
+    return (data: MoveRejectedPayload) => {
+        if (data.game_id !== ctx.gameId) return;
+        ctx.dispatch({ type: 'moveRejected' });
+    };
+}
+
 function onClockSync(ctx: SocketHandlerContext) {
     return (data: ClockSyncPayload) => {
         ctx.clockSyncedRef.current = true;
@@ -175,5 +187,6 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
         ],
         ['opponent_reconnected', () => ctx.markReconnected()],
         ['clock_sync', onClockSync(ctx)],
+        ['move_rejected', onMoveRejected(ctx)],
     ];
 }

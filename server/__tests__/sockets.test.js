@@ -166,7 +166,7 @@ describe('making moves', () => {
     test('the player to move can move; both players receive it with clocks', async () => {
         const { white, black } = await seatedGame();
         const seenByBlack = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4', fen: 'client-fen-ignored' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', san: 'e4', fen: 'client-fen-ignored' });
 
         const move = await seenByBlack;
         expect(move).toMatchObject({ move: 'e2e4', san: 'e4', fen: AFTER_E4, whiteMs: 600000, blackMs: 600000 });
@@ -177,17 +177,17 @@ describe('making moves', () => {
         expect(state.lastMoveAt).toEqual(expect.any(Number));
     });
 
-    test('the server uses the engine\'s FEN, not the one the client sent', async () => {
+    test('the server computes the FEN itself; the one the client sent is ignored [S1]', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4', fen: '8/8/8/8/8/8/8/K6k w - - 0 1' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', san: 'e4', fen: '8/8/8/8/8/8/8/K6k w - - 0 1' });
         expect((await p).fen).toBe(AFTER_E4);
     });
 
     test('moving out of turn is ignored', async () => {
         const { white, black } = await seatedGame();
         const moves = record(white, 'move_made');
-        black.emit('make_move', { game_id: 'game-1', move: 'e7e5', san: 'e5' });
+        black.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'e5' });
         await sleep(100);
         expect(moves).toHaveLength(0);
         expect((await getGame('game-1')).activeSide).toBe('w');
@@ -197,7 +197,7 @@ describe('making moves', () => {
         const { white } = await seatedGame();
         const stranger = await connect('stranger');
         const moves = record(white, 'move_made');
-        stranger.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        stranger.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
         expect(moves).toHaveLength(0);
     });
@@ -208,27 +208,31 @@ describe('making moves', () => {
         const anon = open(undefined);
         const refused = await once(anon, 'connect_error');
         expect(refused.message).toBe('unauthorized');
-        anon.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        anon.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
         expect(anon.connected).toBe(false);
         expect(moves).toHaveLength(0);
     });
 
-    test('an illegal move (per the engine) is rejected', async () => {
-        fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ valid: false }) }));
+    test('an illegal move is rejected by the server itself, and the sender is resynced [S1]', async () => {
         const { white, black } = await seatedGame();
         const moves = record(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e5', san: 'e5??' });
-        await sleep(100);
+        const rejected = once(white, 'move_rejected');
+        const resync = once(white, 'game_state_sync');
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e5', san: 'e5??' });
+        expect(await rejected).toEqual({ game_id: 'game-1', reason: 'illegal_move' });
+        expect((await resync).fen).toBe(START_FEN);
+        await sleep(50);
         expect(moves).toHaveLength(0);
         expect((await getGame('game-1')).fen).toBe(START_FEN);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('moves on a finished game are ignored', async () => {
         const { white, black } = await seatedGame();
         await setGame('game-1', { ...(await getGame('game-1')), status: 'completed' });
         const moves = record(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
         expect(moves).toHaveLength(0);
     });
@@ -236,7 +240,7 @@ describe('making moves', () => {
     test('time spent is deducted from the mover and the increment is added', async () => {
         const { white, black } = await seatedGame({ lastMoveAt: Date.now() - 4000, whiteClockMs: 60000, incrementMs: 2000 });
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         const { whiteMs, blackMs } = await p;
         // 60 s - ~4 s thinking + 2 s increment ≈ 58 s
         expect(whiteMs).toBeGreaterThan(57500);
@@ -247,21 +251,32 @@ describe('making moves', () => {
     test('the first move does not consume clock time', async () => {
         const { white, black } = await seatedGame({ lastMoveAt: null, whiteClockMs: 60000 });
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         expect((await p).whiteMs).toBe(60000);
     });
 
     test('each move is persisted to the moves table', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await p;
         await sleep(20);
         const insert = supabase.op(supabase.callsFor('moves')[0], 'insert')[0];
         expect(insert).toMatchObject({ game_id: 'game-1', move_number: 1, color: 'white', uci: 'e2e4', san: 'e4', fen_after: AFTER_E4 });
     });
 
-    test.todo('when the engine is unreachable, moves are accepted without validation (consider rejecting instead)');
+    test('with the engine unreachable, legal moves still work and illegal ones are still rejected [S10]', async () => {
+        fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+        const { white, black } = await seatedGame();
+        const p = once(black, 'move_made');
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', fen: 'client-fen' });
+        expect((await p).fen).toBe(AFTER_E4);
+        const rejected = once(black, 'move_rejected');
+        black.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'e2', fen: 'client-fen' });
+        expect((await rejected).reason).toBe('illegal_move');
+        expect((await getGame('game-1')).fen).toBe(AFTER_E4);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('ending a game', () => {

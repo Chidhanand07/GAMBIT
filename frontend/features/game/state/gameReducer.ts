@@ -105,6 +105,7 @@ export type GameAction =
     | { type: 'clockActivated' }
     | { type: 'moveReceived'; fen: string; from: Square; to: Square; san: string; whiteMs?: number; blackMs?: number }
     | { type: 'moveCommitted'; fen: string; from: Square; to: Square }
+    | { type: 'moveRejected' }
     | { type: 'squareSelected'; square: Square; dests: Square[] }
     | { type: 'selectionCleared' }
     | { type: 'promotionPending'; move: MovePair }
@@ -175,6 +176,8 @@ const handlers: Handlers = {
         lastMove: { from: a.from, to: a.to },
         pendingPromotion: null,
     }),
+    // The server refused the optimistic move; game_state_sync (sent right after) restores the position.
+    moveRejected: (s) => ({ ...s, ...noSelection(), lastMove: null, pendingPromotion: null }),
     squareSelected: (s, a) => ({ ...s, selectedSq: a.square, legalDests: a.dests }),
     selectionCleared: (s) => ({ ...s, ...noSelection() }),
     promotionPending: (s, a) => ({ ...s, ...noSelection(), pendingPromotion: a.move }),

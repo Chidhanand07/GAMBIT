@@ -247,6 +247,7 @@ describe('pairing', () => {
         expect(await getGame('match-1')).toEqual({
             id: 'match-1',
             fen: START_FEN,
+            startFen: START_FEN,
             whiteId: 'p1',
             blackId: 'p2',
             whiteClockMs: 600000,

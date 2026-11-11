@@ -250,6 +250,7 @@ describe('POST /api/games/join/:token', () => {
         expect(await getGame('pg-1')).toEqual({
             id: 'pg-1',
             fen: START_FEN,
+            startFen: START_FEN,
             whiteId: 'alice',
             blackId: 'bob',
             whiteClockMs: 300000,

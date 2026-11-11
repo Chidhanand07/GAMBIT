@@ -121,6 +121,7 @@ describe('rematch', () => {
         expect(await getGame('rm-1')).toEqual({
             id: 'rm-1',
             fen: START_FEN,
+            startFen: START_FEN,
             whiteId: 'alice',
             blackId: 'bob',
             whiteClockMs: 300000,
