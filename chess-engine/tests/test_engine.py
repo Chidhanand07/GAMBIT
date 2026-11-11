@@ -89,16 +89,7 @@ def test_classification_thresholds(cp_loss, expected_class):
     assert classification == expected_class, f"cp_loss={cp_loss}: expected {expected_class}, got {classification}"
 
 
-# ── API endpoint tests (requires running FastAPI app) ────────────────────────
-
-@pytest.fixture
-def client():
-    """Synchronous test client — no running server needed."""
-    from fastapi.testclient import TestClient
-    # Patch get_stockfish_instance to return None so tests run without Stockfish
-    with patch('main.get_stockfish_instance', return_value=None):
-        from main import app
-        return TestClient(app)
+# ── API endpoint tests (the `client` fixture lives in conftest.py) ───────────
 
 def test_health_endpoint(client):
     resp = client.get('/health')
