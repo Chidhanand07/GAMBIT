@@ -4,8 +4,6 @@
     "app/analysis/page.tsx": 473,
     "app/game/[id]/result/page.tsx": 287,
     "app/offline/page.tsx": 370,
-    "app/page.tsx": 213,
-    "app/settings/page.tsx": 248,
     "components/Navbar.tsx": 350,
     "components/ui/KnightBackground.tsx": 171,
     "components/ui/KnightIntro.tsx": 527,
