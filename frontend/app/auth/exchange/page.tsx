@@ -16,7 +16,7 @@ function ExchangeHandler() {
         // PKCE flow: code is in the URL query string
         if (code) {
             const supabase = createClient()
-            supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+            void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
                 if (error) {
                     console.error('[auth/exchange] PKCE exchange failed:', error.message)
                     setErrMsg(error.message)
@@ -37,7 +37,7 @@ function ExchangeHandler() {
 
             if (accessToken && refreshToken) {
                 const supabase = createClient()
-                supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+                void supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
                     .then(({ error }) => {
                         if (error) {
                             setErrMsg(error.message)
