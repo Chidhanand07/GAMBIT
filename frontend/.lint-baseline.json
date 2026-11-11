@@ -7,7 +7,6 @@
     "app/game/[id]/result/page.tsx": 287,
     "app/join/[token]/page.tsx": 185,
     "app/leaderboard/page.tsx": 200,
-    "app/lobby/page.tsx": 572,
     "app/login/page.tsx": 139,
     "app/offline/page.tsx": 370,
     "app/page.tsx": 213,
