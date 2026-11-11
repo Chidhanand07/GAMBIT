@@ -54,7 +54,10 @@ export interface GameEndPayload {
     time_control?: TimeControl;
 }
 
-/** Fields come from optional chains in the game page and may be undefined. */
+/**
+ * Fields come from optional chains in the game page and may be undefined.
+ * `from_user_id` is added by the server (the verified sender) before it relays the request.
+ */
 export interface RematchRequestPayload {
     from_user_id?: string;
     to_user_id?: string | null;
@@ -63,20 +66,19 @@ export interface RematchRequestPayload {
     is_rated: boolean;
 }
 
+/** Answers name only the requester; the server uses the terms it stored with the request. */
 export interface RematchAcceptPayload {
     /** The original requester (the opponent). */
     from_user_id?: string | null;
-    to_user_id?: string;
-    time_control: TimeControl;
-    is_rated: boolean;
 }
 
 export interface RematchDeclinePayload {
-    to_user_id?: string | null;
-    by_username?: string;
+    /** The original requester (the opponent), who is told about the decline. */
+    from_user_id?: string | null;
 }
 
 export interface ChallengeRequestPayload {
+    /** Set by the server (the verified sender) on the relayed event; not sent by the client. */
     from_user_id: string;
     to_user_id: string;
     from_username: string;
@@ -85,13 +87,9 @@ export interface ChallengeRequestPayload {
     color: ChallengeColor;
 }
 
+/** Names only the challenger; time control, rated flag and colours come from the stored challenge. */
 export interface ChallengeAcceptPayload {
     from_user_id: string;
-    to_user_id: string;
-    time_control: TimeControl;
-    is_rated: boolean;
-    /** Server reads this as the challenger's colour. */
-    color: ChallengeColor;
 }
 
 export interface ChallengeDeclinePayload {

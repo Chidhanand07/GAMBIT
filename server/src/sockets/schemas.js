@@ -80,15 +80,17 @@ const schemas = {
         from_username: name.optional(),
         ...matchTerms,
     }),
-    rematch_accept: z.object({ from_user_id: id, ...matchTerms }),
-    rematch_decline: z.object({ to_user_id: id, by_username: name.optional() }),
+    // Answers name only the requester. Terms in an accept are not read: the
+    // game is created from the request the server stored (S4).
+    rematch_accept: z.object({ from_user_id: id }),
+    rematch_decline: z.object({ from_user_id: id }),
     challenge_request: z.object({
         to_user_id: id,
         from_username: name.optional(),
         ...matchTerms,
         color: color.optional(),
     }),
-    challenge_accept: z.object({ from_user_id: id, ...matchTerms, color: color.optional() }),
+    challenge_accept: z.object({ from_user_id: id }),
     challenge_decline: z.object({ from_user_id: id, by_username: name.optional() }),
 };
 

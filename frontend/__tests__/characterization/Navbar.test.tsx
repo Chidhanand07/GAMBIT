@@ -200,26 +200,25 @@ describe('avatar dropdown and logout', () => {
 })
 
 describe('challenge banner', () => {
-    test('challenge_request shows the toast; Accept emits challenge_accept with the INVERTED colour', () => {
+    test('challenge_request shows the toast; Accept emits challenge_accept naming only the challenger [S4]', () => {
         render(<Navbar />)
         socket.serverSends('challenge_request', CHALLENGE)
         expect(screen.getByText('opp1')).toBeInTheDocument()
         expect(screen.getByText('challenges you')).toBeInTheDocument()
         expect(screen.getByText('5+0 min · Rated')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Accept' }))
-        // LEGACY: server reads `color` as the challenger's colour, but the client inverts it.
-        expect(socket.emitted('challenge_accept')).toEqual([{
-            from_user_id: 'u-opp', to_user_id: 'me', time_control: '5+0', is_rated: true, color: 'black',
-        }])
+        // Was: sent the terms plus an INVERTED colour. The server now uses the stored challenge,
+        // so the accept carries no terms, colour or own id.
+        expect(socket.emitted('challenge_accept')).toEqual([{ from_user_id: 'u-opp' }])
         expect(screen.queryByText('challenges you')).toBeNull()
     })
 
-    test('colour black/random both become white on accept; casual label', () => {
+    test('casual label; the accept never carries a colour, whatever the challenge said [S4]', () => {
         render(<Navbar />)
         socket.serverSends('challenge_request', { ...CHALLENGE, color: 'random', is_rated: false })
         expect(screen.getByText('5+0 min · Casual')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Accept' }))
-        expect(socket.emitted('challenge_accept')[0].color).toBe('white')
+        expect(socket.emitted('challenge_accept')).toEqual([{ from_user_id: 'u-opp' }])
     })
 
     test('Decline and the X button emit challenge_decline {from_user_id, by_username}', () => {

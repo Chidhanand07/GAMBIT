@@ -55,14 +55,9 @@ export function useChallengeBanner(profile: NavProfile | null) {
 
     const accept = () => {
         if (!socket || !challengeBanner || !profile) return;
-        socket.emit('challenge_accept', {
-            from_user_id: challengeBanner.from_user_id,
-            to_user_id: profile.id,
-            time_control: challengeBanner.time_control,
-            is_rated: challengeBanner.is_rated,
-            // LEGACY (preserved): the server reads `color` as the challenger's colour, but this inverts it.
-            color: challengeBanner.color === 'white' ? 'black' : 'white',
-        });
+        // Only the challenger is named: the server starts the game from the challenge it stored
+        // (time control, rated flag and the challenger's colour), not from anything sent here.
+        socket.emit('challenge_accept', { from_user_id: challengeBanner.from_user_id });
         setChallengeBanner(null);
     };
 

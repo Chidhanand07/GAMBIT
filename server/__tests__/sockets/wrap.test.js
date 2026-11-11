@@ -54,6 +54,13 @@ describe('wrap', () => {
         expect(console.error).toHaveBeenCalledWith('[socket] make_move failed:', 'boom');
     });
 
+    test('a thrown Supabase-style { message } object is logged by its message', async () => {
+        await wrap('make_move', schema, async () => Promise.reject({ message: 'insert failed', code: '23505' }))({
+            game_id: 'g1',
+        });
+        expect(console.error).toHaveBeenCalledWith('[socket] make_move failed:', 'insert failed');
+    });
+
     test('a throwing ack callback cannot escape either', async () => {
         const ack = jest.fn(() => {
             throw new Error('client gone');

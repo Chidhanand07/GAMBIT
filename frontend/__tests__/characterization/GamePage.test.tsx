@@ -683,8 +683,9 @@ describe('game-over modal and rematch', () => {
     test('Rematch emits rematch_request with this exact payload, then shows Waiting…', async () => {
         await endedGame()
         click(screen.getByRole('button', { name: /Rematch/ }))
+        // S2: no from_user_id — the server takes the sender from the socket handshake.
         expect(socket.emitted('rematch_request')).toEqual([{
-            from_user_id: 'me', to_user_id: 'opp', from_username: 'Me Display', time_control: '5', is_rated: true,
+            to_user_id: 'opp', from_username: 'Me Display', time_control: '5', is_rated: true,
         }])
         const waiting = screen.getByRole('button', { name: /Waiting…/ })
         expect(waiting).toBeDisabled()
@@ -740,26 +741,25 @@ describe('game-over modal and rematch', () => {
         expect(screen.getByText('5 min · Rated')).toBeInTheDocument()
     })
 
-    test('accepting emits rematch_accept with this exact payload and hides the toast', async () => {
+    test('accepting emits rematch_accept naming only the requester and hides the toast [S4]', async () => {
         await renderGame()
         socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
         const toast = screen.getByText('Bob wants a rematch').parentElement!
         const [, accept] = within(toast).getAllByRole('button')
         click(accept)
-        expect(socket.emitted('rematch_accept')).toEqual([{
-            from_user_id: 'opp', to_user_id: 'me', time_control: '5', is_rated: true,
-        }])
+        // S4: no terms and no own id — the server uses the request it stored.
+        expect(socket.emitted('rematch_accept')).toEqual([{ from_user_id: 'opp' }])
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
 
-    test('declining emits rematch_decline addressed to MY OWN id (legacy bug) with my display name', async () => {
+    test('declining emits rematch_decline naming the REQUESTER, so the opponent is told [S4]', async () => {
         await renderGame()
         socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
         const toast = screen.getByText('Bob wants a rematch').parentElement!
         const [decline] = within(toast).getAllByRole('button')
         click(decline)
-        // LEGACY: white sends to white_id (itself) instead of the opponent
-        expect(socket.emitted('rematch_decline')).toEqual([{ to_user_id: 'me', by_username: 'Me Display' }])
+        // Was: addressed to my own id (legacy bug F1), so the opponent never heard about it.
+        expect(socket.emitted('rematch_decline')).toEqual([{ from_user_id: 'opp' }])
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
 

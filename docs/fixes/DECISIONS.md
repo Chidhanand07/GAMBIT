@@ -20,6 +20,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-003](#f-003) | Socket payload schemas: strip mode, slug-safe ids, brief's ack shape | 1 | S15 |
 | [F-004](#f-004) | Socket identity: handshake token verified by Supabase Auth; no socket for signed-out users | 1 | S2, G13 |
 | [F-005](#f-005) | `join_game`: non-participants are spectators and are never linked to the game | 1 | S9 |
+| [F-006](#f-006) | Rematch/challenge: requests stored in Redis for 60 s; answers consume them and use stored terms | 1 | S4 (+F1, G16) |
 
 ---
 
@@ -152,3 +153,44 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Not changed.** Games are still publicly watchable by anyone signed in who knows the id.
   Private-game creators waiting on their invite page still join the room before the game exists
   in Redis; they are linked when the game starts and their page joins again.
+
+## F-006
+
+**Rematch and challenge requests are stored server-side; answers consume them (S4).**
+
+- **Context.** `rematch_accept` / `challenge_accept` created a game between the two ids in the
+  payload with the payload's time control, rated flag and colour. No request had to exist, so
+  any socket could start a rated game between two other people, or force a game on someone.
+  `rematch_decline` was relayed to whatever id the payload named.
+- **Options.**
+  1. Store: (a) in-process `Map`; (b) Redis key with TTL.
+  2. Atomic read-and-delete: (a) `GETDEL`; (b) Lua script; (c) `MULTI` / `GET` / `DEL` / `EXEC`.
+  3. Terms source: (a) the accept payload, checked against the stored request; (b) the stored
+     request only.
+- **Decision.** 1b, 2c, 3b.
+  - `server/src/repositories/pendingRequestsRepository.js`: key
+    `pending:<kind>:<requester>:<target>`, value = the proposed terms, TTL 60 s. `take()` reads
+    and deletes in one transaction. Redis errors are **not** swallowed here (fail closed).
+  - `socialService`: `request` stores then relays; `accept` and `decline` first `take` the
+    request from `<payload.from_user_id>` to the verified answerer. No pending request →
+    `{ ok:false, error:'no_pending_request' }` and nothing is emitted or created.
+  - Rematch vs challenge differences (events, stored terms, seating) are a strategy table, so a
+    third request type is a new entry, not another `if` (SOLID-03).
+  - Accept/decline schemas accept only `from_user_id`; terms and colours sent with an answer are
+    stripped before the service runs.
+- **Why.**
+  - *Redis + TTL*: survives a redeploy inside the 60 s window and is shared across instances
+    (NODE-17); the TTL gives expiry for free. 60 s comfortably covers the UI's 30 s toast.
+  - *MULTI/EXEC*: atomic on every Redis version and on Upstash. `GETDEL` needs Redis ≥ 6.2 and
+    the deployed version is not known; Lua would work but is harder to fake faithfully in tests.
+  - *Stored terms only*: one source of truth; there is nothing left for an accepter to tamper with.
+- **Side effects (medium/low items fixed because the fix made them unavoidable).**
+  - **F1** — `rematch_decline` now reaches the opponent: the client names the requester and the
+    server notifies that requester. Previously the client addressed it to its own id.
+  - **G16** — challenge colours are now right: the stored `color` is the challenger's choice.
+    The Navbar no longer sends an (inverted) colour, and a missing colour means random instead
+    of "challenger is black".
+- **Known limits.** `from_username` / `by_username` are still display strings supplied by the
+  client (length-capped by the schema); the ids next to them are verified. A rematch request's
+  terms come from the requester's payload rather than from the finished game, exactly like a
+  fresh challenge; the target still has to accept.

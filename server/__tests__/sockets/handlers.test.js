@@ -127,14 +127,15 @@ test('validated payloads go to the services; the actor is always the verified us
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
 });
 
-test('social events: requests are sent *from*, and accepts made *by*, the verified user [S2]', async () => {
+test('social events: requests are sent *from*, and answers given *by*, the verified user [S2][S4]', async () => {
     const d = deps();
     const { handlers } = connect(d, 'u1');
     await handlers.rematch_request({ from_user_id: 'victim', to_user_id: 'u2', time_control: '5' });
     await handlers.challenge_request({ from_user_id: 'victim', to_user_id: 'u2', color: 'white' });
     await handlers.rematch_accept({ from_user_id: 'u2', to_user_id: 'victim' });
     await handlers.challenge_accept({ from_user_id: 'u2', to_user_id: 'victim' });
-    await handlers.rematch_decline({ to_user_id: 'u2' });
+    await handlers.rematch_decline({ from_user_id: 'u2', to_user_id: 'victim' });
+    await handlers.challenge_decline({ from_user_id: 'u2', by_username: 'me' });
     expect(d.socialService.requestRematch).toHaveBeenCalledWith({
         from_user_id: 'u1',
         to_user_id: 'u2',
@@ -147,7 +148,8 @@ test('social events: requests are sent *from*, and accepts made *by*, the verifi
     });
     expect(d.socialService.acceptRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
     expect(d.socialService.acceptChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
-    expect(d.socialService.declineRematch).toHaveBeenCalledWith({ to_user_id: 'u2' });
+    expect(d.socialService.declineRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
+    expect(d.socialService.declineChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', by_username: 'me', to_user_id: 'u1' });
 });
 
 test('an invalid payload never reaches a service and is acked as invalid_payload [S15]', async () => {

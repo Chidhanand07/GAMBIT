@@ -33,11 +33,13 @@ function acknowledge(ack, result) {
 }
 
 /**
+ * Log a handler failure. Supabase errors are plain `{ message }` objects, not Error instances.
  * @param {string} event
  * @param {unknown} error
  */
 function logFailure(event, error) {
-    console.error(`[socket] ${event} failed:`, error instanceof Error ? error.message : error);
+    const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
+    console.error(`[socket] ${event} failed:`, message ?? error);
 }
 
 /** @param {unknown} result */

@@ -92,6 +92,12 @@ describe('the acting user is never read from a payload [S2]', () => {
         ['challenge_request', { from_user_id: 'victim', to_user_id: 'u2' }, 'from_user_id'],
         ['rematch_accept', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
         ['challenge_accept', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
+        ['rematch_decline', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
+        ['challenge_decline', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
+        // Terms in an accept are never read: the stored request decides them [S4].
+        ['rematch_accept', { from_user_id: 'u2', time_control: '1' }, 'time_control'],
+        ['challenge_accept', { from_user_id: 'u2', is_rated: true }, 'is_rated'],
+        ['challenge_accept', { from_user_id: 'u2', color: 'white' }, 'color'],
     ])('%s strips %j → no `%s`', (event, payload, key) => {
         expect(schemas[event].parse(payload)).not.toHaveProperty(key);
     });

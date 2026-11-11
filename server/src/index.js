@@ -21,6 +21,7 @@ const privateGames = require('../services/friends');
 const ratingService = require('../services/rating');
 const { supabase } = require('../supabase');
 const gameStore = require('../lib/gameStore');
+const redis = require('../lib/redis');
 const { startGlobalClock } = require('../services/clock');
 const env = require('./config/env');
 const { buildPgnFromMoveLog } = require('./domain/pgn');
@@ -30,6 +31,7 @@ const { createMovesRepository } = require('./repositories/movesRepository');
 const { createMessagesRepository } = require('./repositories/messagesRepository');
 const { createProfilesRepository } = require('./repositories/profilesRepository');
 const { createNotificationsRepository } = require('./repositories/notificationsRepository');
+const { createPendingRequestsRepository } = require('./repositories/pendingRequestsRepository');
 const { createIoEmitter } = require('./services/emitter');
 const { createReviewService } = require('./services/reviewService');
 const { createGameService } = require('./services/gameService');
@@ -60,6 +62,7 @@ const emitter = createIoEmitter(io);
 const socialService = createSocialService({
     privateGames,
     notificationsRepo: createNotificationsRepository(supabase),
+    pendingRequests: createPendingRequestsRepository(redis),
     emitter,
 });
 const gameService = createGameService({

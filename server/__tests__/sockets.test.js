@@ -444,11 +444,25 @@ describe('challenges and rematches', () => {
         expect(supabase.op(supabase.callsFor('notifications')[0], 'insert')[0]).toMatchObject({ user_id: 'bob', type: 'challenge' });
     });
 
-    test('rematch_decline notifies the requester', async () => {
+    test('rematch_decline notifies the requester of a pending rematch [S4]', async () => {
         const alice = await connect('alice');
         const bob = await connect('bob');
+        const asked = once(bob, 'rematch_request');
+        alice.emit('rematch_request', { to_user_id: 'bob', time_control: '5', is_rated: true });
+        await asked;
         const p = once(alice, 'rematch_declined');
-        bob.emit('rematch_decline', { to_user_id: 'alice' });
+        bob.emit('rematch_decline', { from_user_id: 'alice' });
         await p;
+    });
+
+    test('a rematch nobody asked for cannot be accepted [S4]', async () => {
+        const alice = await connect('alice');
+        const bob = await connect('bob');
+        const ready = record(alice, 'rematch_ready');
+        const ack = await new Promise((resolve) => bob.emit('rematch_accept', { from_user_id: 'alice', is_rated: true }, resolve));
+        expect(ack).toEqual({ ok: false, error: 'no_pending_request' });
+        await sleep(50);
+        expect(ready).toHaveLength(0);
+        expect(supabase.callsFor('games')).toHaveLength(0);
     });
 });

@@ -48,13 +48,13 @@ describe('handshake identity [S2]', () => {
         const victim = await ctx.connect('victim');
         const mallory = await ctx.connect('mallory');
         const echoed = record(mallory, 'authenticated');
-        const leaked = record(mallory, 'rematch_declined');
+        const leaked = record(mallory, 'challenge_request');
         mallory.emit('authenticate', 'victim');
         await sleep(50);
         // Still not in user_victim: an event addressed to the victim does not reach mallory.
-        const p = once(victim, 'rematch_declined');
+        const p = once(victim, 'challenge_request');
         const other = await ctx.connect('other');
-        other.emit('rematch_decline', { to_user_id: 'victim' });
+        other.emit('challenge_request', { to_user_id: 'victim' });
         await p;
         await sleep(30);
         expect(echoed).toEqual([]);
@@ -64,9 +64,9 @@ describe('handshake identity [S2]', () => {
     test('a connection joins its own user_<id> room automatically', async () => {
         const target = await ctx.connect('room-user');
         const other = await ctx.connect();
-        const p = once(target, 'rematch_declined');
-        other.emit('rematch_decline', { to_user_id: 'room-user' });
-        expect(await p).toBeUndefined();
+        const p = once(target, 'challenge_request');
+        other.emit('challenge_request', { to_user_id: 'room-user' });
+        expect(await p).toMatchObject({ to_user_id: 'room-user' });
     });
 
     test('a user with no active game receives nothing on connect', async () => {

@@ -83,7 +83,8 @@ describe('challenge/[username]', () => {
         fireEvent.click(screen.getByRole('button', { name: '♚ Black' }))
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
         expect(socket.emitted('challenge_request')).toEqual([
-            { from_user_id: 'me', to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
+            // S2: no from_user_id — the server takes the sender from the socket handshake.
+            { to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
         ])
         expect(screen.getByText('Challenge sent! Waiting for bob to accept…')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Challenge Sent…/ })).toBeDisabled()
