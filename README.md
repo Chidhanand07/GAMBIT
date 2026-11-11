@@ -8,6 +8,8 @@ A production-ready, full-stack chess platform with an accuracy-based rating syst
 - **Chess Engine Microservice**: Python FastAPI, `python-chess`, Stockfish (deployed to Render)
 - **Database / Auth**: Supabase (PostgreSQL, Realtime subscriptions, Auth)
 
+Code layout, layer dependency rules and how to add a feature: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Engineering rules (mandatory): [`docs/ENGINEERING_RULES.md`](docs/ENGINEERING_RULES.md).
+
 ## Local Development Requirements
 - Node.js >= 18
 - Python >= 3.10
