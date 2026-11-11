@@ -23,18 +23,6 @@ function createProfilesRepository(supabase) {
             supabase.from('profiles').select('username').eq('username', username).single(),
 
         /**
-         * `{ id }` of the profile with this username (`.single()`).
-         * @param {string} username
-         */
-        findIdByUsername: (username) => supabase.from('profiles').select('id').eq('username', username).single(),
-
-        /**
-         * `{ username }` of the profile with this id, or null.
-         * @param {string} id
-         */
-        findUsernameById: (id) => supabase.from('profiles').select('username').eq('id', id).maybeSingle(),
-
-        /**
          * Ratings and games played for the matchmaking queue, or null.
          * @param {string} id
          */
@@ -45,12 +33,6 @@ function createProfilesRepository(supabase) {
          * @param {string[]} ids
          */
         findRatingsByIds: (ids) => supabase.from('profiles').select(RATING_COLUMNS).in('id', ids),
-
-        /**
-         * Insert profile rows as given.
-         * @param {object[]} rows
-         */
-        insert: (rows) => supabase.from('profiles').insert(rows),
 
         /**
          * Update one profile by id.

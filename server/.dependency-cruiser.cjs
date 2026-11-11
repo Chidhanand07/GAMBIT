@@ -8,10 +8,11 @@
  *   clients/       SDK/HTTP adapters (Supabase, Redis, engine)
  *   http/, sockets/ entry adapters: services only
  *
- * Paths outside src/ are the pre-refactor legacy code. Their rules start as
- * "warn" (LEGACY_SEVERITY) and are switched to "error" when src/ owns them.
+ * Paths outside src/ are the legacy entry point and facades (server.js,
+ * services/, lib/, supabase.js). src/ owns all logic now, so their rules are
+ * enforced as "error" too (LEGACY_SEVERITY, ADR 0105).
  */
-const LEGACY_SEVERITY = 'warn';
+const LEGACY_SEVERITY = 'error';
 const INFRA_SDKS = 'node_modules/(@supabase/supabase-js|ioredis)/';
 
 module.exports = {

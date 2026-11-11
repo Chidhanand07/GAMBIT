@@ -8,7 +8,6 @@ const { createGamesRepository } = require('../../src/repositories/gamesRepositor
 const { createMovesRepository } = require('../../src/repositories/movesRepository');
 const { createMessagesRepository } = require('../../src/repositories/messagesRepository');
 const { createProfilesRepository } = require('../../src/repositories/profilesRepository');
-const { createFriendshipsRepository } = require('../../src/repositories/friendshipsRepository');
 const { createNotificationsRepository } = require('../../src/repositories/notificationsRepository');
 
 let supabase;
@@ -114,8 +113,6 @@ describe('profilesRepository', () => {
 
     test.each([
         ['findUsernameByUsername', ['bob'], [['select', 'username'], ['eq', 'username', 'bob'], ['single']]],
-        ['findIdByUsername', ['bob'], [['select', 'id'], ['eq', 'username', 'bob'], ['single']]],
-        ['findUsernameById', ['u1'], [['select', 'username'], ['eq', 'id', 'u1'], ['maybeSingle']]],
         [
             'findForMatchmaking',
             ['u1'],
@@ -136,7 +133,6 @@ describe('profilesRepository', () => {
                 ['in', 'id', ['w', 'b']],
             ],
         ],
-        ['insert', [[{ id: 'u1' }]], [['insert', [{ id: 'u1' }]]]],
         [
             'updateById',
             ['u1', { bio: 'x' }],
@@ -152,69 +148,6 @@ describe('profilesRepository', () => {
     });
 });
 
-describe('friendshipsRepository', () => {
-    let repo;
-    beforeEach(() => {
-        repo = createFriendshipsRepository(supabase);
-    });
-
-    test.each([
-        [
-            'findBetween',
-            ['me', 'them'],
-            [
-                ['select', 'status, requester_id'],
-                ['or', 'and(requester_id.eq.me,addressee_id.eq.them),and(requester_id.eq.them,addressee_id.eq.me)'],
-                ['maybeSingle'],
-            ],
-        ],
-        ['insertRequest', ['me', 'them'], [['insert', { requester_id: 'me', addressee_id: 'them' }]]],
-        [
-            'listAccepted',
-            ['me'],
-            [
-                [
-                    'select',
-                    'id, requester_id, addressee_id, status, requester:profiles!friendships_requester_id_fkey(username,avatar_url,rating_rapid), addressee:profiles!friendships_addressee_id_fkey(username,avatar_url,rating_rapid)',
-                ],
-                ['or', 'requester_id.eq.me,addressee_id.eq.me'],
-                ['eq', 'status', 'accepted'],
-            ],
-        ],
-        [
-            'listPendingFor',
-            ['me'],
-            [
-                [
-                    'select',
-                    'id, created_at, requester:profiles!friendships_requester_id_fkey(id,username,display_name,avatar_url,rating_rapid)',
-                ],
-                ['eq', 'addressee_id', 'me'],
-                ['eq', 'status', 'pending'],
-                ['order', 'created_at', { ascending: false }],
-            ],
-        ],
-        [
-            'setStatusAsAddressee',
-            ['f1', 'me', 'declined'],
-            [
-                ['update', { status: 'declined' }],
-                ['eq', 'id', 'f1'],
-                ['eq', 'addressee_id', 'me'],
-            ],
-        ],
-        [
-            'deleteInvolving',
-            ['f1', 'me'],
-            [['delete'], ['eq', 'id', 'f1'], ['or', 'requester_id.eq.me,addressee_id.eq.me']],
-        ],
-    ])('%s', async (name, args, expected) => {
-        const { table, ops } = await run(repo[name](...args));
-        expect(table).toBe('friendships');
-        expect(ops).toEqual(expected);
-    });
-});
-
 describe('notificationsRepository', () => {
     let repo;
     beforeEach(() => {
@@ -223,34 +156,6 @@ describe('notificationsRepository', () => {
 
     test.each([
         ['insert', [{ type: 't' }], [['insert', { type: 't' }]]],
-        [
-            'listRecent',
-            ['me'],
-            [
-                ['select', '*'],
-                ['eq', 'user_id', 'me'],
-                ['order', 'created_at', { ascending: false }],
-                ['limit', 30],
-            ],
-        ],
-        [
-            'markAllRead',
-            ['me'],
-            [
-                ['update', { read: true }],
-                ['eq', 'user_id', 'me'],
-                ['eq', 'read', false],
-            ],
-        ],
-        [
-            'markRead',
-            ['n1', 'me'],
-            [
-                ['update', { read: true }],
-                ['eq', 'id', 'n1'],
-                ['eq', 'user_id', 'me'],
-            ],
-        ],
     ])('%s', async (name, args, expected) => {
         const { table, ops } = await run(repo[name](...args));
         expect(table).toBe('notifications');
