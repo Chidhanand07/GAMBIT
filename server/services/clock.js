@@ -1,5 +1,6 @@
 const { getGame, setGame, getActiveGameIds, removeActiveGame } = require('../lib/gameStore')
 const { supabase } = require('../supabase')
+const gamesRepo = require('../src/repositories/gamesRepository').createGamesRepository(supabase)
 const { parseIncrementMs } = require('../src/domain/timeControl')
 const { tickerSnapshot, isGraceExpired } = require('../src/domain/clock')
 const { resultLabel, opponentColor, sideToColor, colorOfPlayer, playerIdOf } = require('../src/domain/result')
@@ -13,9 +14,8 @@ function parseIncrement(timeControl) {
 async function finalizeExpiredGame(io, gameId, game, winnerId, reason) {
     const outcome = colorOfPlayer(winnerId, game.whiteId)
 
-    const { data: updated } = await supabase.from('games')
-        .update({ status: 'completed', winner_id: winnerId, ended_at: new Date().toISOString(), final_fen: game.fen ?? null })
-        .eq('id', gameId).eq('status', 'active').select('id').maybeSingle()
+    const { data: updated } = await gamesRepo.finishIfActive(gameId,
+        { status: 'completed', winner_id: winnerId, ended_at: new Date().toISOString(), final_fen: game.fen ?? null })
 
     if (!updated) return // already finalized
 
