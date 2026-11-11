@@ -3,6 +3,9 @@
  * Rematch and challenge events (payload user ids are client-asserted; known bug, preserved).
  */
 
+const { schemas } = require('../schemas');
+const { wrap } = require('../wrap');
+
 /**
  * @typedef {object} SocialHandlerService
  * @property {(data: any) => Promise<void>} requestRematch
@@ -18,12 +21,18 @@
  * @param {{ socialService: SocialHandlerService }} deps
  */
 function registerSocialHandlers(socket, { socialService }) {
-    socket.on('rematch_request', (data) => socialService.requestRematch(data));
-    socket.on('rematch_accept', (data) => socialService.acceptRematch(data));
-    socket.on('rematch_decline', (data) => socialService.declineRematch(data));
-    socket.on('challenge_request', (data) => socialService.requestChallenge(data));
-    socket.on('challenge_accept', (data) => socialService.acceptChallenge(data));
-    socket.on('challenge_decline', (data) => socialService.declineChallenge(data));
+    /** @type {Record<string, (payload: any) => unknown>} */
+    const handlers = {
+        rematch_request: (data) => socialService.requestRematch(data),
+        rematch_accept: (data) => socialService.acceptRematch(data),
+        rematch_decline: (data) => socialService.declineRematch(data),
+        challenge_request: (data) => socialService.requestChallenge(data),
+        challenge_accept: (data) => socialService.acceptChallenge(data),
+        challenge_decline: (data) => socialService.declineChallenge(data),
+    };
+    for (const [event, handler] of Object.entries(handlers)) {
+        socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler));
+    }
 }
 
 module.exports = { registerSocialHandlers };

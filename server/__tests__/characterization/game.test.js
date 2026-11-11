@@ -243,14 +243,13 @@ describe('make_move', () => {
         const { game, white, black } = await ctx.seatedGame();
         const seenByBlack = once(black, 'move_made');
         const seenByWhite = once(white, 'move_made');
-        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4', fen: CLIENT_FEN, extra: 'kept' });
+        white.emit('make_move', { game_id: game.id, move: 'e2e4', san: 'e4', fen: CLIENT_FEN, extra: 'dropped by the schema' });
 
         const expected = {
             game_id: game.id,
             move: 'e2e4',
             san: 'e4',
             fen: AFTER_E4,
-            extra: 'kept',
             whiteMs: 600000,
             blackMs: 600000,
         };

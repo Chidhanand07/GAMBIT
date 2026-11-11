@@ -40,6 +40,7 @@ const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
+const { registerProcessHandlers } = require('./processHandlers');
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl });
 const gamesRepo = createGamesRepository(supabase);
@@ -90,6 +91,7 @@ registerSocketHandlers(io, { sessions, matchmaking: matchmaking.service, gameSer
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
+    registerProcessHandlers();
     const PORT = env.port();
     server.listen(PORT, () => {
         console.log(`Node server running on port ${PORT}`);

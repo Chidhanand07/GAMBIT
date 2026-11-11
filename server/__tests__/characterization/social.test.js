@@ -74,14 +74,14 @@ function expectPrivateGameOps({ gameId, host, hostColor, joiner, timeControl, is
 }
 
 describe('rematch', () => {
-    test('rematch_request is forwarded verbatim to user_<to_user_id> only', async () => {
+    test('rematch_request is forwarded to user_<to_user_id> only, without unknown keys', async () => {
         const alice = await ctx.connect('alice');
         const bob = await ctx.connect('bob');
         const aliceGot = record(alice, 'rematch_request');
         const data = { from_user_id: 'alice', to_user_id: 'bob', time_control: '5', is_rated: true, from_username: 'Alice', x: 1 };
         const p = once(bob, 'rematch_request');
         alice.emit('rematch_request', data);
-        expect(await p).toEqual(data);
+        expect(await p).toEqual({ ...data, x: undefined });
         await sleep(30);
         expect(aliceGot).toEqual([]);
         expect(supabase.calls).toEqual([]);
@@ -162,11 +162,11 @@ describe('challenges', () => {
             time_control: '3+2',
             is_rated: true,
             color: 'black',
-            extra: 'forwarded only',
+            extra: 'dropped by the schema',
         };
         const p = once(bob, 'challenge_request');
         alice.emit('challenge_request', data);
-        expect(await p).toEqual(data);
+        expect(await p).toEqual({ ...data, extra: undefined });
         await sleep(30);
         expect(opsFor('notifications')).toEqual([
             [

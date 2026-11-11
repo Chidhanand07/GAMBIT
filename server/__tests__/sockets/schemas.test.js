@@ -1,0 +1,96 @@
+/**
+ * src/sockets/schemas.js — one zod schema per client → server event [S15] (NODE-08).
+ */
+const { schemas } = require('../../src/sockets/schemas');
+
+const ok = (event, payload) => schemas[event].safeParse(payload).success;
+
+test('there is a schema for every client → server event', () => {
+    expect(Object.keys(schemas).sort()).toEqual(
+        [
+            'authenticate',
+            'join_queue',
+            'leave_queue',
+            'join_game',
+            'spectate_game',
+            'make_move',
+            'game_end',
+            'send_message',
+            'rematch_request',
+            'rematch_accept',
+            'rematch_decline',
+            'challenge_request',
+            'challenge_accept',
+            'challenge_decline',
+        ].sort(),
+    );
+});
+
+test.each(Object.keys(schemas).filter((e) => e !== 'leave_queue'))('%s rejects null, undefined and arrays', (event) => {
+    expect(ok(event, null)).toBe(false);
+    expect(ok(event, undefined)).toBe(false);
+    expect(ok(event, [])).toBe(false);
+});
+
+describe('ids', () => {
+    test('accept UUIDs and short slugs', () => {
+        expect(ok('join_game', '2f1c0b9e-8a53-4f0e-9c5b-0d3c1c1f7a10')).toBe(true);
+        expect(ok('join_game', 'game-1')).toBe(true);
+    });
+
+    test.each([[''], ['a'.repeat(65)], ['a,b'], ['x.or(1)'], [42], [{ id: 'g' }]])('reject %p', (value) => {
+        expect(ok('join_game', value)).toBe(false);
+    });
+});
+
+describe('make_move', () => {
+    const move = { game_id: 'g1', from: 'e2', to: 'e4' };
+
+    test('accepts a plain move and a promotion', () => {
+        expect(ok('make_move', move)).toBe(true);
+        expect(ok('make_move', { ...move, from: 'e7', to: 'e8', promotion: 'q' })).toBe(true);
+    });
+
+    test.each([
+        ['missing game_id', { from: 'e2', to: 'e4' }],
+        ['square off the board', { ...move, to: 'e9' }],
+        ['square not a string', { ...move, from: 12 }],
+        ['unknown promotion piece', { ...move, promotion: 'k' }],
+        ['oversized fen', { ...move, fen: 'x'.repeat(200) }],
+    ])('rejects: %s', (_name, payload) => {
+        expect(ok('make_move', payload)).toBe(false);
+    });
+});
+
+describe('game_end', () => {
+    test('a non-string result is rejected (it used to throw inside the handler)', () => {
+        expect(ok('game_end', { game_id: 'g1', result: 123 })).toBe(false);
+        expect(ok('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate' })).toBe(true);
+    });
+});
+
+describe('send_message', () => {
+    test('bounds the text', () => {
+        expect(ok('send_message', { game_id: 'g1', text: 'hi' })).toBe(true);
+        expect(ok('send_message', { game_id: 'g1', text: 'x'.repeat(501) })).toBe(false);
+    });
+});
+
+describe('join_queue', () => {
+    test('accepts the lobby payloads and bounds the time control', () => {
+        expect(ok('join_queue', { user: { id: 'u1' }, time_control: '5+3', increment: 3, is_rated: true })).toBe(true);
+        expect(ok('join_queue', { user: { id: 'u1' }, time_control: 10, increment: 0 })).toBe(true);
+        expect(ok('join_queue', { user: { id: 'u1' }, time_control: 'x'.repeat(17) })).toBe(false);
+        expect(ok('join_queue', { user: { id: 'u1' }, time_control: '10', is_rated: 'yes' })).toBe(false);
+    });
+});
+
+describe('challenge / rematch', () => {
+    test('colour is one of white, black, random', () => {
+        const base = { from_user_id: 'u1', to_user_id: 'u2', time_control: '10', is_rated: true };
+        expect(ok('challenge_request', { ...base, color: 'random' })).toBe(true);
+        expect(ok('challenge_request', { ...base, color: 'purple' })).toBe(false);
+        expect(ok('rematch_request', base)).toBe(true);
+        expect(ok('rematch_request', { ...base, to_user_id: null })).toBe(false);
+    });
+});

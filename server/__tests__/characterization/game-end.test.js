@@ -68,7 +68,6 @@ describe('game_end', () => {
             game_id: game.id,
             result: 'White wins',
             reason: 'Resignation',
-            extra: 1,
             white_id: 'white-user',
             black_id: 'black-user',
         });
@@ -142,11 +141,11 @@ describe('game_end', () => {
 
     test('time_control / is_rated fall back to the CLIENT payload when Redis lacks them', async () => {
         const { game } = await endGame(
-            { result: 'Draw', time_control: '3+2', is_rated: 'yes' },
+            { result: 'Draw', time_control: '3+2', is_rated: true },
             { timeControl: undefined, isRated: undefined },
         );
         await waitFor(() => rating.processGameEnd.mock.calls.length === 1, 500, 'rating');
-        expect(rating.processGameEnd.mock.calls[0]).toEqual([game.id, 'white-user', 'black-user', 'draw', '3+2', 'yes']);
+        expect(rating.processGameEnd.mock.calls[0]).toEqual([game.id, 'white-user', 'black-user', 'draw', '3+2', true]);
         expect(JSON.parse(reviewCalls()[0][1].body).time_control).toBe('3+2');
     });
 

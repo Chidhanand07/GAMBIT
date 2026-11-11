@@ -84,22 +84,49 @@ test('authenticate registers the session, joins user_<id>, acks, then reconnects
     expect(socket.emit).toHaveBeenLastCalledWith('rematch_declined');
 });
 
-test('payloads go to the services unchanged, with the socket id where identity matters', () => {
+test('validated payloads go to the services, with the socket id where identity matters', async () => {
     const d = deps();
     const { handlers } = connect(d);
     const data = { game_id: 'g' };
-    handlers.join_queue(data);
-    handlers.make_move(data);
-    handlers.send_message(data);
-    handlers.game_end(data);
-    handlers.rematch_decline(data);
-    handlers.leave_queue('u9');
-    expect(d.matchmaking.requestMatch).toHaveBeenCalledWith(data, 'sock-1');
+    const queue = { user: { id: 'u9' }, time_control: '10' };
+    const decline = { to_user_id: 'u2' };
+    await handlers.join_queue(queue);
+    await handlers.make_move(data);
+    await handlers.send_message(data);
+    await handlers.game_end(data);
+    await handlers.rematch_decline(decline);
+    await handlers.leave_queue('u9');
+    expect(d.matchmaking.requestMatch).toHaveBeenCalledWith(queue, 'sock-1');
     expect(d.gameService.makeMove).toHaveBeenCalledWith(data, 'sock-1');
     expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
     expect(d.gameService.endGame).toHaveBeenCalledWith(data);
-    expect(d.socialService.declineRematch).toHaveBeenCalledWith(data);
+    expect(d.socialService.declineRematch).toHaveBeenCalledWith(decline);
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u9');
+});
+
+test('an invalid payload never reaches a service and is acked as invalid_payload [S15]', async () => {
+    const d = deps();
+    const { handlers } = connect(d);
+    const ack = jest.fn();
+    await handlers.make_move(null, ack);
+    await handlers.game_end({ game_id: 'g', result: 123 }, ack);
+    await handlers.send_message('not an object', ack);
+    expect(d.gameService.makeMove).not.toHaveBeenCalled();
+    expect(d.gameService.endGame).not.toHaveBeenCalled();
+    expect(d.chatService.sendMessage).not.toHaveBeenCalled();
+    expect(ack.mock.calls).toEqual(Array(3).fill([{ ok: false, error: 'invalid_payload' }]));
+});
+
+test('a failing service is logged and acked, not thrown [S15]', async () => {
+    const d = deps();
+    d.gameService.makeMove.mockRejectedValue(new Error('redis down'));
+    d.gameService.handleDisconnect.mockRejectedValue(new Error('redis down'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const { handlers } = connect(d);
+    const ack = jest.fn();
+    await expect(handlers.make_move({ game_id: 'g' }, ack)).resolves.toBeUndefined();
+    await expect(handlers.disconnect()).resolves.toBeUndefined();
+    expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
 });
 
 test('disconnect leaves the queue, forgets the session, then handles the game', async () => {

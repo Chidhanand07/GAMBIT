@@ -4,6 +4,9 @@
  * (known bug, preserved; NODE-10).
  */
 
+const { schemas } = require('../schemas');
+const { wrap, guard } = require('../wrap');
+
 /**
  * @typedef {import('../../services/emitter').ClientPort} ClientPort
  * @typedef {object} SessionHandlerDeps
@@ -19,20 +22,26 @@
  * @param {SessionHandlerDeps} deps
  */
 function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking }) {
-    socket.on('authenticate', async (userId) => {
-        sessions.register(userId, socket.id);
-        socket.join(`user_${userId}`);
-        socket.emit('authenticated', { userId });
-        // If reconnecting while in an active game, clear the disconnect grace period in Redis
-        await gameService.reconnect(userId, client);
-    });
+    socket.on(
+        'authenticate',
+        wrap('authenticate', schemas.authenticate, async (userId) => {
+            sessions.register(userId, socket.id);
+            socket.join(`user_${userId}`);
+            socket.emit('authenticated', { userId });
+            // If reconnecting while in an active game, clear the disconnect grace period in Redis
+            await gameService.reconnect(userId, client);
+        }),
+    );
 
-    socket.on('disconnect', async () => {
-        matchmaking.leaveQueueBySocket(socket.id);
-        const userId = sessions.unregister(socket.id);
-        // If this user is in an active game, set disconnectInfo in Redis (global clock handles timeout)
-        await gameService.handleDisconnect(userId);
-    });
+    socket.on(
+        'disconnect',
+        guard('disconnect', async () => {
+            matchmaking.leaveQueueBySocket(socket.id);
+            const userId = sessions.unregister(socket.id);
+            // If this user is in an active game, set disconnectInfo in Redis (global clock handles timeout)
+            await gameService.handleDisconnect(userId);
+        }),
+    );
 }
 
 module.exports = { registerSessionHandlers };

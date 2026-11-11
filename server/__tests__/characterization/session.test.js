@@ -22,10 +22,12 @@ describe('authenticate', () => {
         expect(await once(s, 'authenticated')).toEqual({ userId: 'someone-elses-id' });
     });
 
-    test('non-string ids are echoed back unchanged', async () => {
+    test('non-string ids are rejected by the payload schema [S15]', async () => {
         const s = await ctx.connect();
-        s.emit('authenticate', 42);
-        expect(await once(s, 'authenticated')).toEqual({ userId: 42 });
+        const echoed = record(s, 'authenticated');
+        const ack = await new Promise((resolve) => s.emit('authenticate', 42, resolve));
+        expect(ack).toEqual({ ok: false, error: 'invalid_payload' });
+        expect(echoed).toEqual([]);
     });
 
     test('joins the user_<id> room so user-addressed events reach the socket', async () => {
