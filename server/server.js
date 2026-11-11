@@ -9,22 +9,14 @@ const friendsService = require('./services/friends');
 const ratingService = require('./services/rating');
 const { supabase } = require('./supabase');
 const { getGame, setGame, updateGame, addActiveGame, removeActiveGame } = require('./lib/gameStore');
-const { startGlobalClock, parseIncrement } = require('./services/clock');
+const { startGlobalClock } = require('./services/clock');
+const { buildPgnFromMoveLog } = require('./src/domain/pgn');
+const { ratingField } = require('./src/domain/timeControl');
+const { clocksAt, clocksAfterMove } = require('./src/domain/clock');
+const { gameStateFromRow } = require('./src/domain/gameState');
+const { resultLabel, parseOutcome, sideToColor, colorOfPlayer, winnerIdFor } = require('./src/domain/result');
 
 // ── Game Review trigger ──────────────────────────────────────────────────────
-// Build a PGN movetext string from a game's move log (each entry has a `san`).
-function buildPgnFromMoveLog(moveLog) {
-  const sans = (moveLog || []).map(m => m && m.san).filter(Boolean);
-  if (!sans.length) return null;
-  let movetext = '';
-  for (let i = 0; i < sans.length; i++) {
-    if (i % 2 === 0) movetext += `${i / 2 + 1}. `;
-    movetext += `${sans[i]} `;
-  }
-  // Minimal headers so python-chess parses it as a game.
-  return `[Event "GAMBIT"]\n[Site "GAMBIT"]\n\n${movetext.trim()} *`;
-}
-
 // Ask the engine to analyse a finished game (fire-and-forget; engine runs it async
 // and writes accuracy/classifications/eval_graph back to the games row).
 function triggerGameReview(gameId, moveLog, timeControl) {
@@ -410,12 +402,10 @@ io.on('connection', (socket) => {
             .eq('id', data.user.id)
             .maybeSingle();
         if (!profile) return;
-        const mins = parseInt(data.time_control) || 10;
-        const ratingField = mins <= 2 ? 'rating_bullet' : mins <= 5 ? 'rating_blitz' : mins <= 60 ? 'rating_rapid' : 'rating_classical';
         const verifiedUser = {
             id: profile.id,
             username: profile.username,
-            rating: profile[ratingField] ?? 1200,
+            rating: profile[ratingField(data.time_control)] ?? 1200,
             games_played: profile.games_played ?? 0,
         };
         matchmaking.joinQueue(verifiedUser, socket.id, data.time_control, data.increment, data.is_rated ?? true);
@@ -441,33 +431,11 @@ io.on('connection', (socket) => {
                 .maybeSingle();
 
             if (dbGame && dbGame.status === 'active') {
-                const mins = parseInt(dbGame.time_control) || 10;
-                const clockMs = mins * 60 * 1000;
-                const whiteClockMs = dbGame.white_clock_ms ?? clockMs;
-                const blackClockMs = dbGame.black_clock_ms ?? clockMs;
-                const fenTurn = dbGame.fen ? (dbGame.fen.split(' ')[1] ?? 'w') : 'w';
-                game = {
-                    id: gameId,
-                    fen: dbGame.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-                    whiteId: dbGame.white_id,
-                    blackId: dbGame.black_id,
-                    whiteClockMs,
-                    blackClockMs,
-                    activeSide: fenTurn,
-                    status: 'active',
-                    result: null,
-                    reason: null,
-                    moveLog: [],
-                    timeControl: dbGame.time_control,
-                    incrementMs: parseIncrement(dbGame.time_control),
-                    isRated: dbGame.is_rated ?? false,
-                    lastMoveAt: (dbGame.white_clock_ms !== null || dbGame.black_clock_ms !== null) ? Date.now() : null,
-                    disconnectInfo: null,
-                };
+                game = gameStateFromRow(gameId, dbGame, Date.now());
                 await setGame(gameId, game);
                 await addActiveGame(gameId);
             } else if (dbGame && dbGame.status === 'completed') {
-                const result = dbGame.result === 'white' ? 'White wins' : dbGame.result === 'black' ? 'Black wins' : 'Draw';
+                const result = resultLabel(dbGame.result);
                 socket.emit('game_end', {
                     game_id: gameId, result, reason: 'Game over',
                     white_id: dbGame.white_id, black_id: dbGame.black_id,
@@ -480,7 +448,7 @@ io.on('connection', (socket) => {
 
         // If game is already completed in Redis, notify joining client
         if (game.status === 'completed') {
-            const result = game.result === 'white' ? 'White wins' : game.result === 'black' ? 'Black wins' : 'Draw';
+            const result = resultLabel(game.result);
             socket.emit('game_end', {
                 game_id: gameId, result, reason: game.reason || 'Game over',
                 white_id: game.whiteId, black_id: game.blackId,
@@ -489,14 +457,11 @@ io.on('connection', (socket) => {
         }
 
         // Compute real remaining time for the active player
+        // (clocks are frozen while a player is disconnected)
         const now = Date.now();
-        let whiteMs = game.whiteClockMs;
-        let blackMs = game.blackClockMs;
-        if (game.lastMoveAt && !game.disconnectInfo) {
-            const elapsed = now - game.lastMoveAt;
-            if (game.activeSide === 'w') whiteMs = Math.max(0, game.whiteClockMs - elapsed);
-            else blackMs = Math.max(0, game.blackClockMs - elapsed);
-        }
+        const { whiteMs, blackMs } = game.disconnectInfo
+            ? { whiteMs: game.whiteClockMs, blackMs: game.blackClockMs }
+            : clocksAt(game, now);
 
         socket.emit('game_state_sync', {
             fen: game.fen,
@@ -549,21 +514,8 @@ io.on('connection', (socket) => {
 
         const now = Date.now();
         const movedSide = game.activeSide;
-        let whiteClockMs = game.whiteClockMs;
-        let blackClockMs = game.blackClockMs;
-
-        if (game.lastMoveAt) {
-            const elapsed = now - game.lastMoveAt;
-            if (movedSide === 'w') whiteClockMs = Math.max(0, whiteClockMs - elapsed);
-            else blackClockMs = Math.max(0, blackClockMs - elapsed);
-        }
-
-        // Add increment to the player who just moved
-        const incMs = game.incrementMs ?? 0;
-        if (movedSide === 'w') whiteClockMs += incMs;
-        else blackClockMs += incMs;
-
-        const newSide = movedSide === 'w' ? 'b' : 'w';
+        // Charge elapsed time, then add increment to the player who just moved
+        const { whiteMs: whiteClockMs, blackMs: blackClockMs, nextSide: newSide } = clocksAfterMove(game, now);
         const newMoveLog = [...(game.moveLog || []), { move: data.move, fen: data.fen, san: data.san }];
 
         await updateGame(data.game_id, {
@@ -580,7 +532,7 @@ io.on('connection', (socket) => {
         io.to(`game_${data.game_id}`).emit('move_made', data);
 
         const moveNumber = newMoveLog.length; // sequential index (1-based)
-        const movedColor = movedSide === 'w' ? 'white' : 'black';
+        const movedColor = sideToColor(movedSide);
         const clockAfterMove = movedSide === 'w' ? Math.round(whiteClockMs) : Math.round(blackClockMs);
 
         // Async persist to Supabase — only FEN (H10: clocks flushed on game_end only)
@@ -633,8 +585,7 @@ io.on('connection', (socket) => {
         const blackId = game.blackId;
         if (!whiteId || !blackId) return;
 
-        const outcome = data.result?.toLowerCase().includes('white') ? 'white'
-            : data.result?.toLowerCase().includes('black') ? 'black' : 'draw';
+        const outcome = parseOutcome(data.result);
 
         await setGame(data.game_id, { ...game, status: 'completed', result: outcome });
         await removeActiveGame(data.game_id);
@@ -655,7 +606,7 @@ io.on('connection', (socket) => {
         const { data: updated } = await supabase.from('games').update({
             status: 'completed',
             result: outcome === 'draw' ? 'draw' : null,
-            winner_id: outcome === 'white' ? whiteId : outcome === 'black' ? blackId : null,
+            winner_id: winnerIdFor(outcome, { whiteId, blackId }),
             ended_at: new Date().toISOString(),
             final_fen: game.fen ?? null,
             white_clock_ms: Math.round(game.whiteClockMs ?? 0),
@@ -752,17 +703,10 @@ io.on('connection', (socket) => {
 
             if (game && game.status === 'active') {
                 const now = Date.now();
-                let whiteClockMs = game.whiteClockMs;
-                let blackClockMs = game.blackClockMs;
-
                 // Snapshot the clock at disconnect time
-                if (game.lastMoveAt) {
-                    const elapsed = now - game.lastMoveAt;
-                    if (game.activeSide === 'w') whiteClockMs = Math.max(0, whiteClockMs - elapsed);
-                    else blackClockMs = Math.max(0, blackClockMs - elapsed);
-                }
+                const { whiteMs: whiteClockMs, blackMs: blackClockMs } = clocksAt(game, now);
 
-                const disconnectedSide = game.whiteId === userId ? 'white' : 'black';
+                const disconnectedSide = colorOfPlayer(userId, game.whiteId);
 
                 await setGame(gameId, {
                     ...game,

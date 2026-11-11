@@ -1,5 +1,6 @@
 const { nanoid } = require('nanoid');
 const { supabase } = require('../supabase');
+const { createInitialGameState } = require('../src/domain/gameState');
 
 const generateInviteUrl = () => {
     // using a 10 char nanoid as specified
@@ -98,28 +99,14 @@ class FriendsService {
 
         // Write initial game state to Redis now that both players are assigned
         const { setGame, addActiveGame } = require('../lib/gameStore')
-        const { parseIncrement } = require('./clock')
-        const mins = parseInt(data.time_control) || 10
-        const clockMs = mins * 60 * 1000
 
-        await setGame(data.id, {
+        await setGame(data.id, createInitialGameState({
             id: data.id,
-            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
             whiteId: data.white_id,
             blackId: data.black_id,
-            whiteClockMs: clockMs,
-            blackClockMs: clockMs,
-            activeSide: 'w',
-            status: 'active',
-            result: null,
-            reason: null,
-            moveLog: [],
             timeControl: data.time_control,
-            incrementMs: parseIncrement(data.time_control),
             isRated: data.is_rated ?? false,
-            lastMoveAt: null,
-            disconnectInfo: null,
-        })
+        }))
         await addActiveGame(data.id)
 
         return data;

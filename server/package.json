@@ -8,7 +8,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint .",
-    "lint:arch": "depcruise server.js services lib supabase.js --config .dependency-cruiser.cjs",
+    "lint:arch": "depcruise src server.js services lib supabase.js --config .dependency-cruiser.cjs",
     "lint:baseline": "node ../scripts/lint-baseline/ratchet.js server",
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"src/**/*.js\""
   },
