@@ -15,6 +15,10 @@ const { ratingField } = require('./src/domain/timeControl');
 const { clocksAt, clocksAfterMove } = require('./src/domain/clock');
 const { gameStateFromRow } = require('./src/domain/gameState');
 const { resultLabel, parseOutcome, sideToColor, colorOfPlayer, winnerIdFor } = require('./src/domain/result');
+const env = require('./src/config/env');
+const { createEngineClient } = require('./src/clients/engineClient');
+
+const engineClient = createEngineClient({ baseUrl: env.engineUrl });
 
 // ── Game Review trigger ──────────────────────────────────────────────────────
 // Ask the engine to analyse a finished game (fire-and-forget; engine runs it async
@@ -22,12 +26,7 @@ const { resultLabel, parseOutcome, sideToColor, colorOfPlayer, winnerIdFor } = r
 function triggerGameReview(gameId, moveLog, timeControl) {
   const pgn = buildPgnFromMoveLog(moveLog);
   if (!pgn) return;
-  const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-  fetch(`${engineUrl}/analyse-game`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ game_id: gameId, pgn, time_control: String(timeControl ?? '10') }),
-  })
+  engineClient.analyseGame({ gameId, pgn, timeControl: String(timeControl ?? '10') })
     .then(res => { if (!res.ok) console.warn('[game_review] engine returned', res.status); })
     .catch(e => console.warn('[game_review] trigger failed:', e.message));
 }
@@ -38,7 +37,7 @@ app.use(cors({
     const allowed = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      process.env.FRONTEND_URL,
+      env.frontendUrl(),
     ].filter(Boolean);
     // Allow any vercel.app subdomain
     if (!origin || allowed.includes(origin) || /\.vercel\.app$/.test(origin)) {
@@ -55,7 +54,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || /\.vercel\.app$/.test(origin) || origin === process.env.FRONTEND_URL) {
+      if (!origin || /\.vercel\.app$/.test(origin) || origin === env.frontendUrl()) {
         callback(null, true);
       } else {
         callback(null, true); // permissive fallback for WS
@@ -147,12 +146,7 @@ app.post('/api/auth/register-profile', async (req, res) => {
 app.post('/api/analysis/engine', async (req, res) => {
     try {
         const { fen, depth } = req.body;
-        const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-        const response = await fetch(`${engineUrl}/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fen, depth: depth || 18 })
-        });
+        const response = await engineClient.analyzePosition({ fen, depth: depth || 18 });
         const data = await response.json();
         res.json(data);
     } catch (e) {
@@ -493,12 +487,7 @@ io.on('connection', (socket) => {
 
         if (game.fen && data.move) {
             try {
-                const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-                const validationRes = await fetch(`${engineUrl}/validate-move`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fen: game.fen, move: data.move }),
-                });
+                const validationRes = await engineClient.validateMove({ fen: game.fen, move: data.move });
                 if (validationRes.ok) {
                     const validation = await validationRes.json();
                     if (!validation.valid) {
@@ -733,7 +722,7 @@ io.on('connection', (socket) => {
 // Only bind a port when started directly (`node server.js`). When the file is
 // required (by the test suite) the caller decides whether and where to listen.
 if (require.main === module) {
-    const PORT = process.env.PORT || 3001;
+    const PORT = env.port();
     server.listen(PORT, () => {
         console.log(`Node server running on port ${PORT}`);
     });

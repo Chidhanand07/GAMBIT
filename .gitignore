@@ -28,3 +28,6 @@ frontend/.vercel/
 .DS_Store
 chess-engine/.venv/
 .claude/
+
+# Test coverage output
+server/coverage/
