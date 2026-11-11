@@ -83,9 +83,9 @@ def test_classification_thresholds(cp_loss, expected_class):
     ]
     sf.get_top_moves.return_value = top_moves
 
-    _, classification, _, _, _, _, _ = analyze_move_cp(
+    classification = analyze_move_cp(
         sf, board.fen(), move_uci, chess.WHITE
-    )
+    )[1]
     assert classification == expected_class, f"cp_loss={cp_loss}: expected {expected_class}, got {classification}"
 
 
