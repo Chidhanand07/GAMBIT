@@ -31,12 +31,18 @@ def encode_board(fen: str) -> np.ndarray:
     planes = np.zeros((13, 8, 8), dtype=np.float32)
 
     piece_to_plane = {
-        (chess.PAWN, chess.WHITE): 0, (chess.KNIGHT, chess.WHITE): 1,
-        (chess.BISHOP, chess.WHITE): 2, (chess.ROOK, chess.WHITE): 3,
-        (chess.QUEEN, chess.WHITE): 4, (chess.KING, chess.WHITE): 5,
-        (chess.PAWN, chess.BLACK): 6, (chess.KNIGHT, chess.BLACK): 7,
-        (chess.BISHOP, chess.BLACK): 8, (chess.ROOK, chess.BLACK): 9,
-        (chess.QUEEN, chess.BLACK): 10, (chess.KING, chess.BLACK): 11,
+        (chess.PAWN, chess.WHITE): 0,
+        (chess.KNIGHT, chess.WHITE): 1,
+        (chess.BISHOP, chess.WHITE): 2,
+        (chess.ROOK, chess.WHITE): 3,
+        (chess.QUEEN, chess.WHITE): 4,
+        (chess.KING, chess.WHITE): 5,
+        (chess.PAWN, chess.BLACK): 6,
+        (chess.KNIGHT, chess.BLACK): 7,
+        (chess.BISHOP, chess.BLACK): 8,
+        (chess.ROOK, chess.BLACK): 9,
+        (chess.QUEEN, chess.BLACK): 10,
+        (chess.KING, chess.BLACK): 11,
     }
 
     for square, piece in board.piece_map().items():

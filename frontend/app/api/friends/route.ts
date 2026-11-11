@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
     const seen = new Set()
     const friends = []
     for (const f of data ?? []) {
-        const friend = f.requester_id === targetId ? f.addressee : f.requester
+        const friend = (f.requester_id === targetId ? f.addressee : f.requester) as unknown as { id: string } | null // many-to-one embed: one row at runtime
         if (!friend || seen.has(friend.id)) continue
         seen.add(friend.id)
         friends.push({ ...friend, friendship_id: f.id })

@@ -19,6 +19,7 @@ _pool: _queue.Queue = _queue.Queue()
 _pool_lock = threading.Lock()
 _pool_initialized = False
 
+
 def _init_pool():
     global _pool_initialized
     with _pool_lock:
@@ -32,8 +33,10 @@ def _init_pool():
                 logging.error(f"Stockfish pool init failed: {e}")
         _pool_initialized = True
 
+
 class _EngineCtx:
     """Context manager: acquires an engine from the pool, returns it on exit."""
+
     def __init__(self, depth: int):
         self.depth = depth
         self._sf: Stockfish | None = None
@@ -58,9 +61,11 @@ class _EngineCtx:
         if self._sf is not None:
             _pool.put(self._sf)
 
+
 def get_engine(depth: int = 15) -> "_EngineCtx":
     """Usage: `with get_engine(18) as sf:` — sf may be None if pool is exhausted."""
     return _EngineCtx(depth)
+
 
 # Legacy shim so existing callers still work (used only in single-threaded paths)
 def get_stockfish_instance(depth: int = 15) -> Stockfish | None:
@@ -73,9 +78,11 @@ def get_stockfish_instance(depth: int = 15) -> Stockfish | None:
         logging.error(f"get_stockfish_instance failed: {e}")
         return None
 
+
 def release_stockfish_instance(sf: Stockfish | None):
     if sf is not None:
         _pool.put(sf)
+
 
 def win_percent(cp: float) -> float:
     """
@@ -113,8 +120,10 @@ def analyze_move_cp(sf, board_fen, move_played_san, player_color):
 
     # E5: normalize eval_before to current player's perspective
     eval_before_raw = sf.get_evaluation()
-    eval_before_cp_raw = eval_before_raw["value"] if eval_before_raw["type"] == "cp" else (
-        10000 if eval_before_raw["value"] > 0 else -10000
+    eval_before_cp_raw = (
+        eval_before_raw["value"]
+        if eval_before_raw["type"] == "cp"
+        else (10000 if eval_before_raw["value"] > 0 else -10000)
     )
     # Stockfish reports from side-to-move perspective; normalize to the playing player
     eval_before_normalized = eval_before_cp_raw if player_color == chess.WHITE else -eval_before_cp_raw
@@ -176,7 +185,17 @@ def analyze_move_cp(sf, board_fen, move_played_san, player_color):
         else:
             classification = "Blunder"
 
-    return cp_loss, classification, eval_before_normalized, eval_after_cp, eval_best_cp, best_move_uci, user_move.uci(), round(acc, 1)
+    return (
+        cp_loss,
+        classification,
+        eval_before_normalized,
+        eval_after_cp,
+        eval_best_cp,
+        best_move_uci,
+        user_move.uci(),
+        round(acc, 1),
+    )
+
 
 def compute_game_accuracy(cp_losses):
     if not cp_losses:

@@ -63,16 +63,17 @@ def get_style_move(fen: str, top_k: int = 3):
     candidates = []
     for prob, idx in zip(top_probs.tolist(), top_indices.tolist()):
         from_sq, to_sq = index_to_from_to(idx)
-        matches = [m for m in board.legal_moves
-                   if m.from_square == from_sq and m.to_square == to_sq]
+        matches = [m for m in board.legal_moves if m.from_square == from_sq and m.to_square == to_sq]
         if not matches:
             continue
         move = matches[0]
-        candidates.append({
-            "san": board.san(move),
-            "uci": move.uci(),
-            "confidence": round(prob, 4),
-        })
+        candidates.append(
+            {
+                "san": board.san(move),
+                "uci": move.uci(),
+                "confidence": round(prob, 4),
+            }
+        )
 
     if not candidates:
         return None

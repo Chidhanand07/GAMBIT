@@ -26,11 +26,11 @@ from model import encode_board, legal_move_mask
 from style_engine import _load_model, _device
 from engine import get_engine
 
-BLUNDER_CP = 300           # medium: style move must stay within this loss, else engine best
-HARD_MAX_LOSS = 50         # hard: style move must be near-best, else engine best
-CONVERT_CP = 400           # |eval| at/above this (or any forced mate) -> convert with engine best
-EASY_TEMPERATURE = 1.7     # >1 flattens the model distribution -> weaker/more random
-TOPK = 5                   # model candidates considered by medium/hard
+BLUNDER_CP = 300  # medium: style move must stay within this loss, else engine best
+HARD_MAX_LOSS = 50  # hard: style move must be near-best, else engine best
+CONVERT_CP = 400  # |eval| at/above this (or any forced mate) -> convert with engine best
+EASY_TEMPERATURE = 1.7  # >1 flattens the model distribution -> weaker/more random
+TOPK = 5  # model candidates considered by medium/hard
 MEDIUM_DEPTH = 10
 HARD_DEPTH = 14
 FALLBACK_DEPTH = 12
