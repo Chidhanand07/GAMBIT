@@ -37,6 +37,7 @@ afterAll(async () => {
 let fetchMock;
 beforeEach(() => {
     supabase.reset();
+    supabase.auth.getUser.mockImplementation(verifyTestToken);
     redis._reset();
     rating.processGameEnd.mockClear();
     // Default engine: every move is legal and produces AFTER_E4.
@@ -71,14 +72,26 @@ function record(socket, event) {
     return got;
 }
 
-async function connect(userId) {
-    const socket = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+const TOKEN_PREFIX = 'test-token:';
+
+/** Stand-in for Supabase Auth: `test-token:<id>` verifies as user `<id>`; anything else is invalid. */
+async function verifyTestToken(token) {
+    return typeof token === 'string' && token.startsWith(TOKEN_PREFIX)
+        ? { data: { user: { id: token.slice(TOKEN_PREFIX.length) } }, error: null }
+        : { data: { user: null }, error: { message: 'invalid token' } };
+}
+
+/** A client that has not finished its handshake; `auth` is sent as `handshake.auth`. */
+function open(auth) {
+    const socket = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false, auth });
     clients.push(socket);
+    return socket;
+}
+
+/** Connect with a handshake token that verifies as `userId`. */
+async function connect(userId) {
+    const socket = open({ token: `${TOKEN_PREFIX}${userId}` });
     await once(socket, 'connect');
-    if (userId) {
-        socket.emit('authenticate', userId);
-        await once(socket, 'authenticated');
-    }
     return socket;
 }
 
@@ -189,12 +202,15 @@ describe('making moves', () => {
         expect(moves).toHaveLength(0);
     });
 
-    test('an unauthenticated socket cannot move', async () => {
+    test('an unauthenticated socket cannot even connect, so it cannot move [S2]', async () => {
         const { white } = await seatedGame();
-        const anon = await connect(null);
         const moves = record(white, 'move_made');
+        const anon = open(undefined);
+        const refused = await once(anon, 'connect_error');
+        expect(refused.message).toBe('unauthorized');
         anon.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
         await sleep(100);
+        expect(anon.connected).toBe(false);
         expect(moves).toHaveLength(0);
     });
 
@@ -355,11 +371,9 @@ describe('disconnect and reconnect', () => {
         await gone;
 
         const back = once(black, 'opponent_reconnected');
-        const again = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
-        clients.push(again);
-        await once(again, 'connect');
+        // Reconnecting is just connecting again: the handshake token identifies the player [S2].
+        const again = open({ token: `${TOKEN_PREFIX}white-user` });
         const sync = once(again, 'clock_sync');
-        again.emit('authenticate', 'white-user');
 
         expect(await back).toEqual({ userId: 'white-user' });
         await sync;
@@ -397,7 +411,25 @@ describe('matchmaking queue over sockets', () => {
         expect(matchmaking.queue.has('ghost')).toBe(false);
     });
 
-    test.todo('authenticate trusts any userId the client sends — verify a Supabase access token instead');
+    test('the queued player is the verified user, whatever id the payload claims [S2]', async () => {
+        const s = await connect('p1');
+        supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_rapid: 1400, games_played: 30 }, error: null });
+        s.emit('join_queue', { user: { id: 'victim' }, time_control: '10' });
+        await once(s, 'queue_joined');
+        expect(supabase.op(supabase.callsFor('profiles')[0], 'eq')).toEqual(['id', 'p1']);
+        expect([...matchmaking.queue.keys()]).toEqual(['p1']);
+    });
+
+    test('leave_queue only removes the caller, not the id in the payload [G13]', async () => {
+        const victim = await connect('victim');
+        supabase.queue('profiles', { data: { id: 'victim', username: 'v', rating_rapid: 1400, games_played: 30 }, error: null });
+        victim.emit('join_queue', { time_control: '10' });
+        await once(victim, 'queue_joined');
+        const attacker = await connect('attacker');
+        attacker.emit('leave_queue', 'victim');
+        await sleep(50);
+        expect(matchmaking.queue.has('victim')).toBe(true);
+    });
 });
 
 describe('challenges and rematches', () => {

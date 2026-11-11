@@ -100,14 +100,13 @@ describe('mount', () => {
         expect(fetchMock.mock.calls[0]).toEqual(['/api/games/g1'])
     })
 
-    test('emits authenticate + join_game on mount and AGAIN when my colour resolves (effect deps include myColor)', async () => {
+    test('emits join_game (never authenticate) on mount and AGAIN when my colour resolves (effect deps include myColor)', async () => {
         await renderGame()
         // LEGACY: the socket effect depends on myColor, so it re-runs once the
-        // game row says we are white, re-emitting both events.
+        // game row says we are white, re-emitting the join.
+        // S2: identity travels in the socket handshake, so no `authenticate` is emitted.
         expect(socket.emit.mock.calls).toEqual([
-            ['authenticate', 'me'],
             ['join_game', 'g1'],
-            ['authenticate', 'me'],
             ['join_game', 'g1'],
         ])
     })
@@ -376,14 +375,14 @@ describe('server events', () => {
         expect(screen.getByText(/they have 20s to reconnect/)).toBeInTheDocument()
     })
 
-    test('socket disconnect shows "Reconnecting…"; connect hides it and re-emits authenticate + join_game', async () => {
+    test('socket disconnect shows "Reconnecting…"; connect hides it and re-emits join_game', async () => {
         await renderGame()
         socket.serverSends('disconnect')
         expect(screen.getByText('Reconnecting…')).toBeInTheDocument()
         socket.emit.mockClear()
         socket.serverSends('connect')
         expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument()
-        expect(socket.emit.mock.calls).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
     })
 })
 
@@ -790,7 +789,7 @@ describe('board controls', () => {
         await renderGame()
         click(screen.getAllByTitle('Toggle sound')[0])
         // LEGACY: soundOn is a dependency of the socket effect, so it re-joins
-        expect(socket.emit.mock.calls.slice(-2)).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+        expect(socket.emit.mock.calls.slice(-1)).toEqual([['join_game', 'g1']])
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         expect(sounds.playMoveSound).not.toHaveBeenCalled()
     })

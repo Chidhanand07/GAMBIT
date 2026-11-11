@@ -5,10 +5,9 @@ const { schemas } = require('../../src/sockets/schemas');
 
 const ok = (event, payload) => schemas[event].safeParse(payload).success;
 
-test('there is a schema for every client → server event', () => {
+test('there is a schema for every client → server event (and none for `authenticate`)', () => {
     expect(Object.keys(schemas).sort()).toEqual(
         [
-            'authenticate',
             'join_queue',
             'leave_queue',
             'join_game',
@@ -80,8 +79,21 @@ describe('join_queue', () => {
     test('accepts the lobby payloads and bounds the time control', () => {
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: '5+3', increment: 3, is_rated: true })).toBe(true);
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 10, increment: 0 })).toBe(true);
+        expect(ok('join_queue', { time_control: '10' })).toBe(true);
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 'x'.repeat(17) })).toBe(false);
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: '10', is_rated: 'yes' })).toBe(false);
+    });
+});
+
+describe('the acting user is never read from a payload [S2]', () => {
+    test.each([
+        ['join_queue', { user: { id: 'victim' }, time_control: '10' }, 'user'],
+        ['rematch_request', { from_user_id: 'victim', to_user_id: 'u2' }, 'from_user_id'],
+        ['challenge_request', { from_user_id: 'victim', to_user_id: 'u2' }, 'from_user_id'],
+        ['rematch_accept', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
+        ['challenge_accept', { from_user_id: 'u2', to_user_id: 'victim' }, 'to_user_id'],
+    ])('%s strips %j → no `%s`', (event, payload, key) => {
+        expect(schemas[event].parse(payload)).not.toHaveProperty(key);
     });
 });
 

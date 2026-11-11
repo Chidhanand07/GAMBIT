@@ -189,7 +189,7 @@ describe('game_end', () => {
         expect(rating.processGameEnd).not.toHaveBeenCalled();
     });
 
-    test('any socket — even unauthenticated and outside the room — can end a game (BUG pinned)', async () => {
+    test('any signed-in socket — even outside the room — can end a game (BUG pinned; fixed by S3)', async () => {
         const { game, white, black } = await ctx.seatedGame();
         supabase.queue('games', { data: { id: game.id }, error: null });
         const anon = await ctx.connect();

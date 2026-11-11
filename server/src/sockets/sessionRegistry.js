@@ -1,15 +1,15 @@
 // @ts-check
 /**
  * In-process session bookkeeping for Socket.IO connections (moved from the
- * three maps at the top of `server.js`). Identity is whatever the client sent
- * in `authenticate` (known bug, preserved; see NODE-10).
+ * three maps at the top of `server.js`). User ids are the ones the handshake
+ * middleware verified (NODE-10).
  *
  * `userActiveGame` is never cleaned on disconnect (known unbounded growth, preserved).
  */
 
 /**
  * @typedef {object} SessionRegistry
- * @property {(userId: string, socketId: string) => void} register `authenticate`
+ * @property {(userId: string, socketId: string) => void} register a verified connection
  * @property {(socketId: string) => string | undefined} unregister forget a socket; returns its user id
  * @property {(socketId: string) => string | undefined} userIdOf
  * @property {(userId: string) => string | undefined} activeGameOf

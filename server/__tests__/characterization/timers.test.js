@@ -101,7 +101,7 @@ describe('disconnect during an active game', () => {
         expect((await getGame(game.id)).disconnectInfo).toEqual({ userId: 'stranger', side: 'black', at: expect.any(Number) });
     });
 
-    test('completed game or unauthenticated socket → no notice, no DB write', async () => {
+    test('completed game or a user without a game → no notice, no DB write', async () => {
         const { game, white, black } = await ctx.seatedGame();
         await patchGame(game.id, { status: 'completed' });
         const anon = await ctx.connect();

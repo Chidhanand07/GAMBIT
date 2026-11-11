@@ -12,7 +12,7 @@
     "test:coverage": "jest --coverage",
     "typecheck": "tsc --noEmit",
     "lint:baseline": "node ../scripts/lint-baseline/ratchet.js frontend",
-    "format:check": "prettier --check --no-error-on-unmatched-pattern \"features/**/*.{ts,tsx}\" \"types/**/*.ts\" \"lib/chess/**/*.ts\" \"lib/server/**/*.ts\" \"lib/api/**/*.ts\""
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"features/**/*.{ts,tsx}\" \"types/**/*.ts\" \"lib/chess/**/*.ts\" \"lib/server/**/*.ts\" \"lib/api/**/*.ts\" \"lib/socket/**/*.ts\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.1.0",

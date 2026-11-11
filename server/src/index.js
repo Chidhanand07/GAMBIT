@@ -36,6 +36,7 @@ const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
 const { createProfileService } = require('./services/profileService');
+const { createTokenVerifier } = require('./services/tokenVerifier');
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
@@ -87,7 +88,17 @@ registerRoutes(app, {
     requireUserId: createRequireUserId({ getUser: (token) => supabase.auth.getUser(token) }),
 });
 
-registerSocketHandlers(io, { sessions, matchmaking: matchmaking.service, gameService, chatService, socialService });
+const getUser = /** @type {import('./services/tokenVerifier').GetUser} */ ((token) => supabase.auth.getUser(token));
+const tokenVerifier = createTokenVerifier({ getUser });
+
+registerSocketHandlers(io, {
+    sessions,
+    matchmaking: matchmaking.service,
+    gameService,
+    chatService,
+    socialService,
+    verifyToken: tokenVerifier.verify,
+});
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {

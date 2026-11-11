@@ -54,7 +54,7 @@ describe('GET /api/health', () => {
 describe('GET /api/matchmaking/status', () => {
     test('reports the live queue size', async () => {
         expect((await request(ctx.app).get('/api/matchmaking/status')).body).toEqual({ players_searching: 0 });
-        const s = await ctx.connect();
+        const s = await ctx.connect('p1');
         supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_rapid: 1500, games_played: 9 }, error: null });
         s.emit('join_queue', { user: { id: 'p1' }, time_control: '10' });
         await once(s, 'queue_joined');
@@ -219,9 +219,10 @@ describe('POST /api/games/join/:token', () => {
     }
 
     test('joins as the missing colour, returns the updated row, emits game_start to game_<id>, seeds Redis', async () => {
-        supabase.setUsers({ 'fake-test-token': 'bob' });
         const host = await roomListener('pg-1');
         const outsider = await ctx.connect('carol');
+        // After the sockets are connected: setUsers replaces the handshake token verifier too.
+        supabase.setUsers({ 'fake-test-token': 'bob' });
         const outsiderGot = record(outsider, 'game_start');
         const row = waitingGame();
         const joined = { ...row, black_id: 'bob', status: 'active', started_at: '2026-01-01T00:00:00.000Z' };
@@ -276,8 +277,8 @@ describe('POST /api/games/join/:token', () => {
     });
 
     test('the creator re-joining gets the waiting row back, with NO update — game_start still emitted (pinned)', async () => {
-        supabase.setUsers({ 'fake-test-token': 'alice' });
         const host = await roomListener('pg-1');
+        supabase.setUsers({ 'fake-test-token': 'alice' });
         const row = waitingGame();
         supabase.queue('games', { data: row, error: null });
         const started = once(host, 'game_start');

@@ -4,6 +4,10 @@
  * in zod's default "strip" mode: unknown keys are dropped rather than rejected,
  * because the current frontend sends extra fields (a whole profile in
  * `join_queue.user`, for example). See docs/fixes/DECISIONS.md F-003.
+ *
+ * No schema names the *acting* user: the actor is `socket.data.userId`, set by
+ * the handshake middleware (NODE-10). A `from_user_id` on a request or a
+ * `to_user_id` on an accept is therefore stripped like any unknown key.
  */
 const { z } = require('zod');
 
@@ -41,13 +45,12 @@ const matchTerms = {
 };
 
 const schemas = {
-    authenticate: id,
     join_queue: z.object({
-        user: z.object({ id }),
         ...matchTerms,
         increment: increment.optional(),
     }),
-    leave_queue: id.optional(),
+    // Older clients send their own id; it is ignored (the actor is the verified user).
+    leave_queue: z.unknown(),
     join_game: id,
     spectate_game: id,
     make_move: z.object({
@@ -73,21 +76,19 @@ const schemas = {
         message: z.string().max(MAX_CHAT_LENGTH).optional(),
     }),
     rematch_request: z.object({
-        from_user_id: id.optional(),
         to_user_id: id,
         from_username: name.optional(),
         ...matchTerms,
     }),
-    rematch_accept: z.object({ from_user_id: id, to_user_id: id, ...matchTerms }),
+    rematch_accept: z.object({ from_user_id: id, ...matchTerms }),
     rematch_decline: z.object({ to_user_id: id, by_username: name.optional() }),
     challenge_request: z.object({
-        from_user_id: id,
         to_user_id: id,
         from_username: name.optional(),
         ...matchTerms,
         color: color.optional(),
     }),
-    challenge_accept: z.object({ from_user_id: id, to_user_id: id, ...matchTerms, color: color.optional() }),
+    challenge_accept: z.object({ from_user_id: id, ...matchTerms, color: color.optional() }),
     challenge_decline: z.object({ from_user_id: id, by_username: name.optional() }),
 };
 

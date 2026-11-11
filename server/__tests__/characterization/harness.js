@@ -85,6 +85,17 @@ function compact(selectList) {
     return String(selectList).replace(/\s+/g, '');
 }
 
+const TOKEN_PREFIX = 'test-token:';
+/** The fake access token the mocked Supabase Auth resolves to `userId`. */
+const tokenFor = (userId) => `${TOKEN_PREFIX}${userId}`;
+
+/** Stand-in for Supabase `auth.getUser(token)`: only `tokenFor(...)` tokens verify. */
+async function verifyTestToken(token) {
+    return typeof token === 'string' && token.startsWith(TOKEN_PREFIX)
+        ? { data: { user: { id: token.slice(TOKEN_PREFIX.length) } }, error: null }
+        : { data: { user: null }, error: { message: 'invalid token' } };
+}
+
 let idCounter = 0;
 /** Unique id per test so in-memory maps inside server.js never leak between tests. */
 function uniqueId(prefix) {
@@ -97,7 +108,7 @@ function uniqueId(prefix) {
  * server on an ephemeral port and reset the mocks between tests.
  *
  * @returns {object} ctx with url, app, server, io, matchmaking, fetch (spy),
- *   connect(userId), seatedGame(overrides)
+ *   open(auth), connect(userId, prepare), seatedGame(overrides)
  */
 function useServer() {
     const ctx = { clients: [] };
@@ -128,6 +139,7 @@ function useServer() {
         supabase.reset();
         redis._reset();
         ctx.matchmaking.queue.clear();
+        supabase.auth.getUser.mockImplementation(verifyTestToken);
         ctx.fetch = jest.spyOn(global, 'fetch').mockImplementation(defaultEngine);
         jest.spyOn(console, 'error').mockImplementation(() => {});
         jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -140,15 +152,22 @@ function useServer() {
         jest.spyOn(console, 'log').mockImplementation(() => {});
     });
 
-    /** Connect a fresh client; authenticate it as `userId` when given. */
-    ctx.connect = async (userId) => {
-        const socket = ioClient(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false });
+    /** A client that has not finished its handshake yet; `auth` is sent as `handshake.auth`. */
+    ctx.open = (auth) => {
+        const socket = ioClient(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false, auth });
         ctx.clients.push(socket);
+        return socket;
+    };
+
+    /**
+     * Connect a client whose handshake token verifies as `userId` (a fresh
+     * stranger when omitted). `prepare(socket)` runs before the connection is
+     * established, to attach listeners for events the server sends on connect.
+     */
+    ctx.connect = async (userId = uniqueId('stranger'), prepare = () => {}) => {
+        const socket = ctx.open({ token: tokenFor(userId) });
+        prepare(socket);
         await once(socket, 'connect');
-        if (userId !== undefined && userId !== null) {
-            socket.emit('authenticate', userId);
-            await once(socket, 'authenticated');
-        }
         return socket;
     };
 
@@ -183,5 +202,6 @@ module.exports = {
     opsFor,
     compact,
     uniqueId,
+    tokenFor,
     useServer,
 };

@@ -32,7 +32,6 @@ const DEFAULT_DISCONNECT_TIMEOUT_SECONDS = 20;
 
 export interface SocketHandlerContext {
     socket: Socket;
-    myProfileId: string;
     gameId: string;
     myColor: SeatColor;
     soundOn: boolean;
@@ -45,9 +44,11 @@ export interface SocketHandlerContext {
     markReconnected: () => void;
 }
 
-/** Re-emitted on every (re)connect; the server treats re-joins as idempotent. */
-export function joinGameRoom(socket: Socket, userId: string, gameId: string): void {
-    socket.emit('authenticate', userId);
+/**
+ * Re-emitted on every (re)connect; the server treats re-joins as idempotent. The server
+ * already knows who we are from the handshake token, so nothing identifies the user here.
+ */
+export function joinGameRoom(socket: Socket, gameId: string): void {
     socket.emit('join_game', gameId);
 }
 
@@ -150,7 +151,7 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
             () => {
                 // Fires on initial connect AND on every reconnect.
                 dispatch({ type: 'connectionChanged', connected: true });
-                joinGameRoom(ctx.socket, ctx.myProfileId, ctx.gameId);
+                joinGameRoom(ctx.socket, ctx.gameId);
             },
         ],
         ['game_state_sync', onGameStateSync(ctx)],

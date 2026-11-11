@@ -1,11 +1,10 @@
 // @ts-check
 /**
- * `authenticate` and `disconnect`. The user id is whatever the client sends
- * (known bug, preserved; NODE-10).
+ * Connection and `disconnect` bookkeeping. The user id is the one the
+ * handshake middleware verified (`socket.data.userId`, NODE-10); there is no
+ * `authenticate` event.
  */
-
-const { schemas } = require('../schemas');
-const { wrap, guard } = require('../wrap');
+const { guard } = require('../wrap');
 
 /**
  * @typedef {import('../../services/emitter').ClientPort} ClientPort
@@ -17,27 +16,24 @@ const { wrap, guard } = require('../wrap');
  */
 
 /**
+ * Register the verified user for this connection, join their `user_<id>` room
+ * and resume an active game (clears the disconnect grace period).
  * @param {import('socket.io').Socket} socket
  * @param {ClientPort} client
  * @param {SessionHandlerDeps} deps
  */
 function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking }) {
-    socket.on(
-        'authenticate',
-        wrap('authenticate', schemas.authenticate, async (userId) => {
-            sessions.register(userId, socket.id);
-            socket.join(`user_${userId}`);
-            socket.emit('authenticated', { userId });
-            // If reconnecting while in an active game, clear the disconnect grace period in Redis
-            await gameService.reconnect(userId, client);
-        }),
-    );
+    /** @type {string} */
+    const userId = socket.data.userId;
+    sessions.register(userId, socket.id);
+    socket.join(`user_${userId}`);
+    void guard('connection', () => gameService.reconnect(userId, client))();
 
     socket.on(
         'disconnect',
         guard('disconnect', async () => {
             matchmaking.leaveQueueBySocket(socket.id);
-            const userId = sessions.unregister(socket.id);
+            sessions.unregister(socket.id);
             // If this user is in an active game, set disconnectInfo in Redis (global clock handles timeout)
             await gameService.handleDisconnect(userId);
         }),

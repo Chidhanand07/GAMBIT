@@ -12,7 +12,6 @@ const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
 function makeCtx(over: Partial<SocketHandlerContext> = {}) {
     const ctx: SocketHandlerContext = {
         socket: { emit: jest.fn() } as never,
-        myProfileId: 'me',
         gameId: 'g1',
         myColor: 'white',
         soundOn: true,
@@ -40,11 +39,11 @@ test('registers the 13 events in the legacy order', () => {
     ])
 })
 
-test('connect marks connected then re-emits authenticate + join_game', () => {
+test('connect marks connected then re-emits join_game only (no authenticate) [S2]', () => {
     const { ctx, fire, dispatched } = makeCtx()
     fire('connect')
     expect(dispatched()).toEqual([{ type: 'connectionChanged', connected: true }])
-    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['join_game', 'g1']])
 })
 
 test('move_made: activates the clock before loading the FEN, de-duplicates, ignores other games', () => {

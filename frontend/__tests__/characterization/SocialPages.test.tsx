@@ -183,10 +183,10 @@ describe('join/[token]', () => {
         expect(push.mock.calls).toEqual([['/login?redirect=/join/tok_FAKE_0001']])
     })
 
-    test('creator authenticates, joins the room and follows game_start', async () => {
+    test('creator joins the room (identity comes from the socket handshake) and follows game_start', async () => {
         routes({ ...GAME, white_id: null, black_id: 'creator', white: null, black: { username: 'carl' }, time_control: '1' }, { id: 'creator' })
         await renderJoin()
-        expect(socket.emit.mock.calls).toEqual([['authenticate', 'creator'], ['join_game', 'g-1']])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g-1']])
         expect(screen.getByText('Waiting for opponent to join...')).toBeInTheDocument()
         expect(screen.getByText('♚ Black')).toBeInTheDocument()
         expect(screen.getByText(/Bullet · 1 min/)).toBeInTheDocument()

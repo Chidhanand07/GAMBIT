@@ -6,6 +6,7 @@
 const socketIo = /** @type {(srv: import('http').Server, opts: object) => import('socket.io').Server} */ (
     /** @type {unknown} */ (require('socket.io'))
 );
+const { createHandshakeAuth } = require('./auth');
 const { registerSessionHandlers } = require('./handlers/session');
 const { registerLobbyHandlers } = require('./handlers/lobby');
 const { registerGameHandlers } = require('./handlers/game');
@@ -54,14 +55,17 @@ function clientOf(socket) {
  *   import('./handlers/game').GameHandlerService} gameService
  * @property {Parameters<typeof registerChatHandlers>[1]['chatService']} chatService
  * @property {import('./handlers/social').SocialHandlerService} socialService
+ * @property {(token: string) => Promise<string | null>} verifyToken access token → user id (null when invalid)
  */
 
 /**
- * Register every event handler on each new connection.
+ * Authenticate every handshake, then register the event handlers on each
+ * accepted connection.
  * @param {import('socket.io').Server} io
  * @param {SocketDeps} deps
  */
 function registerSocketHandlers(io, deps) {
+    io.use(createHandshakeAuth({ verifyToken: deps.verifyToken }));
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
         const client = clientOf(socket);

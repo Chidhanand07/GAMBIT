@@ -35,7 +35,6 @@ export default function JoinPage({ params }: { params: { token: string } }) {
         const isCreator = me.id === game.white_id || me.id === game.black_id
         if (!isCreator) return
 
-        socket.emit('authenticate', me.id)
         socket.emit('join_game', game.id)
 
         const onGameStart = (data: { id: string }) => {

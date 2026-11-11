@@ -1,4 +1,6 @@
 // Socket.io event payloads between the pages and server/server.js + server/services/*.js.
+// Identity is not part of any payload: the server takes it from the handshake token
+// (see lib/socket/connection.ts).
 // Shapes describe what is actually sent today (including known quirks), not an ideal
 // protocol. Usable as `Socket<ServerToClientEvents, ClientToServerEvents>` from socket.io-client.
 import type { Game, MoveLogEntry, PlayerColor } from './game';
@@ -10,7 +12,7 @@ type ChallengeColor = PlayerColor | 'random';
 // ── client → server ──────────────────────────────────────────────────────────
 
 export interface JoinQueuePayload {
-    /** The lobby sends `{ id }` or, from the custom-time button, the whole profile. Only `id` is read. */
+    /** Still sent by the lobby but ignored: the server queues the handshake-verified user. */
     user: Pick<Profile, 'id'> & Partial<Profile>;
     time_control: TimeControl;
     increment: number;
@@ -98,10 +100,9 @@ export interface ChallengeDeclinePayload {
 }
 
 export interface ClientToServerEvents {
-    /** Raw user id; the server trusts it (known bug). */
-    authenticate: (userId: string) => void;
     join_queue: (payload: JoinQueuePayload) => void;
-    leave_queue: (userId: string | undefined) => void;
+    /** The argument is ignored: the server removes the handshake-verified user. */
+    leave_queue: (userId?: string) => void;
     join_game: (gameId: string) => void;
     /** Handled by the server; no page emits it today. */
     spectate_game: (gameId: string) => void;
@@ -139,7 +140,7 @@ export interface MatchFoundPayload extends Game {
 export interface ClockSyncPayload {
     whiteMs: number;
     blackMs: number;
-    /** Set by the global ticker; absent on the reconnect sync in `authenticate`. */
+    /** Set by the global ticker; absent on the sync sent when a player reconnects. */
     serverTs?: number;
 }
 
@@ -190,7 +191,6 @@ export interface GameIdPayload {
 }
 
 export interface ServerToClientEvents {
-    authenticated: (payload: { userId: string }) => void;
     queue_joined: (payload: { position: number; estimated_wait: number }) => void;
     /** Broadcast to every socket. */
     queue_status: (payload: { players_searching: number }) => void;

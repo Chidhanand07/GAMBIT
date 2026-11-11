@@ -94,8 +94,8 @@ describe('rematch', () => {
         jest.spyOn(Math, 'random').mockReturnValue(0.9); // > 0.5 → requester is white
         const toAlice = once(alice, 'rematch_ready');
         const toBob = once(bob, 'rematch_ready');
-        // The sender's identity is irrelevant: both ids come from the payload.
-        bob.emit('rematch_accept', { from_user_id: 'alice', to_user_id: 'bob', time_control: '5+3', is_rated: false });
+        // The accepter is the verified sender; a `to_user_id` in the payload is ignored [S2].
+        bob.emit('rematch_accept', { from_user_id: 'alice', to_user_id: 'mallory', time_control: '5+3', is_rated: false });
 
         expect(await toAlice).toEqual({ game_id: 'rm-1' });
         expect(await toBob).toEqual({ game_id: 'rm-1' });
@@ -123,10 +123,11 @@ describe('rematch', () => {
 
     test('rematch_accept with Math.random() <= 0.5 makes the requester black', async () => {
         const alice = await ctx.connect('alice');
+        const bob = await ctx.connect('bob');
         queuePrivateGameFlow('rm-2');
         jest.spyOn(Math, 'random').mockReturnValue(0.2);
         const p = once(alice, 'rematch_ready');
-        alice.emit('rematch_accept', { from_user_id: 'alice', to_user_id: 'bob', time_control: '10', is_rated: true });
+        bob.emit('rematch_accept', { from_user_id: 'alice', time_control: '10', is_rated: true });
         await p;
         expectPrivateGameOps({ gameId: 'rm-2', host: 'alice', hostColor: 'black', joiner: 'bob', timeControl: '10', isRated: true });
     });
@@ -223,11 +224,23 @@ describe('challenges', () => {
         expect(await p).toEqual({ by: 'Bob' });
     });
 
-    test('social events work from unauthenticated sockets (ids are trusted, BUG pinned)', async () => {
+    test('the sender of a challenge is the verified user, never the payload id [S2]', async () => {
         const bob = await ctx.connect('bob');
-        const anon = await ctx.connect();
+        const mallory = await ctx.connect('mallory');
         const p = once(bob, 'challenge_request');
-        anon.emit('challenge_request', { from_user_id: 'impersonated', to_user_id: 'bob' });
-        expect(await p).toEqual({ from_user_id: 'impersonated', to_user_id: 'bob' });
+        mallory.emit('challenge_request', { from_user_id: 'impersonated', to_user_id: 'bob' });
+        expect(await p).toEqual({ from_user_id: 'mallory', to_user_id: 'bob' });
+        await sleep(30);
+        expect(supabase.op(supabase.callsFor('notifications')[0], 'insert')[0].payload.from_user_id).toBe('mallory');
+    });
+
+    test('an unauthenticated client cannot connect, so it cannot send social events [S2]', async () => {
+        const bob = await ctx.connect('bob');
+        const got = record(bob, 'challenge_request');
+        const anon = ctx.open(undefined);
+        expect((await once(anon, 'connect_error')).message).toBe('unauthorized');
+        anon.emit('challenge_request', { from_user_id: 'alice', to_user_id: 'bob' });
+        await sleep(50);
+        expect(got).toEqual([]);
     });
 });

@@ -1,0 +1,56 @@
+/**
+ * src/sockets/auth.js — handshake identity [S2] (NODE-10, SEC-09).
+ */
+const { createHandshakeAuth } = require('../../src/sockets/auth');
+
+const socketWith = (auth) => ({ handshake: { auth }, data: {} });
+
+function run(middleware, socket) {
+    return new Promise((resolve) => middleware(socket, (err) => resolve(err)));
+}
+
+beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
+afterEach(() => jest.restoreAllMocks());
+
+test('a verified token stores the user id on socket.data and lets the connection through', async () => {
+    const verifyToken = jest.fn(async () => 'user-1');
+    const socket = socketWith({ token: 'good-token' });
+    expect(await run(createHandshakeAuth({ verifyToken }), socket)).toBeUndefined();
+    expect(verifyToken).toHaveBeenCalledWith('good-token');
+    expect(socket.data.userId).toBe('user-1');
+});
+
+test.each([
+    ['no auth object', undefined],
+    ['no token', {}],
+    ['empty token', { token: '' }],
+    ['non-string token', { token: { sub: 'user-1' } }],
+    ['oversized token', { token: 'x'.repeat(8193) }],
+    ['a user id instead of a token', { userId: 'user-1' }],
+])('%s is rejected as unauthorized without calling the verifier', async (_name, auth) => {
+    const verifyToken = jest.fn(async () => 'user-1');
+    const socket = socketWith(auth);
+    const err = await run(createHandshakeAuth({ verifyToken }), socket);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('unauthorized');
+    expect(verifyToken).not.toHaveBeenCalled();
+    expect(socket.data.userId).toBeUndefined();
+});
+
+test('a token the verifier does not recognise is rejected', async () => {
+    const socket = socketWith({ token: 'forged' });
+    const err = await run(createHandshakeAuth({ verifyToken: async () => null }), socket);
+    expect(err.message).toBe('unauthorized');
+    expect(socket.data.userId).toBeUndefined();
+});
+
+test('fails closed when the verifier throws (auth service unavailable)', async () => {
+    const verifyToken = async () => {
+        throw new Error('supabase unreachable');
+    };
+    const socket = socketWith({ token: 'good-token' });
+    const err = await run(createHandshakeAuth({ verifyToken }), socket);
+    expect(err.message).toBe('unauthorized');
+    expect(socket.data.userId).toBeUndefined();
+    expect(console.error).toHaveBeenCalledWith('[socket] token verification failed:', 'supabase unreachable');
+});

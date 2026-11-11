@@ -18,6 +18,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-001](#f-001) | Branch from `origin/main`, target `preprod` | 1 | — |
 | [F-002](#f-002) | `GAMBIT_ENGINE_URL` is canonical; `ENGINE_URL` stays as a warned fallback | 1 | G5 |
 | [F-003](#f-003) | Socket payload schemas: strip mode, slug-safe ids, brief's ack shape | 1 | S15 |
+| [F-004](#f-004) | Socket identity: handshake token verified by Supabase Auth; no socket for signed-out users | 1 | S2, G13 |
 
 ---
 
@@ -83,3 +84,49 @@ instead of one file per ADR under `docs/refactor/adr/`.
   reasons above. NODE-07 says unknown errors and `uncaughtException` must log and exit; only the
   `unhandledRejection` logger the brief asked for was added, and it logs without exiting so one
   stray rejection cannot end every live game. `uncaughtException` keeps Node's default (exit).
+
+## F-004
+
+**Socket identity comes from a handshake token verified by Supabase Auth (S2, G13).**
+
+- **Context.** The `authenticate` event stored whatever user id the client sent. Every
+  identity-dependent check on the game server (turn order, chat sender, queue ownership) sat on
+  top of that claim, so anyone could act as anyone.
+- **Options.**
+  1. Verification: (a) verify the JWT locally with the project JWT secret; (b) verify against
+     the JWKS with `jose`; (c) `supabase.auth.getUser(token)` on the server's Supabase client.
+  2. Signed-out visitors: (a) allow anonymous connections with no identity; (b) refuse them.
+  3. `leave_queue` / `join_queue` payload ids: (a) reject payloads that carry a different id;
+     (b) ignore payload ids entirely.
+- **Decision.** 1c, 2b, 3b.
+  - `server/src/services/tokenVerifier.js` wraps `auth.getUser`; `server/src/sockets/auth.js`
+    is the `io.use` middleware. It rejects with `unauthorized` when the token is missing,
+    malformed, unknown, or when verification throws (fail closed, SEC-09), and stores
+    `socket.data.userId`.
+  - On connection the server registers the session, joins `user_<id>` and runs the reconnect
+    logic that `authenticate` used to run. The `authenticate` handler and the `authenticated`
+    reply are deleted.
+  - Handlers overwrite the acting id from `socket.data.userId` (`join_queue.user`,
+    `from_user_id` on requests, `to_user_id` on accepts); the schemas do not even name those
+    keys, so they are stripped before a service sees them.
+  - Frontend: `lib/socket/connection.ts` passes `auth: (cb) => cb({ token })`, read from the
+    Supabase session on every connect and reconnect. `SocketProvider` creates the socket only
+    while a profile is loaded and closes it on sign-out. All `emit('authenticate')` calls are gone.
+- **Why.**
+  - *`getUser`*: it works unchanged for legacy HS256 projects and for projects on asymmetric
+    signing keys, needs no extra secret on the game server, and also catches revoked sessions.
+    The cost is one Auth round trip per connection (not per event), which is acceptable.
+  - *Refuse anonymous sockets*: no page uses the socket while signed out (the lobby player count
+    comes from Supabase presence, not `queue_status`), so an anonymous connection has no feature
+    to serve and would only be an unauthenticated entry point (least privilege).
+  - *Ignore rather than reject payload ids*: the deployed frontend still sends
+    `join_queue.user` and `leave_queue(<id>)`. Ignoring them keeps old tabs working through a
+    rolling deploy while making the values irrelevant.
+- **Known limits (logged for the next phase).**
+  - The token is checked when the connection is made. A socket that stays connected past the
+    token's expiry keeps its identity until it reconnects (NODE-14 territory).
+  - socket.io does not retry a handshake the server refused, so the client retries an
+    `unauthorized` refusal itself every 5 s (covers a token that was mid-refresh).
+  - **Deploy order:** an old frontend cannot connect to the new server (it sends no token), and
+    a new frontend works against the old server but is not protected by it. Deploy the server
+    and the frontend together; see the report's manual steps.
