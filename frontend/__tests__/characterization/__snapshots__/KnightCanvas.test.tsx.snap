@@ -1,0 +1,130 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`KnightBackground landing mode draws a deterministic frame sequence 1`] = `
+{
+  "digest": "01971db75c2ec4f0",
+  "entries": 992,
+}
+`;
+
+exports[`KnightBackground lobby mode draws a deterministic frame sequence 1`] = `
+{
+  "digest": "89154edf57a6d362",
+  "entries": 440,
+}
+`;
+
+exports[`KnightIntro full 17.5 s timeline: overlay/intro opacity and onComplete 1`] = `
+[
+  [
+    0,
+    "1",
+    "0",
+  ],
+  [
+    1000,
+    "1",
+    "0",
+  ],
+  [
+    2000,
+    "1",
+    "0",
+  ],
+  [
+    3000,
+    "1",
+    "0",
+  ],
+  [
+    4000,
+    "1",
+    "0",
+  ],
+  [
+    5000,
+    "1",
+    "0",
+  ],
+  [
+    6000,
+    "1",
+    "0",
+  ],
+  [
+    7000,
+    "1",
+    "0",
+  ],
+  [
+    8000,
+    "1",
+    "0",
+  ],
+  [
+    9000,
+    "1",
+    "0",
+  ],
+  [
+    10000,
+    "1",
+    "0",
+  ],
+  [
+    11000,
+    "1",
+    "0",
+  ],
+  [
+    12000,
+    "1",
+    "0.7037037037037036",
+  ],
+  [
+    13000,
+    "1",
+    "0.9629629629629629",
+  ],
+  [
+    14000,
+    "1",
+    "1",
+  ],
+  [
+    15000,
+    "1",
+    "1",
+  ],
+  [
+    16000,
+    "1",
+    "1",
+  ],
+  [
+    17000,
+    "0.2222222222222221",
+    "0.2222222222222221",
+  ],
+  [
+    18000,
+    "0",
+    "0",
+  ],
+]
+`;
+
+exports[`KnightIntro full 17.5 s timeline: overlay/intro opacity and onComplete 2`] = `
+{
+  "digest": "b6fb894fb180db52",
+  "entries": 83116,
+}
+`;
+
+exports[`KnightIntro sampling helpers map silhouette pixels into the destination box 1`] = `
+{
+  "edge": "e1414dded74a8e7d",
+  "log": "ad5c7e87a4dd4d3d",
+  "pts": "80636ce6b81a0f14",
+}
+`;
