@@ -4,12 +4,19 @@ import chess
 import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from engine import get_engine, get_stockfish_instance, release_stockfish_instance, analyze_move_cp, compute_game_accuracy
+from engine import (
+    get_engine,
+    get_stockfish_instance,
+    release_stockfish_instance,
+    analyze_move_cp,
+    compute_game_accuracy,
+)
 from style_engine import get_style_move, style_model_loaded
 from computer_engine import get_computer_move
 
 # Setup Supabase client
 from supabase import create_client, Client
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 supabase: Client = None
@@ -18,28 +25,34 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 app = FastAPI(title="Gambit Engine")
 
+
 class MoveReq(BaseModel):
     fen: str
     move: str
+
 
 class GameAnalysisReq(BaseModel):
     game_id: str
     pgn: str
     time_control: str
 
+
 class MoveClassifyReq(BaseModel):
     fen: str
     move: str
 
+
 class AnalyzeReq(BaseModel):
     fen: str
     depth: int = 18
+
 
 @app.get("/health")
 def health():
     sf = get_stockfish_instance(depth=1)
     status = "Engine unavailable" if not sf else "online"
     return {"status": "ok", "engine": status}
+
 
 @app.post("/validate-move")
 def validate_move(req: MoveReq):
@@ -55,12 +68,13 @@ def validate_move(req: MoveReq):
                     "is_check": b.is_check(),
                     "is_checkmate": b.is_checkmate(),
                     "is_stalemate": b.is_stalemate(),
-                    "is_game_over": b.is_game_over()
-                }
+                    "is_game_over": b.is_game_over(),
+                },
             }
         return {"valid": False}
     except Exception as e:
         return {"valid": False, "error": str(e)}
+
 
 @app.post("/valid-moves")
 def valid_moves(req: MoveReq):
@@ -69,6 +83,7 @@ def valid_moves(req: MoveReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid FEN: {e}")
     return {"valid_moves": [m.uci() for m in b.legal_moves]}
+
 
 def run_full_game_analysis(game_id: str, pgn: str):
     sf = get_stockfish_instance(depth=18)
@@ -80,20 +95,21 @@ def run_full_game_analysis(game_id: str, pgn: str):
     try:
         import io
         import chess.pgn
+
         pgn_io = io.StringIO(pgn)
         game = chess.pgn.read_game(pgn_io)
-    
+
         if not game:
             return
-        
+
         board = game.board()
-    
+
         white_accuracies = []
         black_accuracies = []
         white_classifications = []
         black_classifications = []
         critical_moments = []
-        eval_graph = []   # white-perspective centipawns per ply, for the advantage chart
+        eval_graph = []  # white-perspective centipawns per ply, for the advantage chart
 
         move_number = 1
         ply = 0
@@ -136,15 +152,17 @@ def run_full_game_analysis(game_id: str, pgn: str):
                 black_classifications.append(move_entry)
 
             if classification in ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]:
-                critical_moments.append({
-                    "move_number": move_number,
-                    "type": classification,
-                    "best_move": best_uci,
-                    "played_move": played_uci,
-                    "eval_before": eb,
-                    "eval_after": ea,
-                    "description": f"{'White' if player_color == chess.WHITE else 'Black'} played a {classification}"
-                })
+                critical_moments.append(
+                    {
+                        "move_number": move_number,
+                        "type": classification,
+                        "best_move": best_uci,
+                        "played_move": played_uci,
+                        "eval_before": eb,
+                        "eval_after": ea,
+                        "description": f"{'White' if player_color == chess.WHITE else 'Black'} played a {classification}",
+                    }
+                )
 
             board.push(move)
             ply += 1
@@ -153,22 +171,25 @@ def run_full_game_analysis(game_id: str, pgn: str):
 
         white_acc = round(sum(white_accuracies) / len(white_accuracies), 1) if white_accuracies else 100.0
         black_acc = round(sum(black_accuracies) / len(black_accuracies), 1) if black_accuracies else 100.0
-    
+
         if supabase:
             try:
-                supabase.table('games').update({
-                    'white_accuracy': white_acc,
-                    'black_accuracy': black_acc,
-                    'white_move_classifications': white_classifications,
-                    'black_move_classifications': black_classifications,
-                    'critical_moments': critical_moments,
-                }).eq('id', game_id).execute()
+                supabase.table("games").update(
+                    {
+                        "white_accuracy": white_acc,
+                        "black_accuracy": black_acc,
+                        "white_move_classifications": white_classifications,
+                        "black_move_classifications": black_classifications,
+                        "critical_moments": critical_moments,
+                    }
+                ).eq("id", game_id).execute()
                 # Note: the eval graph is derived client-side from each move entry's
                 # `eval_white`, so no separate `eval_graph` column is required.
             except Exception as e:
                 print("Failed to save analysis to supabase:", e)
     finally:
         release_stockfish_instance(sf)
+
 
 @app.post("/analyse-game")
 def analyse_game(req: GameAnalysisReq, bg_tasks: BackgroundTasks):
@@ -177,9 +198,10 @@ def analyse_game(req: GameAnalysisReq, bg_tasks: BackgroundTasks):
     if not sf_check:
         raise HTTPException(status_code=503, detail="Engine unavailable")
     release_stockfish_instance(sf_check)
-    
+
     bg_tasks.add_task(run_full_game_analysis, req.game_id, req.pgn)
     return {"status": "Analysis queued"}
+
 
 @app.post("/analyze")
 def analyze_position(req: AnalyzeReq):
@@ -217,9 +239,11 @@ class StyleMoveReq(BaseModel):
     fen: str
     top_k: int = 3
 
+
 @app.get("/style-move/health")
 def style_move_health():
     return {"model_loaded": style_model_loaded()}
+
 
 @app.post("/style-move")
 def style_move(req: StyleMoveReq):
@@ -228,14 +252,14 @@ def style_move(req: StyleMoveReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if result is None:
-        raise HTTPException(status_code=422,
-                             detail="Style model not loaded or no legal moves in position.")
+        raise HTTPException(status_code=422, detail="Style model not loaded or no legal moves in position.")
     return result
 
 
 class ComputerMoveReq(BaseModel):
     fen: str
     difficulty: str = "medium"
+
 
 @app.post("/computer-move")
 def computer_move(req: ComputerMoveReq):
@@ -245,6 +269,5 @@ def computer_move(req: ComputerMoveReq):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if result is None:
-        raise HTTPException(status_code=422,
-                             detail="No move available (game over or no legal moves).")
+        raise HTTPException(status_code=422, detail="No move available (game over or no legal moves).")
     return result

@@ -9,6 +9,7 @@ reports "engine unavailable" (None); tests that need an engine use the
 The real style model (style_model.pt) is used, so MAVERICK tests exercise the
 real policy network on CPU.
 """
+
 import contextlib
 import sys
 from unittest.mock import MagicMock
@@ -19,7 +20,7 @@ import pytest
 # Keep the old behaviour for environments without the python package.
 _stockfish_stub = MagicMock()
 _stockfish_stub.Stockfish = MagicMock
-sys.modules.setdefault('stockfish', _stockfish_stub)
+sys.modules.setdefault("stockfish", _stockfish_stub)
 
 
 class FakeStockfish:
@@ -33,7 +34,7 @@ class FakeStockfish:
 
     def __init__(self, best=None, evaluate=None, top_cp=0):
         self._best = best or (lambda b: next(iter(b.legal_moves), None))
-        self._evaluate = evaluate or (lambda b: {'type': 'cp', 'value': 0})
+        self._evaluate = evaluate or (lambda b: {"type": "cp", "value": 0})
         self._top_cp = top_cp
         self.board = chess.Board()
         self.depth = None
@@ -57,8 +58,8 @@ class FakeStockfish:
             return []
         top_cp = self._top_cp(self.board) if callable(self._top_cp) else self._top_cp
         if isinstance(top_cp, dict):  # {'Mate': k}
-            return [{'Move': mv.uci(), 'Centipawn': None, 'Mate': top_cp['Mate']}][:n]
-        return [{'Move': mv.uci(), 'Centipawn': top_cp, 'Mate': None}][:n]
+            return [{"Move": mv.uci(), "Centipawn": None, "Mate": top_cp["Mate"]}][:n]
+        return [{"Move": mv.uci(), "Centipawn": top_cp, "Mate": None}][:n]
 
 
 class EngineSwitch:
@@ -76,6 +77,7 @@ class EngineSwitch:
         @contextlib.contextmanager
         def _cm():
             yield inst
+
         return _cm()
 
     def acquire(self, depth=15):
@@ -96,11 +98,11 @@ def engine_switch(monkeypatch):
 
     sw = EngineSwitch()
     for mod in (engine, computer_engine, main):
-        if hasattr(mod, 'get_engine'):
-            monkeypatch.setattr(mod, 'get_engine', sw.ctx)
+        if hasattr(mod, "get_engine"):
+            monkeypatch.setattr(mod, "get_engine", sw.ctx)
     for mod in (engine, main):
-        monkeypatch.setattr(mod, 'get_stockfish_instance', sw.acquire)
-        monkeypatch.setattr(mod, 'release_stockfish_instance', sw.release)
+        monkeypatch.setattr(mod, "get_stockfish_instance", sw.acquire)
+        monkeypatch.setattr(mod, "release_stockfish_instance", sw.release)
     return sw
 
 
@@ -115,4 +117,5 @@ def stockfish(engine_switch):
 def client():
     from fastapi.testclient import TestClient
     import main
+
     return TestClient(main.app)
