@@ -1,101 +1,70 @@
-const gamesRepo = require('../src/repositories/gamesRepository').createGamesRepository(require('../supabase').supabase);
-const pairing = require('../src/domain/matchmaking/pairing');
-const { createInitialGameState } = require('../src/domain/gameState');
+// @ts-check
+/**
+ * Legacy seam: `new MatchmakingService(io)` starts the 1 s pairing loop.
+ * Queue and pairing logic live in src/services/matchmakingService.js.
+ */
+const gameStore = require('../lib/gameStore');
+const { supabase } = require('../supabase');
+const { createGamesRepository } = require('../src/repositories/gamesRepository');
+const { createProfilesRepository } = require('../src/repositories/profilesRepository');
+const { createMatchmakingService } = require('../src/services/matchmakingService');
+const { createIoEmitter } = require('../src/services/emitter');
+
+const PAIRING_INTERVAL_MS = 1000;
 
 class MatchmakingService {
+    /**
+     * @param {import('../src/services/emitter').IoLike} io
+     */
     constructor(io) {
         this.io = io;
-        // In-memory queue:
-        // { userId: { user_id, username, rating, time_control, increment, joined_at, socketId } }
-        this.queue = new Map();
-        this._interval = setInterval(() => this.matchPlayers(), 1000);
-    }
-
-    joinQueue(user, socketId, timeControl, increment, isRated = true) {
-        if (this.queue.has(user.id)) return;
-
-        this.queue.set(user.id, pairing.createQueueEntry({
-            user, socketId, timeControl, increment, isRated, now: Date.now(),
-        }));
-        
-        this.io.to(socketId).emit('queue_joined', { 
-            position: this.queue.size, 
-            estimated_wait: 10 
+        this.service = createMatchmakingService({
+            gamesRepo: createGamesRepository(supabase),
+            profilesRepo: createProfilesRepository(supabase),
+            gameStore,
+            emitter: createIoEmitter(io),
         });
+        /** userId → queue entry; shared with the service. */
+        this.queue = this.service.queue;
+        this._interval = setInterval(() => this.matchPlayers(), PAIRING_INTERVAL_MS);
     }
 
+    /**
+     * @param {{ id: string, username: string, rating?: number | null, games_played?: number | null }} user
+     * @param {string} socketId
+     * @param {unknown} timeControl
+     * @param {unknown} increment
+     * @param {boolean} [isRated]
+     */
+    // eslint-disable-next-line max-params -- legacy public signature pinned by __tests__/matchmaking.test.js
+    joinQueue(user, socketId, timeControl, increment, isRated) {
+        this.service.joinQueue({ user, socketId, timeControl, increment, isRated });
+    }
+
+    /** @param {string} userId */
     leaveQueue(userId) {
-        this.queue.delete(userId);
+        this.service.leaveQueue(userId);
     }
 
     destroy() {
         clearInterval(this._interval);
     }
 
+    /** @param {number} elapsedSec */
     getSearchRadius(elapsedSec) {
-        return pairing.getSearchRadius(elapsedSec);
+        return this.service.getSearchRadius(elapsedSec);
     }
 
-    async matchPlayers() {
-        // Sort by longest waiting
-        const players = pairing.sortByLongestWaiting(Array.from(this.queue.values()));
-        const paired = new Set();
-
-        for (let i = 0; i < players.length; i++) {
-            const p1 = players[i];
-            if (paired.has(p1.user_id)) continue;
-
-            // Candidates are sorted by joined_at, so the first match is the longest-waiting one
-            const candidates = players.slice(i + 1).filter((p) => !paired.has(p.user_id));
-            const bestMatch = pairing.findOpponent(p1, candidates, () => Date.now());
-
-            if (bestMatch) {
-                paired.add(p1.user_id);
-                paired.add(bestMatch.user_id);
-                await this.createGame(p1, bestMatch);
-            }
-        }
-
-        // broadcast queue status
-        this.io.emit('queue_status', { players_searching: this.queue.size });
+    matchPlayers() {
+        return this.service.matchPlayers();
     }
 
-    async createGame(p1, p2) {
-        this.queue.delete(p1.user_id);
-        this.queue.delete(p2.user_id);
-
-        let white, black;
-        if (Math.random() > 0.5) { white = p1; black = p2; }
-        else { white = p2; black = p1; }
-
-        const { data, error } = await gamesRepo.insertReturning({
-            white_id: white.user_id,
-            black_id: black.user_id,
-            time_control: p1.time_control,
-            increment: p1.increment,
-            status: 'active',
-            started_at: new Date().toISOString()
-        });
-
-        if (error || !data) {
-            console.error('[matchmaking] createGame error:', error?.message)
-            return
-        }
-
-        // Write initial game state to Redis
-        const { setGame, addActiveGame } = require('../lib/gameStore')
-
-        await setGame(data.id, createInitialGameState({
-            id: data.id,
-            whiteId: white.user_id,
-            blackId: black.user_id,
-            timeControl: p1.time_control,
-            isRated: p1.isRated ?? true,
-        }))
-        await addActiveGame(data.id)
-
-        this.io.to(white.socketId).emit('match_found', { ...data, color: 'white', opponent: black });
-        this.io.to(black.socketId).emit('match_found', { ...data, color: 'black', opponent: white });
+    /**
+     * @param {import('../src/domain/matchmaking/pairing').QueueEntry} p1
+     * @param {import('../src/domain/matchmaking/pairing').QueueEntry} p2
+     */
+    createGame(p1, p2) {
+        return this.service.createGame(p1, p2);
     }
 }
 
