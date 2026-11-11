@@ -13,7 +13,6 @@ max-complexity = 10  # SIZE-03
 # must not edit (tests stay unchanged). The list may only shrink (same ratchet
 # policy as the JS packages). Application modules are fully clean since PR 17.
 [lint.per-file-ignores]
-"main.py" = ["B904", "E501", "F401", "I001"]
 "tests/conftest.py" = ["I001"]
 "tests/test_engine.py" = ["F401", "I001"]
 "tests/test_scoring.py" = ["I001"]
