@@ -22,9 +22,9 @@ import chess
 import numpy as np
 import torch
 
-from model import encode_board, legal_move_mask
-from style_engine import _load_model, _device
 from engine import get_engine
+from model import encode_board, legal_move_mask
+from style_engine import _device, _load_model
 
 BLUNDER_CP = 300  # medium: style move must stay within this loss, else engine best
 HARD_MAX_LOSS = 50  # hard: style move must be near-best, else engine best
@@ -184,7 +184,7 @@ def _fallback_move(fen: str):
     return random.choice(legal) if legal else None
 
 
-def get_computer_move(fen: str, difficulty: str = "medium"):
+def get_computer_move(fen: str, difficulty: str = "medium") -> dict[str, str] | None:
     """
     Return MAVERICK's move for `fen` at the given difficulty as
     {"uci", "san", "difficulty"}, or None if the game is over / no legal move.
@@ -192,8 +192,8 @@ def get_computer_move(fen: str, difficulty: str = "medium"):
     """
     try:
         board = chess.Board(fen)
-    except ValueError:
-        raise ValueError(f"Invalid FEN: {fen}")
+    except ValueError as e:
+        raise ValueError(f"Invalid FEN: {fen}") from e
 
     if board.is_game_over() or not any(board.legal_moves):
         return None
