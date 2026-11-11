@@ -6,13 +6,12 @@ import Link from 'next/link';
 import { Timer, Zap, Flame, BookOpen, Loader2, Users } from 'lucide-react';
 import { useSocket } from '@/components/SocketProvider';
 import { createClient } from '@/lib/supabase/client';
+import { SPEED_BUCKET_LABELS, speedBucketForMinutes } from '@/lib/chess/timeControl';
 
 function tcLabel(tc: string) {
-    const min = parseInt(tc)
-    if (min <= 2) return { label: 'Bullet', icon: <Zap size={18} strokeWidth={1.5} /> }
-    if (min <= 5) return { label: 'Blitz', icon: <Flame size={18} strokeWidth={1.5} /> }
-    if (min <= 15) return { label: 'Rapid', icon: <Timer size={18} strokeWidth={1.5} /> }
-    return { label: 'Classical', icon: <BookOpen size={18} strokeWidth={1.5} /> }
+    const bucket = speedBucketForMinutes(parseInt(tc))
+    const Icon = { bullet: Zap, blitz: Flame, rapid: Timer, classical: BookOpen }[bucket]
+    return { label: SPEED_BUCKET_LABELS[bucket], icon: <Icon size={18} strokeWidth={1.5} /> }
 }
 
 export default function JoinPage({ params }: { params: { token: string } }) {

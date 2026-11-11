@@ -8,6 +8,9 @@ import { Flag, ChevronLeft, ChevronRight, SkipBack, SkipForward, RotateCcw, Volu
 import { playMoveSound, playCaptureSound, playCastleSound, playCheckSound, playCheckmateSound, playPromoteSound, playGameStartSound, playGameEndSound } from '@/lib/sounds';
 import { useSocket } from '@/components/SocketProvider';
 import { useProfile } from '@/components/ProfileProvider';
+import { coordsToSq } from '@/lib/chess/board';
+import { fmtTime } from '@/lib/chess/clock';
+import { parseBaseMinutes } from '@/lib/chess/timeControl';
 
 // ── Piece images (chess.com classic set) ─────────────────────────────────────
 function Piece({ color, type }: { color: Color; type: string }) {
@@ -21,18 +24,6 @@ function Piece({ color, type }: { color: Color; type: string }) {
             style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
         />
     )
-}
-
-function sqToCoords(sq: string): [number, number] {
-    return [sq.charCodeAt(0) - 97, parseInt(sq[1]) - 1]
-}
-function coordsToSq(file: number, rank: number): Square {
-    return `${String.fromCharCode(97 + file)}${rank + 1}` as Square
-}
-function fmtTime(s: number): string {
-    const m = Math.floor(Math.abs(s) / 60).toString().padStart(2, '0')
-    const ss = (Math.abs(s) % 60).toString().padStart(2, '0')
-    return `${m}:${ss}`
 }
 
 // ── Rating change animation ───────────────────────────────────────────────────
@@ -304,7 +295,7 @@ export default function GamePage({ params }: { params: { id: string } }) {
             const startingFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
             const isResume = !!(gd.fen && gd.fen !== startingFen)
             if (gd.fen) { chessRef.current.load(gd.fen); setFen(gd.fen) }
-            const mins = parseInt(gd.time_control) || 10
+            const mins = parseBaseMinutes(gd.time_control)
             // Only preset clock if clock_sync hasn't arrived yet (prevents overwriting the synced value)
             if (!clockSyncedRef.current) {
                 setWhiteTime(mins * 60)
