@@ -1,4 +1,6 @@
 const { supabase } = require('../supabase');
+const pairing = require('../src/domain/matchmaking/pairing');
+const { createInitialGameState } = require('../src/domain/gameState');
 
 class MatchmakingService {
     constructor(io) {
@@ -12,20 +14,9 @@ class MatchmakingService {
     joinQueue(user, socketId, timeControl, increment, isRated = true) {
         if (this.queue.has(user.id)) return;
 
-        const isProvisional = (user.games_played || 0) < 5;
-        const rating = user.rating || 1200;
-
-        this.queue.set(user.id, {
-            user_id: user.id,
-            username: user.username,
-            rating,
-            isProvisional,
-            time_control: timeControl,
-            increment,
-            isRated,
-            joined_at: Date.now(),
-            socketId
-        });
+        this.queue.set(user.id, pairing.createQueueEntry({
+            user, socketId, timeControl, increment, isRated, now: Date.now(),
+        }));
         
         this.io.to(socketId).emit('queue_joined', { 
             position: this.queue.size, 
@@ -42,62 +33,21 @@ class MatchmakingService {
     }
 
     getSearchRadius(elapsedSec) {
-        if (elapsedSec <= 10) return 50;
-        if (elapsedSec <= 20) return 100;
-        if (elapsedSec <= 35) return 150;
-        if (elapsedSec <= 60) return 250;
-        if (elapsedSec <= 120) return 400;
-        return 9999;
+        return pairing.getSearchRadius(elapsedSec);
     }
 
     async matchPlayers() {
-        const players = Array.from(this.queue.values());
-        const paired = new Set();
-        
         // Sort by longest waiting
-        players.sort((a, b) => a.joined_at - b.joined_at);
+        const players = pairing.sortByLongestWaiting(Array.from(this.queue.values()));
+        const paired = new Set();
 
         for (let i = 0; i < players.length; i++) {
-            let p1 = players[i];
+            const p1 = players[i];
             if (paired.has(p1.user_id)) continue;
-            
-            let p1Elapsed = (Date.now() - p1.joined_at) / 1000;
-            let radius1 = this.getSearchRadius(p1Elapsed);
 
-            let bestMatch = null;
-            let longestWait = -1;
-
-            for (let j = i + 1; j < players.length; j++) {
-                let p2 = players[j];
-                if (paired.has(p2.user_id)) continue;
-                if (p1.time_control !== p2.time_control) continue;
-                
-                let p2Elapsed = (Date.now() - p2.joined_at) / 1000;
-                let radius2 = this.getSearchRadius(p2Elapsed);
-
-                // Check Rating compatibility
-                let isMatch = false;
-                
-                if (p1.isProvisional && p2.isProvisional) {
-                    isMatch = true;
-                } else if (p1.isProvisional) {
-                    isMatch = (p2.rating >= 800 && p2.rating <= 1400);
-                } else if (p2.isProvisional) {
-                    isMatch = (p1.rating >= 800 && p1.rating <= 1400);
-                } else {
-                    let diff = Math.abs(p1.rating - p2.rating);
-                    if (diff <= radius1 || diff <= radius2) {
-                        isMatch = true;
-                    }
-                }
-
-                if (isMatch) {
-                    // Pick the one waiting the longest if multiple candidates exist 
-                    // (since outer loop and inner loop are sorted by joined_at, the first match found is implicitly the longest waiting available match)
-                    bestMatch = p2;
-                    break;
-                }
-            }
+            // Candidates are sorted by joined_at, so the first match is the longest-waiting one
+            const candidates = players.slice(i + 1).filter((p) => !paired.has(p.user_id));
+            const bestMatch = pairing.findOpponent(p1, candidates, () => Date.now());
 
             if (bestMatch) {
                 paired.add(p1.user_id);
@@ -105,7 +55,7 @@ class MatchmakingService {
                 await this.createGame(p1, bestMatch);
             }
         }
-        
+
         // broadcast queue status
         this.io.emit('queue_status', { players_searching: this.queue.size });
     }
@@ -134,28 +84,14 @@ class MatchmakingService {
 
         // Write initial game state to Redis
         const { setGame, addActiveGame } = require('../lib/gameStore')
-        const { parseIncrement } = require('./clock')
-        const mins = parseInt(p1.time_control) || 10
-        const clockMs = mins * 60 * 1000
 
-        await setGame(data.id, {
+        await setGame(data.id, createInitialGameState({
             id: data.id,
-            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
             whiteId: white.user_id,
             blackId: black.user_id,
-            whiteClockMs: clockMs,
-            blackClockMs: clockMs,
-            activeSide: 'w',
-            status: 'active',
-            result: null,
-            reason: null,
-            moveLog: [],
             timeControl: p1.time_control,
-            incrementMs: parseIncrement(p1.time_control),
             isRated: p1.isRated ?? true,
-            lastMoveAt: null,
-            disconnectInfo: null,
-        })
+        }))
         await addActiveGame(data.id)
 
         this.io.to(white.socketId).emit('match_found', { ...data, color: 'white', opponent: black });

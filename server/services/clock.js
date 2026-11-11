@@ -1,15 +1,17 @@
 const { getGame, setGame, getActiveGameIds, removeActiveGame } = require('../lib/gameStore')
 const { supabase } = require('../supabase')
+const { parseIncrementMs } = require('../src/domain/timeControl')
+const { tickerSnapshot, isGraceExpired } = require('../src/domain/clock')
+const { resultLabel, opponentColor, sideToColor, colorOfPlayer, playerIdOf } = require('../src/domain/result')
 
 let globalTicker = null
 
 function parseIncrement(timeControl) {
-    const parts = String(timeControl || '0').split('+')
-    return (parseInt(parts[1]) || 0) * 1000
+    return parseIncrementMs(timeControl)
 }
 
 async function finalizeExpiredGame(io, gameId, game, winnerId, reason) {
-    const outcome = winnerId === game.whiteId ? 'white' : 'black'
+    const outcome = colorOfPlayer(winnerId, game.whiteId)
 
     const { data: updated } = await supabase.from('games')
         .update({ status: 'completed', winner_id: winnerId, ended_at: new Date().toISOString(), final_fen: game.fen ?? null })
@@ -42,29 +44,19 @@ function startGlobalClock(io) {
                     if (!game || game.status !== 'active' || !game.lastMoveAt) return
 
                     const now = Date.now()
-                    const elapsed = now - game.lastMoveAt
-                    const side = game.activeSide
-
                     // Real remaining for the active player
-                    const remaining = side === 'w'
-                        ? Math.max(0, game.whiteClockMs - elapsed)
-                        : Math.max(0, game.blackClockMs - elapsed)
-
-                    const wMs = side === 'w' ? remaining : game.whiteClockMs
-                    const bMs = side === 'b' ? remaining : game.blackClockMs
+                    const { remainingMs: remaining, whiteMs: wMs, blackMs: bMs } = tickerSnapshot(game, now)
 
                     io.to(`game_${gameId}`).emit('clock_sync', { whiteMs: wMs, blackMs: bMs, serverTs: now })
 
                     // ── Disconnect grace period check (20 s) ──
                     if (game.disconnectInfo) {
-                        const disconnectElapsed = now - game.disconnectInfo.at
-                        if (disconnectElapsed >= 20000) {
-                            const loserSide = game.disconnectInfo.side
-                            const loserId = loserSide === 'white' ? game.whiteId : game.blackId
-                            const winnerId = loserSide === 'white' ? game.blackId : game.whiteId
-                            const result = loserSide === 'white' ? 'Black wins' : 'White wins'
+                        if (isGraceExpired(game.disconnectInfo, now)) {
+                            const winnerColor = opponentColor(game.disconnectInfo.side)
+                            const winnerId = playerIdOf(winnerColor, game)
+                            const result = resultLabel(winnerColor)
 
-                            await setGame(gameId, { ...game, status: 'completed', result: loserSide === 'white' ? 'black' : 'white' })
+                            await setGame(gameId, { ...game, status: 'completed', result: winnerColor })
                             await removeActiveGame(gameId)
 
                             io.to(`game_${gameId}`).emit('game_end', {
@@ -78,11 +70,11 @@ function startGlobalClock(io) {
 
                     // ── Clock timeout ──
                     if (remaining <= 0) {
-                        const loserIsWhite = side === 'w'
-                        const winnerId = loserIsWhite ? game.blackId : game.whiteId
-                        const result = loserIsWhite ? 'Black wins' : 'White wins'
+                        const winnerColor = opponentColor(sideToColor(game.activeSide))
+                        const winnerId = playerIdOf(winnerColor, game)
+                        const result = resultLabel(winnerColor)
 
-                        await setGame(gameId, { ...game, status: 'completed', result: loserIsWhite ? 'black' : 'white' })
+                        await setGame(gameId, { ...game, status: 'completed', result: winnerColor })
                         await removeActiveGame(gameId)
 
                         io.to(`game_${gameId}`).emit('game_end', {
