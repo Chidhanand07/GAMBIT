@@ -26,3 +26,5 @@ frontend/.vercel/
 
 # OS
 .DS_Store
+chess-engine/.venv/
+.claude/
