@@ -4,7 +4,6 @@
     "app/analysis/page.tsx": 473,
     "app/game/[id]/result/page.tsx": 287,
     "app/offline/page.tsx": 370,
-    "components/Navbar.tsx": 350,
-    "lib/supabase/server.ts": 22
+    "components/Navbar.tsx": 350
   }
 }
