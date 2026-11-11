@@ -1,65 +1,21 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextRequest, NextResponse } from 'next/server'
-import { parseBaseMinutes, speedBucketForMinutes } from '@/lib/chess/timeControl'
+import { NextRequest, NextResponse } from 'next/server';
+import { listFinishedGamesForStats } from '@/lib/server/games';
+import { buildProfileStats } from '@/lib/server/profileStats';
+import { getProfileStatsRow } from '@/lib/server/profiles';
+import { createAdminClient } from '@/lib/server/supabase';
 
-export const dynamic = 'force-dynamic'
+export const dynamic = 'force-dynamic';
 
-export async function GET(
-    _req: NextRequest,
-    { params }: { params: { username: string } }
-) {
-    const admin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        { auth: { autoRefreshToken: false, persistSession: false } }
-    )
+// GET /api/profile/[username]/stats — totals, ratings and per-bucket results
+export async function GET(_req: NextRequest, { params }: { params: { username: string } }) {
+    const admin = createAdminClient();
 
-    const { data: profile } = await admin
-        .from('profiles')
-        .select('id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical')
-        .eq('username', params.username)
-        .maybeSingle()
+    const { data: profile } = await getProfileStatsRow(admin, params.username);
 
-    if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
     // Fetch all completed games for this user
-    const { data: games } = await admin
-        .from('games')
-        .select('id, time_control, winner_id, result, white_id, black_id')
-        .or(`white_id.eq.${profile.id},black_id.eq.${profile.id}`)
-        .in('status', ['completed', 'finished', 'ended'])
+    const { data: games } = await listFinishedGamesForStats(admin, profile.id);
 
-    type CategoryStats = { played: number; wins: number; losses: number; draws: number }
-    const stats: Record<string, CategoryStats> = {
-        bullet: { played: 0, wins: 0, losses: 0, draws: 0 },
-        blitz: { played: 0, wins: 0, losses: 0, draws: 0 },
-        rapid: { played: 0, wins: 0, losses: 0, draws: 0 },
-        classical: { played: 0, wins: 0, losses: 0, draws: 0 },
-    }
-
-    for (const game of games ?? []) {
-        const cat = speedBucketForMinutes(parseBaseMinutes(game.time_control ?? '10'))
-        stats[cat].played++
-        if (game.result === 'draw') {
-            stats[cat].draws++
-        } else if (game.winner_id === profile.id) {
-            stats[cat].wins++
-        } else {
-            stats[cat].losses++
-        }
-    }
-
-    return NextResponse.json({
-        total: profile.games_played ?? 0,
-        wins: profile.wins ?? 0,
-        losses: profile.losses ?? 0,
-        draws: profile.draws ?? 0,
-        ratings: {
-            bullet: profile.rating_bullet ?? 1200,
-            blitz: profile.rating_blitz ?? 1200,
-            rapid: profile.rating_rapid ?? 1200,
-            classical: profile.rating_classical ?? 1200,
-        },
-        byCategory: stats,
-    })
+    return NextResponse.json(buildProfileStats(profile, games ?? []));
 }

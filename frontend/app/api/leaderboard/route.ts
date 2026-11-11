@@ -1,33 +1,26 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { listLeaderboard } from '@/lib/server/profiles';
+import { createAdminClient } from '@/lib/server/supabase';
+import type { RatingField } from '@/types/timeControl';
 
-const VALID_FIELDS = new Set([
-    'rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical'
-])
+const VALID_FIELDS = new Set<string>(['rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical']);
 
+const isRatingField = (field: string): field is RatingField => VALID_FIELDS.has(field);
+
+// GET /api/leaderboard?field=rating_<bucket> — top 50 (default rapid)
 export async function GET(request: NextRequest) {
-    const field = request.nextUrl.searchParams.get('field') ?? 'rating_rapid'
+    const field = request.nextUrl.searchParams.get('field') ?? 'rating_rapid';
 
-    if (!VALID_FIELDS.has(field)) {
-        return NextResponse.json({ error: 'Invalid field' }, { status: 400 })
+    if (!isRatingField(field)) {
+        return NextResponse.json({ error: 'Invalid field' }, { status: 400 });
     }
 
-    const admin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        { auth: { autoRefreshToken: false, persistSession: false } }
-    )
-
-    const { data, error } = await admin
-        .from('profiles')
-        .select(`username, display_name, ${field}, games_played, wins, losses, draws`)
-        .order(field, { ascending: false })
-        .limit(50)
+    const { data, error } = await listLeaderboard(createAdminClient(), field);
 
     if (error) {
-        console.error('[api/leaderboard] error:', error.message)
-        return NextResponse.json([], { status: 200 })
+        console.error('[api/leaderboard] error:', error.message);
+        return NextResponse.json([], { status: 200 });
     }
 
-    return NextResponse.json(data ?? [])
+    return NextResponse.json(data ?? []);
 }
