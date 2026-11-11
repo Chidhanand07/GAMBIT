@@ -7,7 +7,11 @@
     "dev:server": "cd server && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "concurrently \"npm run dev:engine\" \"npm run dev:server\" \"npm run dev:frontend\"",
-    "install:all": "npm install && cd server && npm install && cd ../frontend && npm install"
+    "install:all": "npm install && cd server && npm install && cd ../frontend && npm install",
+    "test:server": "cd server && npx jest",
+    "test:frontend": "cd frontend && npx jest",
+    "test:engine": "cd chess-engine && ./venv/bin/python -m pytest -q",
+    "test": "npm run test:server && npm run test:frontend && npm run test:engine"
   },
   "dependencies": {
     "concurrently": "^8.2.2"

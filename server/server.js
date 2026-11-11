@@ -786,7 +786,13 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-    console.log(`Node server running on port ${PORT}`);
-});
+// Only bind a port when started directly (`node server.js`). When the file is
+// required (by the test suite) the caller decides whether and where to listen.
+if (require.main === module) {
+    const PORT = process.env.PORT || 3001;
+    server.listen(PORT, () => {
+        console.log(`Node server running on port ${PORT}`);
+    });
+}
+
+module.exports = { app, server, io, matchmaking, buildPgnFromMoveLog };
