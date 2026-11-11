@@ -73,19 +73,31 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
 }
 
 /**
- * `join_game`: enter the room, link the caller to the game, and send the
- * current state (or the result of a finished game).
+ * True when `userId` plays white or black in `game`.
+ * @param {{ whiteId?: string | null, blackId?: string | null }} game
+ * @param {string | undefined} userId
+ */
+function isParticipant(game, userId) {
+    return Boolean(userId) && (userId === game.whiteId || userId === game.blackId);
+}
+
+/**
+ * `join_game`: enter the room and send the current state (or the result of a
+ * finished game). Only the white and black players are linked to the game;
+ * the link is what lets a disconnect start the abandonment countdown, so
+ * anyone else is a spectator: they see the game but can never affect it
+ * (NODE-11).
  * @param {GameCtx} ctx
  * @param {string} gameId
  * @param {ClientPort} client
+ * @param {string} userId the connection's verified user
  */
-async function joinGame(ctx, gameId, client) {
+async function joinGame(ctx, gameId, client, userId) {
     client.join(gameRoom(gameId));
-    const userId = ctx.sessions.userIdOf(client.id);
-    if (userId) ctx.sessions.setActiveGame(userId, gameId);
 
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
+    if (isParticipant(game, userId)) ctx.sessions.setActiveGame(userId, gameId);
 
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
@@ -239,6 +251,8 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
     const gameId = /** @type {string} */ (sessions.activeGameOf(userId));
     const game = await gameStore.getGame(gameId);
     if (!game || game.status !== 'active') return;
+    // Defence in depth: a link is only ever created for a participant (see joinGame).
+    if (!isParticipant(game, userId)) return;
 
     const at = now();
     // Snapshot the clock at disconnect time
@@ -271,8 +285,8 @@ function createGameService(deps) {
     /** @type {GameCtx} */
     const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }) };
     return {
-        /** @type {(gameId: string, client: ClientPort) => Promise<void>} */
-        joinGame: (gameId, client) => joinGame(ctx, gameId, client),
+        /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<void>} */
+        joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),
         /**
          * `spectate_game`: join the room only if the game exists (H8).
          * @type {(gameId: string, client: ClientPort) => Promise<void>}

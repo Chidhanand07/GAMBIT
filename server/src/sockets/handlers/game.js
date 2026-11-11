@@ -9,7 +9,7 @@ const { wrap } = require('../wrap');
 /**
  * @typedef {import('../../services/emitter').ClientPort} ClientPort
  * @typedef {object} GameHandlerService
- * @property {(gameId: string, client: ClientPort) => Promise<void>} joinGame
+ * @property {(gameId: string, client: ClientPort, userId: string) => Promise<void>} joinGame
  * @property {(gameId: string, client: ClientPort) => Promise<void>} spectate
  * @property {(data: any, socketId: string) => Promise<void>} makeMove
  * @property {(data: any) => Promise<void>} endGame
@@ -21,9 +21,11 @@ const { wrap } = require('../wrap');
  * @param {{ gameService: GameHandlerService }} deps
  */
 function registerGameHandlers(socket, client, { gameService }) {
+    /** @type {string} */
+    const userId = socket.data.userId;
     /** @type {Record<string, (payload: any) => unknown>} */
     const handlers = {
-        join_game: (gameId) => gameService.joinGame(gameId, client),
+        join_game: (gameId) => gameService.joinGame(gameId, client, userId),
         spectate_game: (gameId) => gameService.spectate(gameId, client),
         make_move: (data) => gameService.makeMove(data, socket.id),
         game_end: (data) => gameService.endGame(data),

@@ -41,15 +41,42 @@ afterEach(() => jest.restoreAllMocks());
 describe('joinGame', () => {
     test('joins the room, links the user and syncs the running clock', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 1000 }) });
-        ctx.sessions.register('white-user', 's1');
         const client = fakeClient('s1');
-        await ctx.svc.joinGame('g', client);
+        await ctx.svc.joinGame('g', client, 'white-user');
         expect(client.joined).toEqual(['game_g']);
         expect(ctx.sessions.activeGameOf('white-user')).toBe('g');
         expect(client.emitted[0]).toEqual({
             event: 'game_state_sync',
             args: [expect.objectContaining({ whiteMs: 599000, blackMs: 600000, clockActive: true })],
         });
+    });
+
+    test('a non-participant joins as a spectator: room + state, but never linked to the game [S9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const client = fakeClient('s2');
+        await ctx.svc.joinGame('g', client, 'stranger');
+        expect(client.joined).toEqual(['game_g']);
+        expect(client.emitted[0].event).toBe('game_state_sync');
+        expect(ctx.sessions.hasActiveGame('stranger')).toBe(false);
+
+        await ctx.svc.handleDisconnect('stranger');
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+    });
+
+    test('joining a game that is not in Redis or the DB links nobody [S9]', async () => {
+        const ctx = setup();
+        await ctx.svc.joinGame('ghost', fakeClient(), 'white-user');
+        expect(ctx.sessions.hasActiveGame('white-user')).toBe(false);
+    });
+
+    test('a stale link to a game the user does not play in cannot trigger abandonment [S9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('stranger', 'g');
+        await ctx.svc.handleDisconnect('stranger');
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+        expect(ctx.gamesRepo.updateIfActive).not.toHaveBeenCalled();
     });
 
     test('restores an active DB game into Redis; reports a completed DB game', async () => {

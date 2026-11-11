@@ -19,6 +19,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-002](#f-002) | `GAMBIT_ENGINE_URL` is canonical; `ENGINE_URL` stays as a warned fallback | 1 | G5 |
 | [F-003](#f-003) | Socket payload schemas: strip mode, slug-safe ids, brief's ack shape | 1 | S15 |
 | [F-004](#f-004) | Socket identity: handshake token verified by Supabase Auth; no socket for signed-out users | 1 | S2, G13 |
+| [F-005](#f-005) | `join_game`: non-participants are spectators and are never linked to the game | 1 | S9 |
 
 ---
 
@@ -130,3 +131,24 @@ instead of one file per ADR under `docs/refactor/adr/`.
   - **Deploy order:** an old frontend cannot connect to the new server (it sends no token), and
     a new frontend works against the old server but is not protected by it. Deploy the server
     and the frontend together; see the report's manual steps.
+
+## F-005
+
+**`join_game` links only the two players; everyone else is a spectator (S9).**
+
+- **Context.** `join_game` linked *any* caller to the game in `userActiveGame` before the game
+  was even loaded. When that socket disconnected, the server recorded a disconnect for the
+  "black" side (anything that is not white), and the global clock forfeited black after 20 s.
+  A stranger could end any game by joining and leaving.
+- **Options.** (a) reject `join_game` from non-participants; (b) let them into the room as
+  spectators but never link them; (c) keep linking and fix only the side calculation.
+- **Decision.** (b). The link is created after the game is loaded and only when the verified
+  user is `whiteId` or `blackId`. `handleDisconnect` re-checks participation before touching
+  the game (defence in depth). `spectate_game` is unchanged and never linked.
+- **Why.** Spectating through the game URL is an existing feature (the page shows a
+  "Spectating" badge and calls `join_game` for every visitor), so (a) would remove it.
+  (c) leaves a non-player able to pause a game's clock. With (b) a spectator receives state and
+  broadcasts but has no path to the disconnect, clock or result logic.
+- **Not changed.** Games are still publicly watchable by anyone signed in who knows the id.
+  Private-game creators waiting on their invite page still join the room before the game exists
+  in Redis; they are linked when the game starts and their page joins again.

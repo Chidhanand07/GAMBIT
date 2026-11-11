@@ -114,11 +114,13 @@ test('validated payloads go to the services; the actor is always the verified us
     const { handlers } = connect(d, 'u1');
     const data = { game_id: 'g' };
     await handlers.join_queue({ user: { id: 'victim' }, time_control: '10' });
+    await handlers.join_game('g');
     await handlers.make_move(data);
     await handlers.send_message(data);
     await handlers.game_end(data);
     await handlers.leave_queue('victim');
     expect(d.matchmaking.requestMatch).toHaveBeenCalledWith({ time_control: '10', user: { id: 'u1' } }, 'sock-1');
+    expect(d.gameService.joinGame).toHaveBeenCalledWith('g', expect.objectContaining({ id: 'sock-1' }), 'u1');
     expect(d.gameService.makeMove).toHaveBeenCalledWith(data, 'sock-1');
     expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
     expect(d.gameService.endGame).toHaveBeenCalledWith(data);
