@@ -3,8 +3,9 @@
  * Legacy seam: `new MatchmakingService(io)` starts the 1 s pairing loop.
  * Queue and pairing logic live in src/services/matchmakingService.js.
  */
-const gameStore = require('../lib/gameStore');
 const { supabase } = require('../supabase');
+// Loaded after ../supabase, as the original lazy require did.
+const gameStore = require('../lib/gameStore');
 const { createGamesRepository } = require('../src/repositories/gamesRepository');
 const { createProfilesRepository } = require('../src/repositories/profilesRepository');
 const { createMatchmakingService } = require('../src/services/matchmakingService');
