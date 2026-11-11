@@ -22,7 +22,7 @@ const jar = new Map<string, string>()
 
 export const cookieStore = {
     get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
-    getAll: () => [...jar.entries()].map(([name, value]) => ({ name, value })),
+    getAll: () => Array.from(jar.entries()).map(([name, value]) => ({ name, value })),
     set: jest.fn(),
 }
 

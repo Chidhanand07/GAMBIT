@@ -29,6 +29,38 @@ A production-ready, full-stack chess platform with an accuracy-based rating syst
    npm run dev
    ```
 
+## Running Tests
+
+All three suites run offline: Supabase, Redis, Stockfish and the network are
+replaced by in-memory fakes, so no `.env` file or running service is needed.
+GitHub Actions runs them on every push and pull request
+(`.github/workflows/tests.yml`).
+
+```bash
+npm test                     # all three suites
+npm run test:server          # Node server (Jest + Supertest + Socket.IO)
+npm run test:frontend        # Next.js API routes, middleware, components (Jest)
+npm run test:engine          # Python engine (pytest)
+```
+
+The engine suite needs its virtualenv with the dev requirements:
+
+```bash
+cd chess-engine
+python3.11 -m venv venv
+./venv/bin/pip install -r requirements-dev.txt
+```
+
+Where things live:
+
+| Part | Tests | Shared fakes |
+|------|-------|--------------|
+| `server/` | `__tests__/*.test.js` | `__tests__/helpers/` (Supabase, Redis, fixtures) |
+| `frontend/` | `__tests__/**/*.test.ts(x)` | `__tests__/helpers/` (Supabase, route harness) |
+| `chess-engine/` | `tests/test_*.py` | `tests/conftest.py` (FakeStockfish) |
+
+`test.todo` entries mark known gaps that still need a code fix.
+
 ## Deployment Guide - Fully Automated
 
 ### Step 1: Supabase Setup
