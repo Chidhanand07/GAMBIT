@@ -1,0 +1,69 @@
+import 'server-only';
+import { parseBaseMinutes, speedBucketForMinutes } from '@/lib/chess/timeControl';
+import type { SpeedBucket } from '@/types/timeControl';
+
+/** Rating reported for a bucket whose column is null. */
+const DEFAULT_RATING = 1200;
+/** Time control assumed for a game row without one. */
+const DEFAULT_TIME_CONTROL = '10';
+
+type CategoryStats = { played: number; wins: number; losses: number; draws: number };
+
+interface StatsProfileRow {
+    id: string;
+    games_played: number | null;
+    wins: number | null;
+    losses: number | null;
+    draws: number | null;
+    rating_bullet: number | null;
+    rating_blitz: number | null;
+    rating_rapid: number | null;
+    rating_classical: number | null;
+}
+
+interface StatsGameRow {
+    time_control: string | null;
+    winner_id: string | null;
+    result: string | null;
+}
+
+const emptyCategory = (): CategoryStats => ({ played: 0, wins: 0, losses: 0, draws: 0 });
+
+/** Played/won/lost/drawn per speed bucket; anything that is not a draw or a win counts as a loss. */
+function statsByCategory(games: StatsGameRow[], profileId: string): Record<SpeedBucket, CategoryStats> {
+    const stats = {
+        bullet: emptyCategory(),
+        blitz: emptyCategory(),
+        rapid: emptyCategory(),
+        classical: emptyCategory(),
+    };
+    for (const game of games) {
+        const cat = speedBucketForMinutes(parseBaseMinutes(game.time_control ?? DEFAULT_TIME_CONTROL));
+        stats[cat].played++;
+        if (game.result === 'draw') {
+            stats[cat].draws++;
+        } else if (game.winner_id === profileId) {
+            stats[cat].wins++;
+        } else {
+            stats[cat].losses++;
+        }
+    }
+    return stats;
+}
+
+/** Response body of GET /api/profile/[username]/stats. */
+export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[]) {
+    return {
+        total: profile.games_played ?? 0,
+        wins: profile.wins ?? 0,
+        losses: profile.losses ?? 0,
+        draws: profile.draws ?? 0,
+        ratings: {
+            bullet: profile.rating_bullet ?? DEFAULT_RATING,
+            blitz: profile.rating_blitz ?? DEFAULT_RATING,
+            rapid: profile.rating_rapid ?? DEFAULT_RATING,
+            classical: profile.rating_classical ?? DEFAULT_RATING,
+        },
+        byCategory: statsByCategory(games, profile.id),
+    };
+}
