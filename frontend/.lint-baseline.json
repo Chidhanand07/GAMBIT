@@ -2,9 +2,6 @@
   "note": "Legacy files allowed to violate lint rules (as warnings). May only shrink; see scripts/lint-baseline/ratchet.js.",
   "files": {
     "app/analysis/page.tsx": 473,
-    "app/api/auth/login/route.ts": 47,
-    "app/api/auth/signup/route.ts": 78,
-    "app/api/debug/session/route.ts": 49,
     "app/api/friends/[id]/route.ts": 85,
     "app/api/friends/pending/route.ts": 56,
     "app/api/friends/request/route.ts": 73,
@@ -16,8 +13,6 @@
     "app/api/notifications/read/route.ts": 55,
     "app/api/notifications/route.ts": 55,
     "app/api/profile/[username]/stats/route.ts": 65,
-    "app/api/profile/me/route.ts": 149,
-    "app/auth/callback/route.ts": 115,
     "app/auth/exchange/page.tsx": 84,
     "app/challenge/[username]/page.tsx": 163,
     "app/game/[id]/page.tsx": 1102,
