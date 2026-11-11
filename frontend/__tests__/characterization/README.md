@@ -11,6 +11,16 @@ something odd, the test asserts the odd behaviour and marks it with a
 | `GamePage.test.tsx` | `app/game/[id]/page.tsx` |
 | `LobbyPage.characterization.test.tsx` | `app/lobby/page.tsx` (adds to `__tests__/components/LobbyPage.test.tsx`) |
 | `ProfilePage.test.tsx` | `app/profile/[username]/page.tsx` |
+| `AuthPages.test.tsx` | `app/auth/exchange`, `app/login`, `app/signup` pages |
+| `SocialPages.test.tsx` | `app/challenge/[username]`, `app/join/[token]`, `app/leaderboard` pages |
+| `HomeSettingsPages.test.tsx` | `app/page.tsx` (landing) and `app/settings/page.tsx` |
+| `ProfileProvider.test.tsx` / `PresenceProvider.test.tsx` | the two context providers |
+| `sounds.test.ts` | `lib/sounds.ts` |
+| `KnightCanvas.test.tsx` | `components/ui/KnightBackground.tsx`, `components/ui/KnightIntro.tsx` (recorded canvas calls, digest snapshots) |
+| `AnalysisPage.test.tsx` | `app/analysis/page.tsx` |
+| `Navbar.test.tsx` | `components/Navbar.tsx` |
+| `OfflinePage.test.tsx` | `app/offline/page.tsx` |
+| `GameResultPage.test.tsx` | `app/game/[id]/result/page.tsx` |
 | `fakeSocket.ts` | shared fake socket and `jsonResponse` helper |
 
 ## Running

@@ -33,7 +33,7 @@ export function playCheckmateSound()  { play('checkmate'); }
 export function playPromoteSound()    { play('promote'); }
 export function playGameStartSound()  { play('matchstart'); }
 
-export function playGameEndSound(won: boolean) {
+export function playGameEndSound(_won: boolean) {
     // Generic end (resign, timeout, draw) — reuse checkmate sound for loss, move for draw
     play('checkmate');
 }

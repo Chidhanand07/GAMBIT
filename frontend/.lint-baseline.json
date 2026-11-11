@@ -1,26 +1,4 @@
 {
   "note": "Legacy files allowed to violate lint rules (as warnings). May only shrink; see scripts/lint-baseline/ratchet.js.",
-  "files": {
-    "app/analysis/page.tsx": 473,
-    "app/auth/exchange/page.tsx": 84,
-    "app/challenge/[username]/page.tsx": 163,
-    "app/game/[id]/result/page.tsx": 287,
-    "app/join/[token]/page.tsx": 185,
-    "app/leaderboard/page.tsx": 200,
-    "app/lobby/page.tsx": 572,
-    "app/login/page.tsx": 139,
-    "app/offline/page.tsx": 370,
-    "app/page.tsx": 213,
-    "app/profile/[username]/page.tsx": 899,
-    "app/settings/page.tsx": 248,
-    "app/signup/page.tsx": 271,
-    "components/Navbar.tsx": 350,
-    "components/PresenceProvider.tsx": 54,
-    "components/ProfileProvider.tsx": 85,
-    "components/Toast.tsx": 51,
-    "components/ui/KnightBackground.tsx": 171,
-    "components/ui/KnightIntro.tsx": 527,
-    "lib/sounds.ts": 39,
-    "lib/supabase/server.ts": 22
-  }
+  "files": {}
 }

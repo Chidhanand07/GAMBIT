@@ -58,7 +58,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     }, [])
 
     useEffect(() => {
-        fetchProfile()
+        void fetchProfile()
     }, [fetchProfile])
 
     // When the browser's refresh token is invalid/expired, supabase-js fires
@@ -71,7 +71,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
                 setProfile(null)
                 setLoading(false)
             } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                fetchProfile()
+                void fetchProfile()
             }
         })
         return () => subscription.unsubscribe()

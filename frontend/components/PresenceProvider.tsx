@@ -44,6 +44,7 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
             mounted = false;
             channel.untrack().then(() => supabase.removeChannel(channel)).catch(() => {});
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: re-subscribe only when the user id changes; the username is read once per subscription
     }, [profile?.id]);
 
     return (

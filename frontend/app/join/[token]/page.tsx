@@ -2,23 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Timer, Zap, Flame, BookOpen, Loader2, Users } from 'lucide-react';
 import { useSocket } from '@/components/SocketProvider';
 import { createClient } from '@/lib/supabase/client';
-import { SPEED_BUCKET_LABELS, speedBucketForMinutes } from '@/lib/chess/timeControl';
-
-function tcLabel(tc: string) {
-    const bucket = speedBucketForMinutes(parseInt(tc))
-    const Icon = { bullet: Zap, blitz: Flame, rapid: Timer, classical: BookOpen }[bucket]
-    return { label: SPEED_BUCKET_LABELS[bucket], icon: <Icon size={18} strokeWidth={1.5} /> }
-}
+import { fetchInviteGame, fetchMyProfile, postJoinInvite } from '@/lib/api/invite';
+import { InviteDetails } from '@/features/join/components/InviteDetails';
+import { InviteActions, InviteExpired, InviteLoading } from '@/features/join/components/InviteScreens';
+import type { GameWithPlayers } from '@/types/game';
+import type { Profile } from '@/types/profile';
 
 export default function JoinPage({ params }: { params: { token: string } }) {
     const router = useRouter()
     const socket = useSocket()
-    const [game, setGame] = useState<any>(null)
-    const [me, setMe] = useState<any>(null)
+    const [game, setGame] = useState<GameWithPlayers | null>(null)
+    const [me, setMe] = useState<Profile | null>(null)
     const [loading, setLoading] = useState(true)
     const [joining, setJoining] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -26,29 +22,7 @@ export default function JoinPage({ params }: { params: { token: string } }) {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://127.0.0.1:3001'
 
     useEffect(() => {
-        const fetchGame = async () => {
-            try {
-                const res = await fetch(`${socketUrl}/api/games/join/${params.token}`)
-                if (!res.ok) {
-                    const d = await res.json().catch(() => ({}))
-                    console.warn('[JoinPage] Game fetch failed:', res.status, d.error)
-                    return null
-                }
-                return await res.json()
-            } catch (err) {
-                console.error('[JoinPage] Game fetch network error:', err)
-                return null
-            }
-        }
-
-        const fetchMe = async () => {
-            try {
-                const res = await fetch('/api/profile/me')
-                return res.ok ? await res.json() : null
-            } catch { return null }
-        }
-
-        Promise.all([fetchGame(), fetchMe()]).then(([g, m]) => {
+        void Promise.all([fetchInviteGame(socketUrl, params.token), fetchMyProfile()]).then(([g, m]) => {
             setGame(g)
             setMe(m)
             setLoading(false)
@@ -78,43 +52,22 @@ export default function JoinPage({ params }: { params: { token: string } }) {
             const supabase = createClient()
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) { router.push(`/login?redirect=/join/${params.token}`); return }
-            const res = await fetch(`${socketUrl}/api/games/join/${params.token}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify({}),
-            })
+            const res = await postJoinInvite(socketUrl, params.token, session.access_token)
             if (!res.ok) { const d = await res.json(); setError(d.error ?? 'Failed to join'); setJoining(false); return }
             const data = await res.json()
             router.push(`/game/${data.id}`)
-        } catch (e: any) {
-            setError(e.message)
+        } catch (e) {
+            setError((e as Error).message)
             setJoining(false)
         }
     }
 
-    if (loading) return (
-        <div className="min-h-[calc(100vh-56px)] flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin" />
-        </div>
-    )
+    if (loading) return <InviteLoading />
 
-    if (!game) return (
-        <div className="min-h-[calc(100vh-56px)] flex flex-col items-center justify-center gap-4 text-center px-4">
-            <div className="text-6xl">♟</div>
-            <h1 className="text-2xl font-medium text-text-primary">Invite expired or not found</h1>
-            <p className="text-text-secondary text-sm">This invite link is invalid or has expired (48h limit).</p>
-            <Link href="/lobby" className="mt-4 px-6 py-3 bg-accent hover:bg-accent-hover text-surface rounded-lg font-medium transition-colors">
-                Go to Lobby
-            </Link>
-        </div>
-    )
+    if (!game) return <InviteExpired />
 
     const creatorIsWhite = !!game.white_id
     const creator = creatorIsWhite ? game.white : game.black
-    const tc = tcLabel(game.time_control)
     const isCreator = me?.id === game.white_id || me?.id === game.black_id
 
     return (
@@ -133,52 +86,10 @@ export default function JoinPage({ params }: { params: { token: string } }) {
                 </div>
 
                 {/* Game details */}
-                <div className="px-6 py-5 space-y-3">
-                    <div className="flex items-center justify-between py-2.5 border-b border-border/50">
-                        <span className="text-text-secondary text-sm">Time Control</span>
-                        <span className="flex items-center gap-1.5 text-text-primary text-sm font-medium">
-                            <span className="text-accent">{tc.icon}</span>
-                            {tc.label} · {game.time_control} min
-                        </span>
-                    </div>
-                    <div className="flex items-center justify-between py-2.5 border-b border-border/50">
-                        <span className="text-text-secondary text-sm">Rated</span>
-                        <span className={`text-sm font-medium ${game.is_rated ? 'text-accent' : 'text-text-tertiary'}`}>
-                            {game.is_rated ? 'Yes' : 'Casual'}
-                        </span>
-                    </div>
-                    <div className="flex items-center justify-between py-2.5">
-                        <span className="text-text-secondary text-sm">Your color</span>
-                        <span className="text-sm font-medium text-text-primary flex items-center gap-2">
-                            {isCreator
-                                ? (creatorIsWhite ? <>♔ White</> : <>♚ Black</>)
-                                : (creatorIsWhite ? <>♚ Black</> : <>♔ White</>)
-                            }
-                        </span>
-                    </div>
-                </div>
+                <InviteDetails game={game} isCreator={isCreator} creatorIsWhite={creatorIsWhite} />
 
                 {/* Action */}
-                <div className="px-6 pb-6 space-y-3">
-                    {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-                    {isCreator ? (
-                        <div className="text-center py-3 text-text-secondary text-sm flex items-center justify-center gap-2">
-                            <div className="w-4 h-4 border-2 border-border border-t-accent rounded-full animate-spin" />
-                            Waiting for opponent to join...
-                        </div>
-                    ) : (
-                        <button
-                            onClick={handleJoin}
-                            disabled={joining}
-                            className="w-full py-3.5 bg-accent hover:bg-accent-hover disabled:opacity-60 text-surface rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                        >
-                            {joining ? <><Loader2 size={18} className="animate-spin" /> Joining...</> : <><Users size={18} strokeWidth={1.5} /> Accept & Play</>}
-                        </button>
-                    )}
-                    <Link href="/lobby" className="block text-center text-text-tertiary text-sm hover:text-text-secondary transition-colors py-1">
-                        Decline
-                    </Link>
-                </div>
+                <InviteActions error={error} isCreator={isCreator} joining={joining} onJoin={handleJoin} />
             </div>
         </div>
     )
