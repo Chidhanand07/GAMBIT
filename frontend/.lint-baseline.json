@@ -5,8 +5,6 @@
     "app/game/[id]/result/page.tsx": 287,
     "app/offline/page.tsx": 370,
     "components/Navbar.tsx": 350,
-    "components/ui/KnightBackground.tsx": 171,
-    "components/ui/KnightIntro.tsx": 527,
     "lib/supabase/server.ts": 22
   }
 }
