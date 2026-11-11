@@ -1,111 +1,73 @@
-const { getGame, setGame, getActiveGameIds, removeActiveGame } = require('../lib/gameStore')
-const { supabase } = require('../supabase')
+// @ts-check
+/**
+ * Legacy seam: the single global clock ticker (one interval per process).
+ * The tick logic lives in src/services/clockService.js.
+ */
+const gameStore = require('../lib/gameStore');
+const { supabase } = require('../supabase');
+const { createGamesRepository } = require('../src/repositories/gamesRepository');
+const { parseIncrementMs } = require('../src/domain/timeControl');
+const { createClockService } = require('../src/services/clockService');
+const { createIoEmitter } = require('../src/services/emitter');
 
-let globalTicker = null
+const TICK_MS = 1000;
+const gamesRepo = createGamesRepository(supabase);
 
+/** @type {ReturnType<typeof setInterval> | null} */
+let globalTicker = null;
+
+/**
+ * Required lazily, as before, so this module and ./rating never load each other eagerly.
+ * @returns {{ processGameEnd: Function }}
+ */
+const getRatingService = () => require('./rating');
+
+/**
+ * @param {import('../src/services/emitter').IoLike} io
+ */
+function clockServiceFor(io) {
+    return createClockService({ gameStore, gamesRepo, getRatingService, emitter: createIoEmitter(io) });
+}
+
+/**
+ * Increment in ms from a time control such as "3+2".
+ * @param {unknown} timeControl
+ */
 function parseIncrement(timeControl) {
-    const parts = String(timeControl || '0').split('+')
-    return (parseInt(parts[1]) || 0) * 1000
+    return parseIncrementMs(timeControl);
 }
 
-async function finalizeExpiredGame(io, gameId, game, winnerId, reason) {
-    const outcome = winnerId === game.whiteId ? 'white' : 'black'
-
-    const { data: updated } = await supabase.from('games')
-        .update({ status: 'completed', winner_id: winnerId, ended_at: new Date().toISOString(), final_fen: game.fen ?? null })
-        .eq('id', gameId).eq('status', 'active').select('id').maybeSingle()
-
-    if (!updated) return // already finalized
-
-    try {
-        const ratingService = require('./rating')
-        const changes = await ratingService.processGameEnd(
-            gameId, game.whiteId, game.blackId, outcome, game.timeControl, game.isRated
-        )
-        if (changes) io.to(`game_${gameId}`).emit('rating_updated', changes)
-    } catch (e) {
-        console.error('[clock] rating error:', e.message)
-    }
+/**
+ * Finalize a game ended by the clock or by abandonment (DB + rating).
+ * @param {import('../src/services/emitter').IoLike} io
+ * @param {string} gameId
+ * @param {any} game
+ * @param {string | null} winnerId
+ * @param {string} [reason]
+ */
+// eslint-disable-next-line max-params -- legacy public signature pinned by __tests__/clock.test.js
+function finalizeExpiredGame(io, gameId, game, winnerId, reason) {
+    return clockServiceFor(io).finalizeExpiredGame({ gameId, game, winnerId, reason });
 }
 
+/**
+ * Start the 1 s global ticker (no-op when already running).
+ * @param {import('../src/services/emitter').IoLike} io
+ */
 function startGlobalClock(io) {
-    if (globalTicker) return
+    if (globalTicker) return;
 
-    globalTicker = setInterval(async () => {
-        try {
-            const gameIds = await getActiveGameIds()
-            if (!gameIds.length) return
+    const clockService = clockServiceFor(io);
+    globalTicker = setInterval(() => clockService.tick(), TICK_MS);
 
-            await Promise.all(gameIds.map(async (gameId) => {
-                try {
-                    const game = await getGame(gameId)
-                    if (!game || game.status !== 'active' || !game.lastMoveAt) return
-
-                    const now = Date.now()
-                    const elapsed = now - game.lastMoveAt
-                    const side = game.activeSide
-
-                    // Real remaining for the active player
-                    const remaining = side === 'w'
-                        ? Math.max(0, game.whiteClockMs - elapsed)
-                        : Math.max(0, game.blackClockMs - elapsed)
-
-                    const wMs = side === 'w' ? remaining : game.whiteClockMs
-                    const bMs = side === 'b' ? remaining : game.blackClockMs
-
-                    io.to(`game_${gameId}`).emit('clock_sync', { whiteMs: wMs, blackMs: bMs, serverTs: now })
-
-                    // ── Disconnect grace period check (20 s) ──
-                    if (game.disconnectInfo) {
-                        const disconnectElapsed = now - game.disconnectInfo.at
-                        if (disconnectElapsed >= 20000) {
-                            const loserSide = game.disconnectInfo.side
-                            const loserId = loserSide === 'white' ? game.whiteId : game.blackId
-                            const winnerId = loserSide === 'white' ? game.blackId : game.whiteId
-                            const result = loserSide === 'white' ? 'Black wins' : 'White wins'
-
-                            await setGame(gameId, { ...game, status: 'completed', result: loserSide === 'white' ? 'black' : 'white' })
-                            await removeActiveGame(gameId)
-
-                            io.to(`game_${gameId}`).emit('game_end', {
-                                game_id: gameId, result, reason: 'Abandonment',
-                                white_id: game.whiteId, black_id: game.blackId,
-                            })
-                            await finalizeExpiredGame(io, gameId, game, winnerId, 'abandonment')
-                        }
-                        return // clock paused while opponent is disconnected
-                    }
-
-                    // ── Clock timeout ──
-                    if (remaining <= 0) {
-                        const loserIsWhite = side === 'w'
-                        const winnerId = loserIsWhite ? game.blackId : game.whiteId
-                        const result = loserIsWhite ? 'Black wins' : 'White wins'
-
-                        await setGame(gameId, { ...game, status: 'completed', result: loserIsWhite ? 'black' : 'white' })
-                        await removeActiveGame(gameId)
-
-                        io.to(`game_${gameId}`).emit('game_end', {
-                            game_id: gameId, result, reason: 'Time',
-                            white_id: game.whiteId, black_id: game.blackId,
-                            is_rated: game.isRated, time_control: game.timeControl,
-                        })
-                        await finalizeExpiredGame(io, gameId, game, winnerId, 'time')
-                    }
-                } catch (e) {
-                    console.error(`[clock] game ${gameId} error:`, e.message)
-                }
-            }))
-        } catch (e) {
-            console.error('[clock] ticker error:', e.message)
-        }
-    }, 1000)
-
-    console.log('[Clock] Global ticker started')
+    console.log('[Clock] Global ticker started');
 }
 
 function stopGlobalClock() {
-    if (globalTicker) { clearInterval(globalTicker); globalTicker = null }
+    if (globalTicker) {
+        clearInterval(globalTicker);
+        globalTicker = null;
+    }
 }
 
-module.exports = { startGlobalClock, stopGlobalClock, finalizeExpiredGame, parseIncrement }
+module.exports = { startGlobalClock, stopGlobalClock, finalizeExpiredGame, parseIncrement };

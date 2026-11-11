@@ -1,16 +1,19 @@
+"""MAVERICK style policy: loads style_model.pt and ranks moves "like the user"."""
+
 import os
+from typing import Any
+
 import chess
 import torch
 
-from model import StylePolicyNet, encode_board, legal_move_mask, index_to_from_to, get_device
-
-MODEL_PATH = os.environ.get("STYLE_MODEL_PATH", "style_model.pt")
+from config import MODEL_PATH
+from model import StylePolicyNet, encode_board, get_device, index_to_from_to, legal_move_mask
 
 _device = get_device()
 _model = None
 
 
-def _load_model():
+def _load_model() -> StylePolicyNet | None:
     global _model
     if _model is not None:
         return _model
@@ -33,15 +36,15 @@ def style_model_loaded() -> bool:
     return _model is not None
 
 
-def get_style_move(fen: str, top_k: int = 3):
+def get_style_move(fen: str, top_k: int = 3) -> dict[str, Any] | None:
     model = _load_model()
     if model is None:
         return None
 
     try:
         board = chess.Board(fen)
-    except ValueError:
-        raise ValueError(f"Invalid FEN: {fen}")
+    except ValueError as e:
+        raise ValueError(f"Invalid FEN: {fen}") from e
 
     board_tensor = encode_board(fen)
     x = torch.from_numpy(board_tensor).unsqueeze(0).to(_device)
@@ -61,18 +64,19 @@ def get_style_move(fen: str, top_k: int = 3):
     top_probs, top_indices = torch.topk(probs, k)
 
     candidates = []
-    for prob, idx in zip(top_probs.tolist(), top_indices.tolist()):
+    for prob, idx in zip(top_probs.tolist(), top_indices.tolist(), strict=False):
         from_sq, to_sq = index_to_from_to(idx)
-        matches = [m for m in board.legal_moves
-                   if m.from_square == from_sq and m.to_square == to_sq]
+        matches = [m for m in board.legal_moves if m.from_square == from_sq and m.to_square == to_sq]
         if not matches:
             continue
         move = matches[0]
-        candidates.append({
-            "san": board.san(move),
-            "uci": move.uci(),
-            "confidence": round(prob, 4),
-        })
+        candidates.append(
+            {
+                "san": board.san(move),
+                "uci": move.uci(),
+                "confidence": round(prob, 4),
+            }
+        )
 
     if not candidates:
         return None

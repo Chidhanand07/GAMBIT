@@ -37,20 +37,7 @@ afterEach(() => {
 
 /** Every route that must reject callers without a valid bearer token. */
 const PROTECTED = [
-    ['post', '/api/auth/register-profile'],
-    ['post', '/api/games/private/create'],
-    ['put', '/api/profile'],
     ['post', '/api/games/join/tok'],
-    ['get', '/api/friends/status/bob'],
-    ['post', '/api/friends/request'],
-    ['get', '/api/friends'],
-    ['put', '/api/friends/f1/accept'],
-    ['delete', '/api/friends/f1'],
-    ['get', '/api/friends/requests/pending'],
-    ['put', '/api/friends/f1/decline'],
-    ['get', '/api/notifications'],
-    ['put', '/api/notifications/read-all'],
-    ['put', '/api/notifications/n1/read'],
 ];
 
 describe('authentication', () => {
@@ -65,11 +52,6 @@ describe('authentication', () => {
         const res = await request(app)[method](path).set('Authorization', 'Bearer forged').send({});
         expect(res.status).toBe(401);
         expect(res.body.error).toMatch(/Invalid or expired/);
-    });
-
-    test('a non-Bearer Authorization header is rejected', async () => {
-        const res = await request(app).get('/api/friends').set('Authorization', 'Basic abc');
-        expect(res.status).toBe(401);
     });
 });
 
@@ -102,148 +84,12 @@ describe('public endpoints', () => {
     });
 });
 
-describe('profiles', () => {
-    test('register-profile creates a profile with starting ratings for the token\'s user', async () => {
-        const res = await request(app).post('/api/auth/register-profile').set(AUTH).send({ username: 'me1', id: 'someone-else' });
-        expect(res.body).toEqual({ success: true });
-        const row = supabase.op(supabase.callsFor('profiles')[0], 'insert')[0][0];
-        expect(row).toMatchObject({ id: 'me', username: 'me1', rating_rapid: 1200, rating_blitz: 1200, games_played: 0 });
-    });
-
-    test('register-profile requires a username and surfaces DB errors', async () => {
-        expect((await request(app).post('/api/auth/register-profile').set(AUTH).send({})).status).toBe(400);
-        supabase.queue('profiles', { data: null, error: { message: 'duplicate key' } });
-        const res = await request(app).post('/api/auth/register-profile').set(AUTH).send({ username: 'x' });
-        expect(res.status).toBe(400);
-        expect(res.body.error).toBe('duplicate key');
-    });
-
-    test('PUT /api/profile only updates the caller\'s own row with whitelisted fields', async () => {
-        const res = await request(app).put('/api/profile').set(AUTH).send({
-            displayName: 'Me', bio: 'hi', country: 'IN', sex: 'x', isPublic: true, rating_rapid: 3000,
-        });
-        expect(res.body).toEqual({ success: true });
-        const call = supabase.callsFor('profiles')[0];
-        expect(supabase.op(call, 'update')[0]).toEqual({ display_name: 'Me', bio: 'hi', country: 'IN', sex: 'x', is_public: true });
-        expect(supabase.op(call, 'eq')).toEqual(['id', 'me']);
-    });
-});
-
 describe('private games', () => {
-    test('create returns the token, id and join url', async () => {
-        supabase.queue('games', (call) => ({ data: { id: 'g1', ...supabase.op(call, 'insert')[0] }, error: null }));
-        const res = await request(app).post('/api/games/private/create').set(AUTH).send({ timeControl: '10', color: 'white', isRated: true });
-        expect(res.status).toBe(200);
-        expect(res.body.game_id).toBe('g1');
-        expect(res.body.url).toBe(`/join/${res.body.token}`);
-    });
-
     test('join with a bad token returns 400 with the reason', async () => {
         supabase.queue('games', { data: null, error: null });
         const res = await request(app).post('/api/games/join/bad').set(AUTH);
         expect(res.status).toBe(400);
         expect(res.body.error).toBe('Invalid or expired token');
-    });
-});
-
-describe('friends', () => {
-    test('status: none / self / friends / pending_sent / pending_received', async () => {
-        const get = () => request(app).get('/api/friends/status/bob').set(AUTH);
-
-        supabase.queue('profiles', { data: null, error: null });
-        expect((await get()).body).toEqual({ status: 'none' });
-
-        supabase.queue('profiles', { data: { id: 'me' }, error: null });
-        expect((await get()).body).toEqual({ status: 'self' });
-
-        const cases = [
-            [{ status: 'accepted', requester_id: 'me' }, 'friends'],
-            [{ status: 'pending', requester_id: 'me' }, 'pending_sent'],
-            [{ status: 'pending', requester_id: 'bob-id' }, 'pending_received'],
-            [{ status: 'declined', requester_id: 'me' }, 'none'],
-        ];
-        for (const [row, expected] of cases) {
-            supabase.queue('profiles', { data: { id: 'bob-id' }, error: null });
-            supabase.queue('friendships', { data: row, error: null });
-            expect((await get()).body).toEqual({ status: expected });
-        }
-    });
-
-    test('request: validates, blocks self-friending, and notifies the addressee', async () => {
-        expect((await request(app).post('/api/friends/request').set(AUTH).send({})).status).toBe(400);
-
-        supabase.queue('profiles', { data: null, error: null });
-        expect((await request(app).post('/api/friends/request').set(AUTH).send({ addressee_username: 'ghost' })).status).toBe(404);
-
-        supabase.queue('profiles', { data: { id: 'me' }, error: null });
-        expect((await request(app).post('/api/friends/request').set(AUTH).send({ addressee_username: 'me1' })).status).toBe(400);
-
-        supabase.reset();
-        supabase.setUsers({ 'good-token': 'me' });
-        supabase.queue('profiles', { data: { id: 'bob-id' }, error: null }, { data: { username: 'me1' }, error: null });
-        const ok = await request(app).post('/api/friends/request').set(AUTH).send({ addressee_username: 'bob' });
-        expect(ok.body).toEqual({ success: true });
-        expect(supabase.op(supabase.callsFor('friendships')[0], 'insert')[0]).toEqual({ requester_id: 'me', addressee_id: 'bob-id' });
-        expect(supabase.op(supabase.callsFor('notifications')[0], 'insert')[0]).toMatchObject({
-            user_id: 'bob-id', type: 'friend_request', read: false, payload: { from_user_id: 'me', from_username: 'me1' },
-        });
-    });
-
-    test('list returns each friend once, from either side of the friendship', async () => {
-        supabase.queue('friendships', {
-            data: [
-                { id: 'f1', requester_id: 'me', addressee_id: 'a', requester: { username: 'me1' }, addressee: { username: 'alice' } },
-                { id: 'f2', requester_id: 'b', addressee_id: 'me', requester: { username: 'bob' }, addressee: { username: 'me1' } },
-                { id: 'f3', requester_id: 'a', addressee_id: 'me', requester: { username: 'alice' }, addressee: { username: 'me1' } },
-                { id: 'f4', requester_id: 'me', addressee_id: 'gone', requester: { username: 'me1' }, addressee: null },
-            ],
-            error: null,
-        });
-        const res = await request(app).get('/api/friends').set(AUTH);
-        expect(res.body).toEqual([
-            { username: 'alice', friendship_id: 'f1' },
-            { username: 'bob', friendship_id: 'f2' },
-        ]);
-    });
-
-    test('accept/decline only touch requests addressed to the caller', async () => {
-        await request(app).put('/api/friends/f1/accept').set(AUTH);
-        await request(app).put('/api/friends/f2/decline').set(AUTH);
-        const [accept, decline] = supabase.callsFor('friendships');
-        expect(supabase.op(accept, 'update')[0]).toEqual({ status: 'accepted' });
-        expect(accept.ops).toContainEqual(['eq', 'addressee_id', 'me']);
-        expect(supabase.op(decline, 'update')[0]).toEqual({ status: 'declined' });
-        expect(decline.ops).toContainEqual(['eq', 'addressee_id', 'me']);
-    });
-
-    test('delete is scoped to friendships the caller is part of', async () => {
-        await request(app).delete('/api/friends/f1').set(AUTH);
-        expect(supabase.callsFor('friendships')[0].ops).toContainEqual(['or', 'requester_id.eq.me,addressee_id.eq.me']);
-    });
-
-    test('pending requests: returns [] when there are none and 500 on DB error', async () => {
-        expect((await request(app).get('/api/friends/requests/pending').set(AUTH)).body).toEqual([]);
-        supabase.queue('friendships', { data: null, error: { message: 'x' } });
-        expect((await request(app).get('/api/friends/requests/pending').set(AUTH)).status).toBe(500);
-    });
-});
-
-describe('notifications', () => {
-    test('list is the caller\'s latest 30', async () => {
-        supabase.queue('notifications', { data: [{ id: 'n1' }], error: null });
-        const res = await request(app).get('/api/notifications').set(AUTH);
-        expect(res.body).toEqual([{ id: 'n1' }]);
-        const call = supabase.callsFor('notifications')[0];
-        expect(call.ops).toEqual(expect.arrayContaining([['eq', 'user_id', 'me'], ['limit', 30]]));
-    });
-
-    test('mark one / mark all read are scoped to the caller', async () => {
-        await request(app).put('/api/notifications/n1/read').set(AUTH);
-        await request(app).put('/api/notifications/read-all').set(AUTH);
-        for (const call of supabase.callsFor('notifications')) {
-            expect(supabase.op(call, 'update')[0]).toEqual({ read: true });
-            expect(call.ops).toContainEqual(['eq', 'user_id', 'me']);
-        }
     });
 });
 

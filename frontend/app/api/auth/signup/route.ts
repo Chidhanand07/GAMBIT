@@ -1,78 +1,38 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { createUserWithProfile } from '@/lib/server/auth';
+import { findProfileIdByUsername } from '@/lib/server/profiles';
+import { createAdminClient } from '@/lib/server/supabase';
 
+// POST /api/auth/signup — body { email, password, username }
 export async function POST(request: NextRequest) {
-    const { email, password, username } = await request.json()
+    const { email, password, username } = await request.json();
 
     if (!email || !password || !username) {
-        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!serviceKey) {
-        console.error('SUPABASE_SERVICE_ROLE_KEY is not set in frontend/.env.local')
-        return NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        console.error('SUPABASE_SERVICE_ROLE_KEY is not set in frontend/.env.local');
+        return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
     // Admin client — full access to create user + profile
-    const admin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        serviceKey,
-        { auth: { autoRefreshToken: false, persistSession: false } }
-    )
+    const admin = createAdminClient();
 
     // Check if username is already taken before creating the auth user
-    const { data: existing } = await admin
-        .from('profiles')
-        .select('id')
-        .eq('username', username)
-        .maybeSingle()
+    const { data: existing } = await findProfileIdByUsername(admin, username);
 
     if (existing) {
-        return NextResponse.json({ error: 'Username already taken' }, { status: 400 })
+        return NextResponse.json({ error: 'Username already taken' }, { status: 400 });
     }
 
     // Create the auth user via admin (bypasses email rate limits on the anon endpoint)
-    const { data: created, error: authError } = await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: false,
-    })
+    const signupError = await createUserWithProfile(admin, { email, password, username });
 
-    if (authError) {
-        const msg = authError.message.toLowerCase().includes('already registered') ||
-                    authError.message.toLowerCase().includes('already exists')
-            ? 'An account with this email already exists'
-            : authError.message
-        return NextResponse.json({ error: msg }, { status: 400 })
-    }
-
-    if (!created?.user) {
-        return NextResponse.json({ error: 'Signup failed. Please try again.' }, { status: 400 })
-    }
-
-    const { error: profileError } = await admin.from('profiles').insert({
-        id: created.user.id,
-        username,
-        rating_bullet: 1200,
-        rating_blitz: 1200,
-        rating_rapid: 1200,
-        rating_classical: 1200,
-        games_played: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        created_at: new Date().toISOString(),
-    })
-
-    if (profileError) {
-        await admin.auth.admin.deleteUser(created.user.id)
-        const msg = profileError.message.includes('unique')
-            ? 'Username already taken'
-            : profileError.message
-        return NextResponse.json({ error: msg }, { status: 400 })
+    if (signupError) {
+        return NextResponse.json({ error: signupError }, { status: 400 });
     }
 
     // Return ok — client will sign in using the browser client directly
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true });
 }
