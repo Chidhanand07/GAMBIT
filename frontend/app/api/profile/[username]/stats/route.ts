@@ -1,15 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { parseBaseMinutes, speedBucketForMinutes } from '@/lib/chess/timeControl'
 
 export const dynamic = 'force-dynamic'
-
-function classifyTc(tc: string): 'bullet' | 'blitz' | 'rapid' | 'classical' {
-    const mins = parseInt(tc) || 10
-    if (mins <= 2) return 'bullet'
-    if (mins <= 5) return 'blitz'
-    if (mins <= 15) return 'rapid'
-    return 'classical'
-}
 
 export async function GET(
     _req: NextRequest,
@@ -45,7 +38,7 @@ export async function GET(
     }
 
     for (const game of games ?? []) {
-        const cat = classifyTc(game.time_control ?? '10')
+        const cat = speedBucketForMinutes(parseBaseMinutes(game.time_control ?? '10'))
         stats[cat].played++
         if (game.result === 'draw') {
             stats[cat].draws++

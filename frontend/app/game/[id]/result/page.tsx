@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Chess } from 'chess.js';
 import { ChevronLeft, ChevronRight, SkipBack, SkipForward } from 'lucide-react';
 import Piece from '@/components/ui/Piece';
+import { FILES, RANKS } from '@/lib/chess/board';
 
 // chess.com-style classification metadata: badge symbol + colour.
 const CLASS_META: Record<string, { sym: string; color: string; label: string }> = {
@@ -20,9 +21,6 @@ const CLASS_META: Record<string, { sym: string; color: string; label: string }> 
     Blunder:      { sym: '??', color: '#CA3431', label: 'Blunder' },
 };
 const CLASS_ORDER = ['Brilliant', 'Great move', 'Best', 'Excellent', 'Good', 'Book', 'Inaccuracy', 'Mistake', 'Miss', 'Blunder'];
-
-const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
 type MoveEntry = {
     ply: number; move: string; san: string; classification: string;

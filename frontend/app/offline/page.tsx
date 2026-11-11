@@ -5,6 +5,7 @@ import { Chess, Square } from 'chess.js';
 import { RotateCcw, Undo2, Flag, Cpu, Zap, Brain, Swords } from 'lucide-react';
 import Piece from '@/components/ui/Piece';
 import { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound, playGameStartSound } from '@/lib/sounds';
+import { FILES, RANKS } from '@/lib/chess/board';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 type ColorChoice = 'w' | 'b' | 'random';
@@ -15,9 +16,6 @@ const DIFFICULTIES: { id: Difficulty; label: string; desc: string; Icon: any }[]
     { id: 'medium', label: 'Medium', desc: 'Plays like you, but avoids blunders',      Icon: Brain },
     { id: 'hard',   label: 'Hard',   desc: 'Style moves sharpened by Stockfish',       Icon: Swords },
 ];
-
-const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
 export default function ComputerPage() {
     const [phase, setPhase] = useState<Phase>('setup');

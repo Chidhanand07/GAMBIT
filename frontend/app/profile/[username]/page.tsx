@@ -7,6 +7,7 @@ import {
     UserPlus, Swords, Users, Clock, Camera, Check, Loader2, X
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { classifyTimeControl } from '@/lib/chess/timeControl';
 
 type FriendStatus = 'none' | 'pending_sent' | 'pending_received' | 'friends' | 'loading'
 type Tab = 'overview' | 'games' | 'stats' | 'friends'
@@ -32,16 +33,6 @@ const RATING_ICONS: Record<string, React.ReactNode> = {
     blitz: <Flame size={14} strokeWidth={1.5} />,
     rapid: <Timer size={14} strokeWidth={1.5} />,
     classical: <BookOpen size={14} strokeWidth={1.5} />,
-}
-
-function classifyTimeControl(tc: string): string {
-    if (!tc) return 'rapid'
-    const mins = parseInt(tc)
-    if (isNaN(mins)) return 'rapid'
-    if (mins <= 2) return 'bullet'
-    if (mins <= 5) return 'blitz'
-    if (mins <= 15) return 'rapid'
-    return 'classical'
 }
 
 function formatDate(iso: string): string {
