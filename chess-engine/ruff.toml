@@ -1,0 +1,18 @@
+# Ruff lint + format for the chess engine (docs/ENGINEERING_RULES.md GIT-09).
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv", "venv"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "C90"]
+
+[lint.mccabe]
+max-complexity = 10  # SIZE-03
+
+# Legacy baseline: pre-existing findings in test files, which this refactor
+# must not edit (tests stay unchanged). The list may only shrink (same ratchet
+# policy as the JS packages). Application modules are fully clean since PR 17.
+[lint.per-file-ignores]
+"tests/conftest.py" = ["I001"]
+"tests/test_engine.py" = ["F401", "I001"]
+"tests/test_scoring.py" = ["I001"]
