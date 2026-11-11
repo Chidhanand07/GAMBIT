@@ -15,6 +15,22 @@ const { ratingField } = require('./src/domain/timeControl');
 const { clocksAt, clocksAfterMove } = require('./src/domain/clock');
 const { gameStateFromRow } = require('./src/domain/gameState');
 const { resultLabel, parseOutcome, sideToColor, colorOfPlayer, winnerIdFor } = require('./src/domain/result');
+const env = require('./src/config/env');
+const { createEngineClient } = require('./src/clients/engineClient');
+const { createGamesRepository } = require('./src/repositories/gamesRepository');
+const { createMovesRepository } = require('./src/repositories/movesRepository');
+const { createMessagesRepository } = require('./src/repositories/messagesRepository');
+const { createProfilesRepository } = require('./src/repositories/profilesRepository');
+const { createFriendshipsRepository } = require('./src/repositories/friendshipsRepository');
+const { createNotificationsRepository } = require('./src/repositories/notificationsRepository');
+
+const engineClient = createEngineClient({ baseUrl: env.engineUrl });
+const gamesRepo = createGamesRepository(supabase);
+const movesRepo = createMovesRepository(supabase);
+const messagesRepo = createMessagesRepository(supabase);
+const profilesRepo = createProfilesRepository(supabase);
+const friendshipsRepo = createFriendshipsRepository(supabase);
+const notificationsRepo = createNotificationsRepository(supabase);
 
 // ── Game Review trigger ──────────────────────────────────────────────────────
 // Ask the engine to analyse a finished game (fire-and-forget; engine runs it async
@@ -22,12 +38,7 @@ const { resultLabel, parseOutcome, sideToColor, colorOfPlayer, winnerIdFor } = r
 function triggerGameReview(gameId, moveLog, timeControl) {
   const pgn = buildPgnFromMoveLog(moveLog);
   if (!pgn) return;
-  const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-  fetch(`${engineUrl}/analyse-game`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ game_id: gameId, pgn, time_control: String(timeControl ?? '10') }),
-  })
+  engineClient.analyseGame({ gameId, pgn, timeControl: String(timeControl ?? '10') })
     .then(res => { if (!res.ok) console.warn('[game_review] engine returned', res.status); })
     .catch(e => console.warn('[game_review] trigger failed:', e.message));
 }
@@ -38,7 +49,7 @@ app.use(cors({
     const allowed = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      process.env.FRONTEND_URL,
+      env.frontendUrl(),
     ].filter(Boolean);
     // Allow any vercel.app subdomain
     if (!origin || allowed.includes(origin) || /\.vercel\.app$/.test(origin)) {
@@ -55,7 +66,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || /\.vercel\.app$/.test(origin) || origin === process.env.FRONTEND_URL) {
+      if (!origin || /\.vercel\.app$/.test(origin) || origin === env.frontendUrl()) {
         callback(null, true);
       } else {
         callback(null, true); // permissive fallback for WS
@@ -103,11 +114,7 @@ app.get('/api/users/check-username', async (req, res) => {
         const username = req.query.u;
         if (!username) return res.status(400).json({ error: 'Missing username parameter' });
         
-        const { data } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('username', username)
-            .single();
+        const { data } = await profilesRepo.findUsernameByUsername(username);
             
         res.json({ available: !data });
     } catch (e) {
@@ -122,9 +129,7 @@ app.post('/api/auth/register-profile', async (req, res) => {
         const { username } = req.body;
         if (!username) return res.status(400).json({ error: 'Missing mandatory fields' });
 
-        const { error } = await supabase
-            .from('profiles')
-            .insert([{
+        const { error } = await profilesRepo.insert([{
                 id: userId,
                 username: username,
                 rating_bullet: 1200,
@@ -147,12 +152,7 @@ app.post('/api/auth/register-profile', async (req, res) => {
 app.post('/api/analysis/engine', async (req, res) => {
     try {
         const { fen, depth } = req.body;
-        const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-        const response = await fetch(`${engineUrl}/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fen, depth: depth || 18 })
-        });
+        const response = await engineClient.analyzePosition({ fen, depth: depth || 18 });
         const data = await response.json();
         res.json(data);
     } catch (e) {
@@ -188,10 +188,7 @@ app.put('/api/profile', async (req, res) => {
         if (!userId) return;
         const { displayName, bio, country, sex, isPublic } = req.body;
 
-        const { error } = await supabase
-            .from('profiles')
-            .update({ display_name: displayName, bio, country, sex, is_public: isPublic })
-            .eq('id', userId);
+        const { error } = await profilesRepo.updateById(userId, { display_name: displayName, bio, country, sex, is_public: isPublic });
 
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
@@ -219,13 +216,10 @@ app.post('/api/games/join/:token', async (req, res) => {
 app.get('/api/friends/status/:username', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { data: them } = await supabase.from('profiles').select('id').eq('username', req.params.username).single();
+        const { data: them } = await profilesRepo.findIdByUsername(req.params.username);
         if (!them) return res.json({ status: 'none' });
         if (them.id === meId) return res.json({ status: 'self' });
-        const { data } = await supabase.from('friendships')
-            .select('status, requester_id')
-            .or(`and(requester_id.eq.${meId},addressee_id.eq.${them.id}),and(requester_id.eq.${them.id},addressee_id.eq.${meId})`)
-            .maybeSingle();
+        const { data } = await friendshipsRepo.findBetween(meId, them.id);
         if (!data) return res.json({ status: 'none' });
         if (data.status === 'accepted') return res.json({ status: 'friends' });
         if (data.status === 'pending') {
@@ -240,13 +234,13 @@ app.post('/api/friends/request', async (req, res) => {
         const meId = await requireUserId(req, res); if (!meId) return;
         const { addressee_username } = req.body;
         if (!addressee_username) return res.status(400).json({ error: 'addressee_username required' });
-        const { data: them } = await supabase.from('profiles').select('id').eq('username', addressee_username).single();
+        const { data: them } = await profilesRepo.findIdByUsername(addressee_username);
         if (!them) return res.status(404).json({ error: 'User not found' });
         if (them.id === meId) return res.status(400).json({ error: 'Cannot friend yourself' });
-        const { error } = await supabase.from('friendships').insert({ requester_id: meId, addressee_id: them.id });
+        const { error } = await friendshipsRepo.insertRequest(meId, them.id);
         if (error) return res.status(400).json({ error: error.message });
         // H3: notify addressee of the incoming friend request
-        const { data: me } = await supabase.from('profiles').select('username').eq('id', meId).maybeSingle();
+        const { data: me } = await profilesRepo.findUsernameById(meId);
         await insertNotification(them.id, 'friend_request', { from_user_id: meId, from_username: me?.username });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -255,10 +249,7 @@ app.post('/api/friends/request', async (req, res) => {
 app.get('/api/friends', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { data, error } = await supabase.from('friendships')
-            .select('id, requester_id, addressee_id, status, requester:profiles!friendships_requester_id_fkey(username,avatar_url,rating_rapid), addressee:profiles!friendships_addressee_id_fkey(username,avatar_url,rating_rapid)')
-            .or(`requester_id.eq.${meId},addressee_id.eq.${meId}`)
-            .eq('status', 'accepted');
+        const { data, error } = await friendshipsRepo.listAccepted(meId);
         if (error) return res.status(500).json({ error: error.message });
         const seen = new Set();
         const friends = [];
@@ -275,10 +266,7 @@ app.get('/api/friends', async (req, res) => {
 app.put('/api/friends/:id/accept', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { error } = await supabase.from('friendships')
-            .update({ status: 'accepted' })
-            .eq('id', req.params.id)
-            .eq('addressee_id', meId);
+        const { error } = await friendshipsRepo.setStatusAsAddressee(req.params.id, meId, 'accepted');
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -287,9 +275,7 @@ app.put('/api/friends/:id/accept', async (req, res) => {
 app.delete('/api/friends/:id', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { error } = await supabase.from('friendships').delete()
-            .eq('id', req.params.id)
-            .or(`requester_id.eq.${meId},addressee_id.eq.${meId}`);
+        const { error } = await friendshipsRepo.deleteInvolving(req.params.id, meId);
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -299,11 +285,7 @@ app.delete('/api/friends/:id', async (req, res) => {
 app.get('/api/friends/requests/pending', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { data, error } = await supabase.from('friendships')
-            .select('id, created_at, requester:profiles!friendships_requester_id_fkey(id,username,display_name,avatar_url,rating_rapid)')
-            .eq('addressee_id', meId)
-            .eq('status', 'pending')
-            .order('created_at', { ascending: false });
+        const { data, error } = await friendshipsRepo.listPendingFor(meId);
         if (error) return res.status(500).json({ error: error.message });
         res.json(data ?? []);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -312,10 +294,7 @@ app.get('/api/friends/requests/pending', async (req, res) => {
 app.put('/api/friends/:id/decline', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { error } = await supabase.from('friendships')
-            .update({ status: 'declined' })
-            .eq('id', req.params.id)
-            .eq('addressee_id', meId);
+        const { error } = await friendshipsRepo.setStatusAsAddressee(req.params.id, meId, 'declined');
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -325,11 +304,7 @@ app.put('/api/friends/:id/decline', async (req, res) => {
 app.get('/api/notifications', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { data, error } = await supabase.from('notifications')
-            .select('*')
-            .eq('user_id', meId)
-            .order('created_at', { ascending: false })
-            .limit(30);
+        const { data, error } = await notificationsRepo.listRecent(meId);
         if (error) return res.status(500).json({ error: error.message });
         res.json(data ?? []);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -338,10 +313,7 @@ app.get('/api/notifications', async (req, res) => {
 app.put('/api/notifications/read-all', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { error } = await supabase.from('notifications')
-            .update({ read: true })
-            .eq('user_id', meId)
-            .eq('read', false);
+        const { error } = await notificationsRepo.markAllRead(meId);
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -350,10 +322,7 @@ app.put('/api/notifications/read-all', async (req, res) => {
 app.put('/api/notifications/:id/read', async (req, res) => {
     try {
         const meId = await requireUserId(req, res); if (!meId) return;
-        const { error } = await supabase.from('notifications')
-            .update({ read: true })
-            .eq('id', req.params.id)
-            .eq('user_id', meId);
+        const { error } = await notificationsRepo.markRead(req.params.id, meId);
         if (error) return res.status(400).json({ error: error.message });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -361,7 +330,7 @@ app.put('/api/notifications/:id/read', async (req, res) => {
 
 // ── Friend request notification helper ───────────────────────────────────────
 async function insertNotification(userId, type, payload = {}) {
-    await supabase.from('notifications').insert({
+    await notificationsRepo.insert({
         user_id: userId,
         type,
         payload,
@@ -397,10 +366,7 @@ io.on('connection', (socket) => {
     socket.on('join_queue', async (data) => {
         if (!data?.user?.id) return;
         // C3 fix: look up actual rating from DB — never trust client-provided rating
-        const { data: profile } = await supabase.from('profiles')
-            .select('id, username, rating_bullet, rating_blitz, rating_rapid, rating_classical, games_played')
-            .eq('id', data.user.id)
-            .maybeSingle();
+        const { data: profile } = await profilesRepo.findForMatchmaking(data.user.id);
         if (!profile) return;
         const verifiedUser = {
             id: profile.id,
@@ -424,11 +390,7 @@ io.on('connection', (socket) => {
 
         // Server-restart fallback: restore from Supabase if Redis has no state
         if (!game) {
-            const { data: dbGame } = await supabase
-                .from('games')
-                .select('id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms')
-                .eq('id', gameId)
-                .maybeSingle();
+            const { data: dbGame } = await gamesRepo.findForRestore(gameId);
 
             if (dbGame && dbGame.status === 'active') {
                 game = gameStateFromRow(gameId, dbGame, Date.now());
@@ -493,12 +455,7 @@ io.on('connection', (socket) => {
 
         if (game.fen && data.move) {
             try {
-                const engineUrl = process.env.ENGINE_URL || 'http://localhost:8001';
-                const validationRes = await fetch(`${engineUrl}/validate-move`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fen: game.fen, move: data.move }),
-                });
+                const validationRes = await engineClient.validateMove({ fen: game.fen, move: data.move });
                 if (validationRes.ok) {
                     const validation = await validationRes.json();
                     if (!validation.valid) {
@@ -537,10 +494,10 @@ io.on('connection', (socket) => {
 
         // Async persist to Supabase — only FEN (H10: clocks flushed on game_end only)
         Promise.all([
-            supabase.from('games').update({
+            gamesRepo.updateById(data.game_id, {
                 fen: data.fen,
-            }).eq('id', data.game_id),
-            supabase.from('moves').insert({
+            }),
+            movesRepo.insert({
                 game_id: data.game_id,
                 move_number: moveNumber,
                 color: movedColor,
@@ -566,7 +523,7 @@ io.on('connection', (socket) => {
         const safeData = { ...data, from_user_id: senderId };
 
         // M4: persist chat message to DB
-        supabase.from('messages').insert({
+        messagesRepo.insert({
             game_id: data.game_id,
             user_id: senderId,
             content: data.message,
@@ -603,7 +560,7 @@ io.on('connection', (socket) => {
         }
 
         // Idempotent DB update — only applies if game is still marked active
-        const { data: updated } = await supabase.from('games').update({
+        const { data: updated } = await gamesRepo.finishIfActive(data.game_id, {
             status: 'completed',
             result: outcome === 'draw' ? 'draw' : null,
             winner_id: winnerIdFor(outcome, { whiteId, blackId }),
@@ -611,7 +568,7 @@ io.on('connection', (socket) => {
             final_fen: game.fen ?? null,
             white_clock_ms: Math.round(game.whiteClockMs ?? 0),
             black_clock_ms: Math.round(game.blackClockMs ?? 0),
-        }).eq('id', data.game_id).eq('status', 'active').select('id').maybeSingle();
+        });
 
         if (!updated) return;
 
@@ -716,10 +673,10 @@ io.on('connection', (socket) => {
                 });
 
                 // Persist clock snapshot to Supabase
-                supabase.from('games').update({
+                gamesRepo.updateIfActive(gameId, {
                     white_time_ms: Math.round(whiteClockMs),
                     black_time_ms: Math.round(blackClockMs),
-                }).eq('id', gameId).eq('status', 'active').then(() => {});
+                }).then(() => {});
 
                 io.to(`game_${gameId}`).emit('opponent_disconnected', {
                     userId,
@@ -733,7 +690,7 @@ io.on('connection', (socket) => {
 // Only bind a port when started directly (`node server.js`). When the file is
 // required (by the test suite) the caller decides whether and where to listen.
 if (require.main === module) {
-    const PORT = process.env.PORT || 3001;
+    const PORT = env.port();
     server.listen(PORT, () => {
         console.log(`Node server running on port ${PORT}`);
     });

@@ -1,18 +1,7 @@
-const Redis = require('ioredis')
+const env = require('../src/config/env')
+const { createRedisClient } = require('../src/clients/redisClient')
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-    retryStrategy: (times) => {
-        if (times > 3) {
-            console.error('[Redis] Connection failed after 3 retries — game state will use Supabase fallback')
-            return null
-        }
-        return Math.min(times * 200, 2000)
-    },
-    lazyConnect: true,
-    maxRetriesPerRequest: 2,
-})
-
-redis.on('connect', () => console.log('[Redis] Connected'))
-redis.on('error', (err) => console.error('[Redis] Error:', err.message))
+// Legacy seam: tests jest.mock('../lib/redis'); src/ obtains the client through this path.
+const redis = createRedisClient(env.redisUrl())
 
 module.exports = redis

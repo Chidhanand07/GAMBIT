@@ -1,4 +1,4 @@
-const { supabase } = require('../supabase');
+const gamesRepo = require('../src/repositories/gamesRepository').createGamesRepository(require('../supabase').supabase);
 const pairing = require('../src/domain/matchmaking/pairing');
 const { createInitialGameState } = require('../src/domain/gameState');
 
@@ -68,14 +68,14 @@ class MatchmakingService {
         if (Math.random() > 0.5) { white = p1; black = p2; }
         else { white = p2; black = p1; }
 
-        const { data, error } = await supabase.from('games').insert({
+        const { data, error } = await gamesRepo.insertReturning({
             white_id: white.user_id,
             black_id: black.user_id,
             time_control: p1.time_control,
             increment: p1.increment,
             status: 'active',
             started_at: new Date().toISOString()
-        }).select().single();
+        });
 
         if (error || !data) {
             console.error('[matchmaking] createGame error:', error?.message)

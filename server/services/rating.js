@@ -1,4 +1,5 @@
 const { supabase } = require('../supabase');
+const profilesRepo = require('../src/repositories/profilesRepository').createProfilesRepository(supabase);
 const { ratingField } = require('../src/domain/timeControl');
 const glicko = require('../src/domain/rating/glicko');
 
@@ -13,10 +14,7 @@ class RatingService {
     async processGameEnd(gameId, whiteId, blackId, result, timeControl, isRated = true) {
         try {
             // Select base columns only; rating_rd/vol are optional and may not exist yet
-            const { data: profiles } = await supabase
-                .from('profiles')
-                .select('id, rating_rapid, rating_blitz, rating_bullet, rating_classical, rating_rd, rating_vol, games_played, wins, losses, draws')
-                .in('id', [whiteId, blackId]);
+            const { data: profiles } = await profilesRepo.findRatingsByIds([whiteId, blackId]);
 
             if (!profiles || profiles.length < 2) return null;
 
@@ -52,8 +50,8 @@ class RatingService {
             }
 
             const [wRes, bRes] = await Promise.all([
-                supabase.from('profiles').update(whiteUpdate).eq('id', whiteId),
-                supabase.from('profiles').update(blackUpdate).eq('id', blackId),
+                profilesRepo.updateById(whiteId, whiteUpdate),
+                profilesRepo.updateById(blackId, blackUpdate),
             ]);
             if (wRes.error) console.error('[rating] white update error:', wRes.error.message);
             if (bRes.error) console.error('[rating] black update error:', bRes.error.message);

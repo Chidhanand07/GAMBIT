@@ -1,5 +1,6 @@
 const { nanoid } = require('nanoid');
 const { supabase } = require('../supabase');
+const gamesRepo = require('../src/repositories/gamesRepository').createGamesRepository(supabase);
 const { createInitialGameState } = require('../src/domain/gameState');
 
 const generateInviteUrl = () => {
@@ -25,7 +26,7 @@ class FriendsService {
             else black_id = userId;
         }
 
-        const { data, error } = await supabase.from('games').insert({
+        const { data, error } = await gamesRepo.insertReturning({
             white_id,
             black_id,
             time_control: timeControl,
@@ -33,7 +34,7 @@ class FriendsService {
             invite_token: token,
             invite_expires_at: expiresAt.toISOString(),
             is_rated: isRated
-        }).select().single();
+        });
 
         if (error) throw error;
         return data;
@@ -43,14 +44,7 @@ class FriendsService {
         // Simplify query — nested profile selects can sometimes cause issues in PostgREST 
         // if the foreign keys are null. We'll fetch the base game and join manually if needed, 
         // but for the join page check, we only need the basic game info first.
-        const { data, error } = await supabase.from('games')
-            .select(`
-                *,
-                white:profiles!white_id(username, avatar_url),
-                black:profiles!black_id(username, avatar_url)
-            `)
-            .eq('invite_token', token)
-            .maybeSingle();
+        const { data, error } = await gamesRepo.findByInviteToken(token);
 
         if (error) {
             console.error('[FriendsService] getGameByToken error:', error.message);
@@ -87,12 +81,12 @@ class FriendsService {
         if (white_id && !black_id) black_id = userId;
         else if (black_id && !white_id) white_id = userId;
 
-        const { data, error } = await supabase.from('games').update({
+        const { data, error } = await gamesRepo.startIfWaiting(game.id, {
             white_id,
             black_id,
             status: 'active',
             started_at: new Date().toISOString()
-        }).eq('id', game.id).eq('status', 'waiting').select().maybeSingle();
+        });
 
         if (error) throw error;
         if (!data) throw new Error('Game already started or not found');
