@@ -2,10 +2,7 @@
   "note": "Legacy files allowed to violate lint rules (as warnings). May only shrink; see scripts/lint-baseline/ratchet.js.",
   "files": {
     "app/analysis/page.tsx": 473,
-    "app/challenge/[username]/page.tsx": 163,
     "app/game/[id]/result/page.tsx": 287,
-    "app/join/[token]/page.tsx": 185,
-    "app/leaderboard/page.tsx": 200,
     "app/offline/page.tsx": 370,
     "app/page.tsx": 213,
     "app/settings/page.tsx": 248,
