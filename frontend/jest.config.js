@@ -1,6 +1,8 @@
-import type { Config } from 'jest';
+// Plain JS (not jest.config.ts) so Jest can read it on any Node version
+// without ts-node. Node 20 cannot load a TypeScript config on its own.
 
-const config: Config = {
+/** @type {import('jest').Config} */
+const config = {
     testEnvironment: 'jsdom',
     setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
     moduleNameMapper: {
@@ -19,4 +21,4 @@ const config: Config = {
     ],
 };
 
-export default config;
+module.exports = config;
