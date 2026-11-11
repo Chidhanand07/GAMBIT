@@ -1,22 +1,54 @@
 // @ts-check
 /**
- * The only module that reads `process.env` (NODE-05). Names and defaults are
- * unchanged from the pre-refactor code.
+ * The only module that reads `process.env` (NODE-05).
  *
  * Every setting is an accessor that reads `process.env` when it is called,
  * not when this module loads. The original code read ENGINE_URL and
  * FRONTEND_URL on every request and PORT/REDIS_URL/SUPABASE_* when their
  * modules loaded (after `dotenv` ran); call-time accessors keep each read at
  * exactly that moment (ADR 0101).
+ *
+ * The engine URL's canonical name is `GAMBIT_ENGINE_URL` (the name every
+ * `.env.example` and deploy guide documents). `ENGINE_URL` is still read as a
+ * deprecated fallback so existing deployments keep working (G5; docs/fixes/DECISIONS.md F-002).
  */
 
 const DEFAULT_ENGINE_URL = 'http://localhost:8001';
 const DEFAULT_PORT = 3001;
 const DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379';
 
+/** Warnings already logged; the accessors run per request, so each is logged once. */
+const warned = new Set();
+
+/**
+ * @param {string} key
+ * @param {string} message
+ */
+function warnOnce(key, message) {
+    if (warned.has(key)) return;
+    warned.add(key);
+    console.warn(message);
+}
+
+/**
+ * `GAMBIT_ENGINE_URL`, else the deprecated `ENGINE_URL`, else the local default.
+ * @returns {string}
+ */
+function engineUrl() {
+    if (process.env.GAMBIT_ENGINE_URL) return process.env.GAMBIT_ENGINE_URL;
+    if (process.env.ENGINE_URL) {
+        warnOnce('engine-legacy', '[config] ENGINE_URL is deprecated; rename it to GAMBIT_ENGINE_URL.');
+        return process.env.ENGINE_URL;
+    }
+    if (process.env.NODE_ENV === 'production') {
+        warnOnce('engine-missing', `[config] GAMBIT_ENGINE_URL is not set; using ${DEFAULT_ENGINE_URL}.`);
+    }
+    return DEFAULT_ENGINE_URL;
+}
+
 /**
  * @typedef {object} Env
- * @property {() => string} engineUrl chess-engine base URL (`ENGINE_URL`).
+ * @property {() => string} engineUrl chess-engine base URL (`GAMBIT_ENGINE_URL`, fallback `ENGINE_URL`).
  * @property {() => string | undefined} frontendUrl extra CORS origin (`FRONTEND_URL`).
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
  * @property {() => string} redisUrl `REDIS_URL`, default local Redis.
@@ -28,7 +60,7 @@ const DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379';
 
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
-    engineUrl: () => process.env.ENGINE_URL || DEFAULT_ENGINE_URL,
+    engineUrl,
     frontendUrl: () => process.env.FRONTEND_URL,
     port: () => process.env.PORT || DEFAULT_PORT,
     redisUrl: () => process.env.REDIS_URL || DEFAULT_REDIS_URL,

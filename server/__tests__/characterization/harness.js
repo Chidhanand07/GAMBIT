@@ -108,7 +108,7 @@ function useServer() {
         Object.assign(ctx, require('../../server'));
         await new Promise((resolve) => ctx.server.listen(0, '127.0.0.1', resolve));
         ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
-        for (const k of ['ENGINE_URL', 'FRONTEND_URL']) savedEnv[k] = process.env[k];
+        for (const k of ['GAMBIT_ENGINE_URL', 'ENGINE_URL', 'FRONTEND_URL']) savedEnv[k] = process.env[k];
     });
 
     afterAll(async () => {
@@ -122,6 +122,7 @@ function useServer() {
     });
 
     beforeEach(() => {
+        delete process.env.GAMBIT_ENGINE_URL;
         delete process.env.ENGINE_URL;
         delete process.env.FRONTEND_URL;
         supabase.reset();

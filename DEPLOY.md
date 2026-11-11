@@ -101,7 +101,7 @@ Go to your service → **Variables** tab and add:
 | `SUPABASE_SERVICE_KEY` | service role key |
 | `REDIS_URL` | `rediss://...` from Upstash |
 | `FRONTEND_URL` | `https://your-app.vercel.app` (set after Vercel deploy) |
-| `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` |
+| `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `PORT` | **do not set** — Railway injects this automatically |
 
 ### 4c. Get the URL

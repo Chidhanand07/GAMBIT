@@ -4,7 +4,9 @@
 const env = require('../../src/config/env');
 
 const KEYS = [
+    'GAMBIT_ENGINE_URL',
     'ENGINE_URL',
+    'NODE_ENV',
     'FRONTEND_URL',
     'PORT',
     'REDIS_URL',
@@ -64,6 +66,48 @@ test('service key prefers SUPABASE_SERVICE_KEY over SUPABASE_SERVICE_ROLE_KEY', 
     process.env.SUPABASE_SERVICE_KEY = 'service';
     expect(env.supabaseServiceKey()).toBe('service');
     expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_KEY');
+});
+
+describe('engine URL [G5]', () => {
+    // A fresh module per test: the "warn once" memory is module state.
+    let env;
+    let warn;
+    beforeEach(() => {
+        jest.isolateModules(() => {
+            env = require('../../src/config/env');
+        });
+        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    test('GAMBIT_ENGINE_URL is the canonical name and wins over ENGINE_URL', () => {
+        process.env.GAMBIT_ENGINE_URL = 'http://canonical.test:8001';
+        process.env.ENGINE_URL = 'http://legacy.test:8001';
+        expect(env.engineUrl()).toBe('http://canonical.test:8001');
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    test('ENGINE_URL still works as a fallback and warns once', () => {
+        process.env.ENGINE_URL = 'http://legacy.test:8001';
+        expect(env.engineUrl()).toBe('http://legacy.test:8001');
+        expect(env.engineUrl()).toBe('http://legacy.test:8001');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/ENGINE_URL is deprecated.*GAMBIT_ENGINE_URL/);
+    });
+
+    test('neither set in production: default URL plus one warning', () => {
+        process.env.NODE_ENV = 'production';
+        expect(env.engineUrl()).toBe('http://localhost:8001');
+        expect(env.engineUrl()).toBe('http://localhost:8001');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/GAMBIT_ENGINE_URL is not set/);
+    });
+
+    test('neither set outside production: default URL, no warning', () => {
+        process.env.NODE_ENV = 'test';
+        expect(env.engineUrl()).toBe('http://localhost:8001');
+        expect(warn).not.toHaveBeenCalled();
+    });
 });
 
 test('the config object is frozen', () => {
