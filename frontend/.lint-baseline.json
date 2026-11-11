@@ -4,7 +4,6 @@
     "app/analysis/page.tsx": 473,
     "app/auth/exchange/page.tsx": 84,
     "app/challenge/[username]/page.tsx": 163,
-    "app/game/[id]/page.tsx": 1102,
     "app/game/[id]/result/page.tsx": 287,
     "app/join/[token]/page.tsx": 185,
     "app/leaderboard/page.tsx": 200,
