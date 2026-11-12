@@ -53,6 +53,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
 | [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
 | [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
+| [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
 
 ---
 
@@ -1278,3 +1279,24 @@ instead of one file per ADR under `docs/refactor/adr/`.
   case that pinned "never adjudicated (BUG pinned)" asserts the abort. The existing
   abandonment tests now use a position with one move each, because that is when the rule
   awards a win.
+
+## F-033
+
+**A move that arrives after the mover's flag has fallen is refused, and the game ends on time immediately (G7).**
+
+- **Context.** The ticker looks at each game once a second. A move sent after the mover's
+  clock reached zero but before the next tick was accepted: the clock was clamped to 0, the
+  increment was added, and the player went on with fresh time.
+- **Decision.** Inside the per-game lock, after the authorization checks and before the
+  legality check, `moveRecorder` asks whether the mover's remaining time at that instant is
+  ≤ 0 (only for a clock that is running; a game before its first move, or frozen for a
+  disconnect, cannot time out). If so the move is rejected with `time_expired`; the game
+  service then calls `finalizer.endGameIf` with the same `clockVerdict` the ticker uses, so
+  the game ends as "Time" for the opponent right away, through the one finalizer.
+- **Why reject and finalize, not just reject.** Otherwise the outcome would depend on which
+  comes first, the player's next attempt or the tick, and the opponent would wait up to a
+  second for a result that is already decided.
+- **Boundary.** Exactly 0 ms left is too late; 1 ms is in time. The increment is added only
+  after a move is accepted, so it cannot rescue a move that was not.
+- **Client.** The sender gets `move_rejected { reason: 'time_expired' }` and the `game_end`
+  broadcast; no extra state sync is sent because the game is over.

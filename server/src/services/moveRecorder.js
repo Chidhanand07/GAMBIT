@@ -9,7 +9,7 @@
  * The read–decide–write runs under the per-game lock, so the same move sent
  * twice is applied once.
  */
-const { clocksAfterMove } = require('../domain/clock');
+const { activeRemainingMs, clocksAfterMove } = require('../domain/clock');
 const { playMove } = require('../domain/chessRules');
 const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
@@ -41,6 +41,18 @@ function stateAfterMove(game, played, at) {
         lastMoveAt: at,
         moveLog: [...(game.moveLog || []), { move: played.uci, fen: played.fen, san: played.san }],
     };
+}
+
+/**
+ * True when the mover's time ran out before this move arrived. The ticker
+ * only looks once a second, so without this check a move sent in that gap
+ * was accepted with a clock of 0 plus the increment (G7).
+ * @param {any} game
+ * @param {number} at
+ * @returns {boolean}
+ */
+function isFlagDown(game, at) {
+    return Boolean(game.lastMoveAt) && activeRemainingMs({ ...game, activeSide: sideToMove(game) }, at) <= 0;
 }
 
 /**
@@ -115,7 +127,8 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
         /** @type {MoveOutcome | null} */
         let outcome = null;
         await gameStore.mutateGame(request.game_id, (/** @type {any} */ game) => {
-            const reason = moveRejection(game, userId);
+            const at = now();
+            const reason = moveRejection(game, userId) ?? (isFlagDown(game, at) ? REJECTION.TIME_EXPIRED : null);
             if (reason) {
                 outcome = { accepted: false, reason, game };
                 return null;
@@ -125,7 +138,7 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
                 outcome = { accepted: false, reason: REJECTION.ILLEGAL_MOVE, game };
                 return null;
             }
-            const state = stateAfterMove(game, played, now());
+            const state = stateAfterMove(game, played, at);
             outcome = { accepted: true, state, played };
             return state;
         });

@@ -522,3 +522,58 @@ describe('clock around a disconnect [G8, G9]', () => {
         expect(viewer.emitted[0].args[0]).toMatchObject({ whiteMs: 600000, blackMs: 600000, clockActive: false });
     });
 });
+
+describe('a move after the flag has fallen [G7]', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const TWO_PLIES = [
+        { move: 'g1f3', fen: 'x', san: 'Nf3' },
+        { move: 'g8f6', fen: 'y', san: 'Nf6' },
+    ];
+    /** White to move with 3 s left, and 5 s have passed: the flag is down, the ticker has not run yet. */
+    const flagged = (overrides = {}) =>
+        makeGame({ id: 'g', fen: START, whiteClockMs: 3000, lastMoveAt: T - 5000, incrementMs: 2000, moveLog: TWO_PLIES, ...overrides });
+    const e4 = { game_id: 'g', from: 'e2', to: 'e4' };
+
+    test('the move is refused: not applied, not broadcast, not persisted', async () => {
+        const ctx = setup({ g: flagged() });
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove(e4, 'white-user', client)).toEqual({ ok: false, error: 'time_expired' });
+
+        expect(ctx.emitter.named('move_made')).toEqual([]);
+        expect(ctx.movesRepo.insert).not.toHaveBeenCalled();
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ fen: START, moveLog: TWO_PLIES });
+        expect(client.emitted[0]).toEqual({ event: 'move_rejected', args: [{ game_id: 'g', reason: 'time_expired' }] });
+    });
+
+    test('the game ends on time right away, through the finalizer: the opponent wins', async () => {
+        const ctx = setup({ g: flagged() });
+        await ctx.svc.makeMove(e4, 'white-user', fakeClient());
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black', reason: 'Time' });
+        expect(ctx.emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'Black wins', reason: 'Time' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: 'black', winner_id: 'black-user' });
+    });
+
+    test('the increment cannot buy the move: 0 ms left is too late, 1 ms is in time', async () => {
+        const late = setup({ g: flagged({ whiteClockMs: 5000 }) });
+        expect(await late.svc.makeMove(e4, 'white-user', fakeClient())).toEqual({ ok: false, error: 'time_expired' });
+
+        const inTime = setup({ g: flagged({ whiteClockMs: 5001 }) });
+        expect(await inTime.svc.makeMove(e4, 'white-user', fakeClient())).toEqual({ ok: true });
+        expect(inTime.gameStore.state.get('g')).toMatchObject({ whiteClockMs: 2001, status: 'active' });
+    });
+
+    test('a frozen clock (opponent disconnected) or a clock that has not started never rejects a move', async () => {
+        const notStarted = setup({ g: flagged({ lastMoveAt: null, moveLog: [] }) });
+        expect(await notStarted.svc.makeMove(e4, 'white-user', fakeClient())).toEqual({ ok: true });
+    });
+
+    test('the opponent is unaffected: it is still not their turn', async () => {
+        const ctx = setup({ g: flagged() });
+        expect(await ctx.svc.makeMove({ game_id: 'g', from: 'e7', to: 'e5' }, 'black-user', fakeClient())).toEqual({
+            ok: false,
+            error: 'not_your_turn',
+        });
+        expect(ctx.gameStore.state.get('g').status).toBe('active');
+    });
+});

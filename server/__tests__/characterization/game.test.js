@@ -369,14 +369,23 @@ describe('make_move', () => {
         expect(supabase.op(supabase.callsFor('moves')[0], 'insert')[0].clock_ms_remaining).toBe(58001);
     });
 
-    test('a flagged player who moves before the ticker fires gets 0 + increment (pinned, G7)', async () => {
+    test('a flagged player who moves before the ticker fires is refused, and the game ends on time [G7]', async () => {
+        // Was: "gets 0 + increment (pinned, G7)" — the move was accepted with whiteMs 2000.
         const T = Date.now();
         const { game, white, black } = await ctx.seatedGame({ whiteClockMs: 60000, incrementMs: 2000 });
         await setGame(game.id, { ...(await getGame(game.id)), lastMoveAt: T - 70000 });
+        supabase.queue('games', { data: { id: game.id }, error: null });
         jest.spyOn(Date, 'now').mockReturnValue(T);
-        const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: game.id, ...E4 });
-        expect((await p).whiteMs).toBe(2000);
+        const moves = record(black, 'move_made');
+        const ended = once(black, 'game_end');
+        const rejected = once(white, 'move_rejected');
+        const ack = await emitAck(white, 'make_move', { game_id: game.id, ...E4 });
+
+        expect(ack).toEqual({ ok: false, error: 'time_expired' });
+        expect(await rejected).toEqual({ game_id: game.id, reason: 'time_expired' });
+        expect(await ended).toMatchObject({ result: 'Black wins', reason: 'Time' });
+        expect(moves).toEqual([]);
+        expect(await getGame(game.id)).toMatchObject({ status: 'completed', result: 'black', moveLog: [] });
     });
 
     test('"10+5" game restored from DB: first move adds the 5 s increment without deducting time', async () => {

@@ -12,6 +12,7 @@
  */
 const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
 const { adjudicate, REASON } = require('../domain/adjudication');
+const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
@@ -160,7 +161,8 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
  * server decide whether that move ended the game (checkmate, stalemate,
  * insufficient material, threefold repetition, fifty-move rule). Otherwise
  * tell the sender why (`move_rejected`) and resend the authoritative state so
- * its board snaps back. Nothing from the payload except `from`/`to`/`promotion`
+ * its board snaps back; a move that arrives after the mover's flag fell ends
+ * the game on time instead. Nothing from the payload except `from`/`to`/`promotion`
  * is used.
  * @param {GameCtx} ctx
  * @param {import('./moveRecorder').MoveRequest} data
@@ -177,7 +179,13 @@ async function makeMove(ctx, data, userId, client) {
     }
 
     client.emit('move_rejected', { game_id: data.game_id, reason: outcome.reason });
-    if (outcome.game) sendState(ctx, outcome.game, client);
+    if (outcome.reason === REJECTION.TIME_EXPIRED) {
+        // Too late: the game is over on time now, not at the next tick (G7).
+        const at = ctx.now();
+        await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at));
+    } else if (outcome.game) {
+        sendState(ctx, outcome.game, client);
+    }
     return { ok: false, error: outcome.reason };
 }
 
