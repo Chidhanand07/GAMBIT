@@ -39,7 +39,7 @@ export function createAdminClient(): SupabaseClient {
 
 /**
  * Public-key (publishable / legacy anon) @supabase/ssr client bound to the request's session cookies. Used only to ask
- * Supabase Auth who the caller is (`auth.getUser()`); it is never used to bypass RLS.
+ * verify who the caller is (`auth.getClaims()`, see identity.ts); it is never used to bypass RLS.
  *
  * `setAll` writes a refreshed session back. That works in Route Handlers; in a Server
  * Component the store is read-only and the write is skipped (the browser client refreshes).

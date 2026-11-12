@@ -46,8 +46,33 @@ test('the unverified decoders no longer exist', () => {
     expect(identity).not.toHaveProperty('getSessionUser')
 })
 
-test('a failing Auth lookup is logged and treated as signed out', async () => {
-    db.auth.getUser.mockRejectedValue(new Error('fetch failed'))
+test('a failing verification is logged and treated as signed out', async () => {
+    db.auth.getClaims.mockRejectedValue(new Error('fetch failed'))
     expect(await getVerifiedUserId()).toBeNull()
     expect(console.error).toHaveBeenCalledWith('[identity] could not verify the session:', 'fetch failed')
+})
+
+describe('getVerifiedUserId({ fresh: true }) [IDENTITY-PERF]', () => {
+    test('needs BOTH verified claims and a matching user from Supabase Auth', async () => {
+        db.signIn('u1')
+        expect(await getVerifiedUserId({ fresh: true })).toBe('u1')
+        expect(db.auth.getClaims).toHaveBeenCalledTimes(1)
+        expect(db.auth.getUser).toHaveBeenCalledTimes(1)
+    })
+
+    test.each([
+        ['Auth has no such user', { data: { user: null }, error: null }],
+        ['Auth reports an error', { data: { user: { id: 'u1' } }, error: { message: 'session_not_found' } }],
+        ['Auth names someone else', { data: { user: { id: 'u2' } }, error: null }],
+    ])('%s → null', async (_label, answer) => {
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: 'u1' } }, error: null })
+        db.auth.getUser.mockResolvedValue(answer as never)
+        expect(await getVerifiedUserId({ fresh: true })).toBeNull()
+    })
+
+    test('the default does not call getUser()', async () => {
+        db.signIn('u1')
+        expect(await getVerifiedUserId()).toBe('u1')
+        expect(db.auth.getUser).not.toHaveBeenCalled()
+    })
 })

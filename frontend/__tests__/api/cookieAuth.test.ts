@@ -5,8 +5,9 @@
  * The handlers used to base64-decode the access token in the session cookie
  * WITHOUT verifying its signature and then query with the service-role client,
  * so a hand-made cookie impersonated any user. Identity now comes only from
- * `supabase.auth.getUser()` on a cookie-bound server client, i.e. from
- * Supabase Auth; the cookie's own claims are never read.
+ * VERIFIED claims: `supabase.auth.getClaims()` on a cookie-bound server client checks
+ * the token's signature (locally with asymmetric signing keys, through Supabase Auth
+ * otherwise) [IDENTITY-PERF]. Unverified cookie contents are never read.
  */
 jest.mock('next/headers', () => require('../helpers/routeHarness').nextHeadersMock)
 jest.mock('@supabase/supabase-js', () => require('../helpers/routeHarness').supabaseJsMock)
@@ -27,7 +28,7 @@ import * as profileGames from '@/app/api/profile/[username]/games/route'
 import * as profileByName from '@/app/api/profile/[username]/route'
 import * as profileStats from '@/app/api/profile/[username]/stats/route'
 import * as profileMe from '@/app/api/profile/me/route'
-import { requireUser } from '@/lib/server/identity'
+import { requireFreshUser, requireUser } from '@/lib/server/identity'
 import {
     AUTH_COOKIE,
     cookieStore,
@@ -84,22 +85,39 @@ describe.each([
     ['forged cookie, URI-encoded', () => forgeCookie(VICTIM, { encoded: true })],
     ['an expired session Supabase Auth no longer accepts', () => forgeCookie(ME, { expSecondsFromNow: -3600 })],
     [
-        'Supabase Auth reports an error',
+        'the claims do not verify (bad signature)',
         () => {
             forgeCookie(ME)
-            db.auth.getUser.mockResolvedValue({ data: { user: null }, error: { message: 'invalid JWT' } } as never)
+            db.auth.getClaims.mockResolvedValue({ data: null, error: { message: 'invalid JWT signature' } })
         },
     ],
     [
-        'Supabase Auth is unreachable (fail closed)',
+        'verification is unreachable (fail closed)',
         () => {
             forgeCookie(ME)
-            db.auth.getUser.mockRejectedValue(new Error('fetch failed'))
+            db.auth.getClaims.mockRejectedValue(new Error('fetch failed'))
+        },
+    ],
+    ['claims come back together with an error', () => db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: ME } }, error: { message: 'expired' } })],
+    ['verified claims without a subject', () => db.auth.getClaims.mockResolvedValue({ data: { claims: { role: 'authenticated' } }, error: null })],
+    ['verified claims with an empty subject', () => db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: '' } }, error: null })],
+    ['a subject that is not a string', () => db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: { id: ME } } }, error: null })],
+    [
+        // getSession() only parses the cookie. It saying "this is ME" proves nothing.
+        'the cookie parses into a session (getSession) but its claims do not verify',
+        () => {
+            forgeCookie(ME)
+            db.auth.getSession.mockResolvedValue({ data: { session: { user: { id: ME } } }, error: null } as never)
         },
     ],
     [
-        'Supabase Auth answers with a user but also an error',
-        () => db.auth.getUser.mockResolvedValue({ data: { user: { id: ME } }, error: { message: 'expired' } } as never),
+        // IDENTITY-PERF: getUser() is no longer the gate. A caller whose claims do not verify is
+        // refused without asking Supabase Auth anything else.
+        'the claims do not verify even though getUser() would name a user',
+        () => {
+            db.auth.getClaims.mockResolvedValue({ data: null, error: { message: 'invalid JWT signature' } })
+            db.auth.getUser.mockResolvedValue({ data: { user: { id: ME } }, error: null } as never)
+        },
     ],
 ])('unverified caller (%s)', (_label, setup) => {
     test.each(PROTECTED)('%s → 401 and the database is never touched', async (_name, call) => {
@@ -130,12 +148,20 @@ describe('verified caller', () => {
         expect(JSON.stringify(db.calls)).not.toContain(VICTIM)
     })
 
-    test('getUser() is called (verified by Supabase Auth); getSession() is never trusted', async () => {
+    test('identity is the verified claims (getClaims): no getUser() round trip, getSession() never trusted [IDENTITY-PERF]', async () => {
         signInWithCookie(ME)
         await requireUser()
-        expect(db.auth.getUser).toHaveBeenCalledTimes(1)
-        expect(db.auth.getUser).toHaveBeenCalledWith()
+        expect(db.auth.getClaims).toHaveBeenCalledTimes(1)
+        expect(db.auth.getClaims).toHaveBeenCalledWith()
+        expect(db.auth.getUser).not.toHaveBeenCalled()
         expect(db.auth.getSession).not.toHaveBeenCalled()
+    })
+
+    test('a read route makes no call to Supabase Auth beyond verifying the claims', async () => {
+        signInWithCookie(ME)
+        db.queue('notifications', { data: [], error: null })
+        expect((await notifications.GET()).status).toBe(200)
+        expect(db.auth.getUser).not.toHaveBeenCalled()
     })
 
     test('requireUser returns the user id, or a ready-made 401 response', async () => {
@@ -144,6 +170,46 @@ describe('verified caller', () => {
         expect(denied.ok === false && denied.response.status).toBe(401)
         signInWithCookie(ME)
         expect(await requireUser()).toEqual({ ok: true, userId: ME })
+    })
+})
+
+describe('routes that change the account ask Supabase Auth for the current user (requireFreshUser)', () => {
+    const patchMe = () => profileMe.PATCH(req('/api/profile/me', { method: 'PATCH', body: { bio: 'x' } }))
+
+    test('PATCH /api/profile/me: valid claims but Auth no longer knows the user (signed out, banned, deleted) → 401', async () => {
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: ME } }, error: null })
+        // getUser() keeps its default: no user.
+        const res = await patchMe()
+        expect(res.status).toBe(401)
+        expect(db.calls).toEqual([])
+        expect(db.auth.getUser).toHaveBeenCalledTimes(1)
+    })
+
+    test('PATCH /api/profile/me: Auth names a different user than the claims → 401', async () => {
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: ME } }, error: null })
+        db.auth.getUser.mockResolvedValue({ data: { user: { id: VICTIM } }, error: null } as never)
+        expect((await patchMe()).status).toBe(401)
+        expect(db.calls).toEqual([])
+    })
+
+    test('PATCH /api/profile/me: Auth unreachable → 401 (fail closed)', async () => {
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: ME } }, error: null })
+        db.auth.getUser.mockRejectedValue(new Error('fetch failed'))
+        expect((await patchMe()).status).toBe(401)
+        expect(db.calls).toEqual([])
+    })
+
+    test('PATCH /api/profile/me: claims and Auth agree → the update runs as that user', async () => {
+        signInWithCookie(ME)
+        db.queue('profiles', { data: { id: ME, bio: 'x' }, error: null })
+        const res = await patchMe()
+        expect(res.status).toBe(200)
+        expect(db.callsFor('profiles')[0].ops).toContainEqual(['eq', 'id', ME])
+    })
+
+    test('requireFreshUser never asks Auth when the claims already fail', async () => {
+        expect(await requireFreshUser()).toMatchObject({ ok: false })
+        expect(db.auth.getUser).not.toHaveBeenCalled()
     })
 })
 

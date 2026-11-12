@@ -45,6 +45,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-022](#f-022) | Medium phase is based on local `fix/high-3-supabase-lockdown` @ `70a94f9`; local-only work | M1 | — |
 | [F-023](#f-023) | Node 26 everywhere; Railway builds the Dockerfile; Supabase client pins lifted | M1 | NODE-RUNTIME |
 | [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
+| [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
 
 ---
 
@@ -983,3 +984,46 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Lint.** `@next/eslint-plugin-next` 16 adds a warning for `window.location.assign('/lobby')`
   in `features/auth/signup.ts`. It is intentional there (a full reload so the new session
   cookie is sent; documented in `readme_first.md`), so it stays a warning and is not changed.
+
+## F-025
+
+**`requireUser()` verifies the token's claims with `getClaims()`; `requireFreshUser()` adds `getUser()` for routes that change the account (IDENTITY-PERF).**
+
+- **Context.** Since S5 (F-012) every route handler called `auth.getUser()`: one HTTPS round
+  trip to Supabase Auth per API request. `getClaims()` verifies the same token locally when
+  the project signs JWTs with an asymmetric key: the client fetches the project's JWKS once,
+  caches it for 10 minutes at module level (so it survives across requests in a warm function),
+  and checks the signature with WebCrypto. For a token signed with the legacy shared secret
+  (`HS256`) the library itself falls back to `getUser()`. So one call gives local verification
+  "where the project's keys allow it" and the old behaviour everywhere else, with no
+  configuration switch to get wrong.
+- **What verified claims do not tell you.** A token that verifies was issued by Supabase and
+  has not expired. It does not prove the session still exists: after a sign-out, a ban or a
+  deleted account, an already issued access token keeps verifying until it expires (one hour
+  by default). `getUser()` does notice.
+- **Options.** (a) `getClaims()` everywhere; (b) `getClaims()` for reads, `getUser()` for every
+  mutation; (c) `getClaims()` by default and `getUser()` only where the account itself changes.
+- **Decision.** (c).
+  - `getVerifiedUserId()` / `requireUser()`: `getClaims()`; the subject must be a non-empty
+    string and there must be no error. `getSession()` is still never used.
+  - `getVerifiedUserId({ fresh: true })` / `requireFreshUser()`: the same, and then
+    `getUser()` must return the same user id. Used by `PATCH /api/profile/me`, the only route
+    that edits the account.
+  - Any error or exception → 401 (SEC-09). The 401 body and status are unchanged.
+- **Why not (b).** The other mutations (friend requests, notifications read, private game
+  creation, draw offer) are bounded by RLS-independent ownership checks on the caller's own
+  id and are low-value for a token that is at most an hour old; making them all pay the round
+  trip gives back most of what this item removes. The stale-token window is the same one every
+  JWT-verifying service has, and the game server has it too (F-004, addressed by
+  TOKEN-LIFETIME in M2).
+- **What the owner must do to get the benefit.** Enable asymmetric JWT signing keys in the
+  Supabase dashboard (Authentication → Signing keys) and rotate to them. Until then
+  `getClaims()` behaves exactly like `getUser()` did: correct, just not faster.
+- **Tests.** `__tests__/api/cookieAuth.test.ts`: the forged-cookie matrix now has 14 kinds of
+  unverified caller × 18 handlers (was 9 × 18), including claims without a subject, a
+  non-string subject, a cookie that `getSession()` would accept, and "claims fail although
+  `getUser()` would name a user". New `requireFreshUser` cases. `identity.test.ts`: the default
+  path never calls `getUser()`.
+- **Not verified.** No real token was verified: the tests mock `@supabase/ssr`. The local
+  verification path was read in the installed `@supabase/auth-js` source (JWKS cache, HS256
+  fallback) but not exercised against a project with asymmetric keys.
