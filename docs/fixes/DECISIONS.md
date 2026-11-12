@@ -24,6 +24,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-007](#f-007) | Moves are validated on the server with chess.js; FEN is the authority, UCI history adds repetition | 1 | S1, S10 |
 | [F-008](#f-008) | The server decides results; one finalizer; `games.result` = `white` / `black` / `draw` | 1 | S3 (+G1) |
 | [F-009](#f-009) | No draw-offer or abort events: the UI has neither | 1 | S3 |
+| [F-010](#f-010) | Pre-PR review of PR 1: what was fixed, what was deferred | 1 | S1, S2, S3 |
 
 ---
 
@@ -326,3 +327,48 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Why.** Adding events with no UI would be new, untested product surface in a security PR
   (YAGNI, SOLID-09). `resign` covers the one existing manual ending. The adjudication rule table
   and the single finalizer are the extension points a draw offer would use later.
+
+## F-010
+
+**Independent review of PR 1 before it was opened: fixed vs deferred.**
+
+- **Context.** Before pushing, the PR 1 diff was reviewed by a second, independent pass
+  (read-only) focused on impersonation, fail-open paths and races. It found no way for a client
+  to act as another user, move for the opponent, decide a result or force a game on someone.
+  It did find races around the new atomic transition, reproduced by running the real
+  `gameService` + `gameStateRepository` over a fake Redis with latency (not against a live
+  server), plus one frontend regression.
+- **Fixed in PR 1** (each with a regression test that failed first):
+  1. *A disconnect could undo a move.* `handleDisconnect` read the game, then wrote that
+     snapshot back with `setGame`; a move accepted in between was overwritten in Redis while
+     both boards and the database kept it. Now the disconnect is a `mutateGame` transition.
+  2. *A disconnect could make a finished game active again.* Same code; the `status === 'active'`
+     check now runs inside the lock.
+  3. *A reconnect racing a move forfeited a connected player.* `reconnect` cleared
+     `disconnectInfo` with `setGame`; a concurrent move wrote the old marker back and the clock
+     ended the game as Abandonment 20 s later. Now a `mutateGame` transition.
+  4. *The clock decided on a stale read.* `tickGame` read the game without the lock and
+     `endOnClock` only re-checked the status. The verdict (`clockVerdict`, a pure function) is
+     now taken again on the state read inside the lock, so a reconnect or a move that lands
+     just before adjudication wins.
+  5. *The socket closed whenever the profile fetch failed* (regression from S2: the socket was
+     keyed on `profile?.id`, and `ProfileProvider` nulls the profile on any failed
+     `/api/profile/me`, which it refetches on every token refresh). Mid-game that started the
+     abandonment countdown. The socket now belongs to the last profile id seen and closes only
+     on Supabase's `SIGNED_OUT` event or an account switch.
+- **Why these and not the rest.** 1–4 are what makes the "atomic transition / one finalizer"
+  claim of S1 and S3 true; shipping the claim with a hole next to it would be worse than not
+  making it. 5 is a regression this PR introduced. All five are small and local.
+- **Deferred (pre-existing or outside the listed items; logged for the next phase).**
+  - Any one of a player's sockets disconnecting (closing a second tab; an old socket timing out
+    after the new one connected) starts the abandonment countdown. Pre-existing.
+  - `gameStateRepository.setGame` swallows Redis write errors, so a move or an ending can be
+    broadcast without being stored. Pre-existing (the repository's documented contract);
+    changing it touches every caller (NODE-17).
+  - A database error in finalization is treated like "already finalized": no log, no rating,
+    the row stays `active`. Pre-existing in the clock path; the new finalizer kept the same shape.
+  - `time_control` is a free string up to 16 characters; `"-5"` parses to a negative clock if
+    the target accepts such a challenge. The parsing is pre-existing (`domain/timeControl`);
+    tightening the schema risks rejecting values current clients send, so it needs its own pass.
+  - A rejected `resign` shows nothing in the UI; a `make_move` can be acked `internal_error`
+    after it was applied if finalization throws (the page ignores acks today). Low impact.

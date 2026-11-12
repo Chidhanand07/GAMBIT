@@ -71,66 +71,90 @@ async function finalizeExpiredGame({ gamesRepo, getRatingService, emitter }, { g
 }
 
 /**
- * End a game won by `winnerColor`: Redis state, active set, broadcast, finalize.
- * The active → completed transition is atomic and shared with gameFinalizer,
- * so a flag fall that races a mate or a resignation cannot produce a second,
- * contradictory `game_end` (NODE-18).
- * @param {ClockDeps} deps
- * @param {{ gameId: string, game: GameState, winnerColor: 'white' | 'black', reason: string,
- *   payloadExtra: object }} p
+ * @typedef {object} ClockVerdict
+ * @property {'white' | 'black'} winnerColor
+ * @property {string} reason 'Abandonment' | 'Time'
+ * @property {object} payloadExtra extra `game_end` fields (kept from the original payloads)
  */
-async function endOnClock(deps, { gameId, game, winnerColor, reason, payloadExtra }) {
-    const winnerId = playerIdOf(winnerColor, game);
-    const result = resultLabel(winnerColor);
 
-    const finished = await deps.gameStore.mutateGame(gameId, (current) =>
-        current && current.status === 'active' ? { ...current, status: 'completed', result: winnerColor } : null,
-    );
-    if (!finished) return; // another ending won the race
+/**
+ * Whether the clock ends `game` at `at`, and for whom. Pure. A disconnected
+ * player's clock is paused; after the grace period the opponent wins by
+ * abandonment. Otherwise the side to move loses when its time is up.
+ * @param {GameState} game an active game whose clock has started
+ * @param {number} at
+ * @returns {ClockVerdict | null}
+ */
+function clockVerdict(game, at) {
+    const disconnectInfo = /** @type {{ side: string, at: number } | null} */ (game.disconnectInfo);
+    // ── Disconnect grace period check (20 s) ──
+    if (disconnectInfo) {
+        if (!isGraceExpired(disconnectInfo, at)) return null; // clock paused while opponent is disconnected
+        return { winnerColor: opponentColor(disconnectInfo.side), reason: 'Abandonment', payloadExtra: {} };
+    }
+    // ── Clock timeout ──
+    if (tickerSnapshot(game, at).remainingMs > 0) return null;
+    return {
+        winnerColor: opponentColor(sideToColor(game.activeSide)),
+        reason: 'Time',
+        payloadExtra: { is_rated: game.isRated, time_control: game.timeControl },
+    };
+}
+
+/** @param {any} game */
+const isRunning = (game) => Boolean(game && game.status === 'active' && game.lastMoveAt);
+
+/**
+ * End a game the clock has decided: Redis state, active set, broadcast, finalize.
+ *
+ * The verdict is taken again on the state read *inside* the per-game lock
+ * (the same atomic active → completed transition gameFinalizer uses), not on
+ * the tick's earlier read. A move, a reconnect or another ending that landed
+ * in between therefore wins: the player who just reconnected is not
+ * forfeited, and there is never a second, contradictory `game_end` (NODE-18).
+ * @param {ClockDeps} deps
+ * @param {string} gameId
+ * @param {number} at
+ */
+async function endOnClock(deps, gameId, at) {
+    /** @type {ClockVerdict | null} */
+    let verdict = null;
+    const finished = await deps.gameStore.mutateGame(gameId, (current) => {
+        verdict = isRunning(current) ? clockVerdict(current, at) : null;
+        return verdict ? { ...current, status: 'completed', result: verdict.winnerColor } : null;
+    });
+    if (!finished || !verdict) return; // the state moved on: nothing to end
+    const { winnerColor, reason, payloadExtra } = /** @type {ClockVerdict} */ (verdict);
     await deps.gameStore.removeActiveGame(gameId);
 
     deps.emitter.toRoom(gameRoom(gameId), 'game_end', {
         game_id: gameId,
-        result,
+        result: resultLabel(winnerColor),
         reason,
-        white_id: game.whiteId,
-        black_id: game.blackId,
+        white_id: finished.whiteId,
+        black_id: finished.blackId,
         ...payloadExtra,
     });
-    await finalizeExpiredGame(deps, { gameId, game, winnerId, reason: reason.toLowerCase() });
+    const winnerId = playerIdOf(winnerColor, finished);
+    await finalizeExpiredGame(deps, { gameId, game: finished, winnerId, reason: reason.toLowerCase() });
 }
 
 /**
- * One game's tick. A disconnected player's clock is paused; after the grace
- * period the opponent wins by abandonment.
+ * One game's tick: broadcast the running clock, then end the game if the
+ * clock says so (see `clockVerdict`).
  * @param {ClockDeps} deps
  * @param {string} gameId
  */
 async function tickGame(deps, gameId) {
     const game = await deps.gameStore.getGame(gameId);
-    if (!game || game.status !== 'active' || !game.lastMoveAt) return;
+    if (!isRunning(game)) return;
 
     const at = deps.now();
     // Real remaining for the active player
-    const { remainingMs: remaining, whiteMs, blackMs } = tickerSnapshot(game, at);
-
+    const { whiteMs, blackMs } = tickerSnapshot(game, at);
     deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
 
-    // ── Disconnect grace period check (20 s) ──
-    if (game.disconnectInfo) {
-        if (isGraceExpired(game.disconnectInfo, at)) {
-            const winnerColor = opponentColor(game.disconnectInfo.side);
-            await endOnClock(deps, { gameId, game, winnerColor, reason: 'Abandonment', payloadExtra: {} });
-        }
-        return; // clock paused while opponent is disconnected
-    }
-
-    // ── Clock timeout ──
-    if (remaining <= 0) {
-        const winnerColor = opponentColor(sideToColor(game.activeSide));
-        const payloadExtra = { is_rated: game.isRated, time_control: game.timeControl };
-        await endOnClock(deps, { gameId, game, winnerColor, reason: 'Time', payloadExtra });
-    }
+    if (clockVerdict(game, at)) await endOnClock(deps, gameId, at);
 }
 
 /**

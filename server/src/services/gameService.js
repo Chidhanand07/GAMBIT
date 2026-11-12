@@ -137,7 +137,9 @@ function sendState(ctx, game, client) {
 }
 
 /**
- * `authenticate` while in an active game: clear the disconnect grace period.
+ * A player connected again while in an active game: clear the disconnect
+ * grace period. The check and the write are one atomic transition, so a move
+ * or an ending that lands at the same moment is neither lost nor undone.
  * @param {GameCtx} ctx
  * @param {string} userId
  * @param {ClientPort} client
@@ -145,13 +147,15 @@ function sendState(ctx, game, client) {
 async function reconnect({ gameStore, sessions, emitter, now }, userId, client) {
     const gameId = sessions.activeGameOf(userId);
     if (!gameId) return;
-    const game = await gameStore.getGame(gameId);
-    if (game && game.status === 'active' && game.disconnectInfo?.userId === userId) {
-        await gameStore.setGame(gameId, { ...game, disconnectInfo: null, lastMoveAt: now() });
-        client.join(gameRoom(gameId));
-        emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
-        client.emit('clock_sync', { whiteMs: game.whiteClockMs, blackMs: game.blackClockMs });
-    }
+    const resumed = await gameStore.mutateGame(gameId, (/** @type {any} */ game) =>
+        game && game.status === 'active' && game.disconnectInfo?.userId === userId
+            ? { ...game, disconnectInfo: null, lastMoveAt: now() }
+            : null,
+    );
+    if (!resumed) return;
+    client.join(gameRoom(gameId));
+    emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
+    client.emit('clock_sync', { whiteMs: resumed.whiteClockMs, blackMs: resumed.blackClockMs });
 }
 
 /**
@@ -202,32 +206,34 @@ async function resign(ctx, { game_id: gameId }, userId) {
 /**
  * After a socket of `userId` disconnected: freeze the clocks and start the
  * 20 s grace period (the global ticker adjudicates abandonment).
+ *
+ * The state is re-read inside the per-game lock and only an active game the
+ * user plays in is touched, so a disconnect that overlaps a move keeps the
+ * move, and one that overlaps the end of the game cannot make it active again.
  * @param {GameCtx} ctx
  * @param {string | undefined} userId
  */
 async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }, userId) {
     if (!userId || !sessions.hasActiveGame(userId)) return;
     const gameId = /** @type {string} */ (sessions.activeGameOf(userId));
-    const game = await gameStore.getGame(gameId);
-    if (!game || game.status !== 'active') return;
-    // Defence in depth: a link is only ever created for a participant (see joinGame).
-    if (!isParticipant(game, userId)) return;
-
     const at = now();
-    // Snapshot the clock at disconnect time
-    const { whiteMs: whiteClockMs, blackMs: blackClockMs } = clocksAt(game, at);
-    const disconnectedSide = colorOfPlayer(userId, game.whiteId);
 
-    await gameStore.setGame(gameId, {
-        ...game,
-        whiteClockMs,
-        blackClockMs,
-        disconnectInfo: { userId, side: disconnectedSide, at },
+    const frozen = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
+        // Defence in depth: a link is only ever created for a participant (see joinGame).
+        if (!game || game.status !== 'active' || !isParticipant(game, userId)) return null;
+        // Snapshot the clock at disconnect time
+        const { whiteMs: whiteClockMs, blackMs: blackClockMs } = clocksAt(game, at);
+        const side = colorOfPlayer(userId, game.whiteId);
+        return { ...game, whiteClockMs, blackClockMs, disconnectInfo: { userId, side, at } };
     });
+    if (!frozen) return;
 
     // Persist clock snapshot to Supabase (fire-and-forget)
     gamesRepo
-        .updateIfActive(gameId, { white_time_ms: Math.round(whiteClockMs), black_time_ms: Math.round(blackClockMs) })
+        .updateIfActive(gameId, {
+            white_time_ms: Math.round(frozen.whiteClockMs),
+            black_time_ms: Math.round(frozen.blackClockMs),
+        })
         .then(() => {});
 
     emitter.toRoom(gameRoom(gameId), 'opponent_disconnected', {

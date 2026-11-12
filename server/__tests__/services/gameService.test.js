@@ -360,6 +360,108 @@ describe('disconnect and reconnect', () => {
         await ctx.svc.handleDisconnect('nobody');
         await ctx.svc.reconnect('nobody', fakeClient());
         expect(ctx.gameStore.getGame).not.toHaveBeenCalled();
+        expect(ctx.gameStore.mutateGame).not.toHaveBeenCalled();
+    });
+});
+
+describe('disconnect / reconnect cannot clobber a concurrent write (review findings 1–3)', () => {
+    /**
+     * Make `change` land "in between": a caller that reads with getGame and writes
+     * later sees the state from BEFORE the change (the old, racy code path), while a
+     * caller that goes through mutateGame gets the lock only AFTER the change.
+     */
+    function interleave(ctx, id, change) {
+        let applied = false;
+        const apply = () => {
+            if (applied) return;
+            applied = true;
+            ctx.gameStore.state.set(id, change(structuredClone(ctx.gameStore.state.get(id))));
+        };
+        ctx.gameStore.getGame.mockImplementationOnce(async () => {
+            const stale = structuredClone(ctx.gameStore.state.get(id));
+            apply();
+            return stale;
+        });
+        const mutate = ctx.gameStore.mutateGame.getMockImplementation();
+        ctx.gameStore.mutateGame.mockImplementationOnce(async (gameId, fn) => {
+            apply();
+            return mutate(gameId, fn);
+        });
+    }
+
+    const afterE4 = (game) => ({
+        ...game,
+        fen: NEXT_FEN,
+        activeSide: 'b',
+        lastMoveAt: T,
+        moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
+    });
+
+    test('a disconnect that overlaps a move keeps the move (no server-side takeback)', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', afterE4);
+        await ctx.svc.handleDisconnect('white-user');
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            fen: NEXT_FEN,
+            moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
+            activeSide: 'b',
+            disconnectInfo: { userId: 'white-user', side: 'white', at: T },
+        });
+    });
+
+    test('a disconnect that overlaps the end of the game cannot resurrect it', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', (game) => ({ ...game, status: 'completed', result: 'black', reason: 'Resignation' }));
+        await ctx.svc.handleDisconnect('white-user');
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            status: 'completed',
+            result: 'black',
+            reason: 'Resignation',
+            disconnectInfo: null,
+        });
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+        expect(ctx.gamesRepo.updateIfActive).not.toHaveBeenCalled();
+    });
+
+    test('a reconnect that overlaps the opponent’s move keeps the move AND clears the grace period', async () => {
+        const disconnectInfo = { userId: 'white-user', side: 'white', at: T - 5000 };
+        const ctx = setup({ g: makeGame({ id: 'g', fen: NEXT_FEN, activeSide: 'b', disconnectInfo }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        const AFTER_E5 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2';
+        interleave(ctx, 'g', (game) => ({
+            ...game,
+            fen: AFTER_E5,
+            activeSide: 'w',
+            moveLog: [{ move: 'e7e5', fen: AFTER_E5, san: 'e5' }],
+        }));
+        const client = fakeClient();
+        await ctx.svc.reconnect('white-user', client);
+
+        // Was: either the move was lost, or disconnectInfo came back and the
+        // connected player was forfeited for abandonment 20 s later.
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            fen: AFTER_E5,
+            moveLog: [{ move: 'e7e5', fen: AFTER_E5, san: 'e5' }],
+            disconnectInfo: null,
+        });
+        expect(ctx.emitter.named('opponent_reconnected')).toHaveLength(1);
+    });
+
+    test('a reconnect after the game ended changes nothing', async () => {
+        const disconnectInfo = { userId: 'white-user', side: 'white', at: T - 5000 };
+        const ctx = setup({ g: makeGame({ id: 'g', disconnectInfo }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', (game) => ({ ...game, status: 'completed', result: 'black', reason: 'Abandonment' }));
+        const client = fakeClient();
+        await ctx.svc.reconnect('white-user', client);
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black' });
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(client.emitted).toEqual([]);
     });
 });
 
