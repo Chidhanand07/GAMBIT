@@ -17,7 +17,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn() }));
 const { supabase } = require('../../supabase');
 const rating = require('../../services/rating');
 const { getGame, getActiveGameIds } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, waitFor, opsFor, ISO_DATE, START_FEN } = require('./harness');
+const { useServer, once, record, sleep, waitFor, opsFor, ISO_DATE, START_FEN, ENGINE_HEADERS } = require('./harness');
 
 const ctx = useServer();
 
@@ -121,7 +121,7 @@ describe('checkmate', () => {
                 'http://localhost:8001/analyse-game',
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: ENGINE_HEADERS,
                     body: JSON.stringify({ game_id: game.id, pgn: PGN, time_control: '10' }),
                 },
             ],

@@ -13,7 +13,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const request = require('supertest');
 const { supabase } = require('../../supabase');
 const { getGame, setGame, getActiveGameIds } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, opsFor, compact, makeGame, ISO_DATE, START_FEN } = require('./harness');
+const { useServer, once, record, sleep, opsFor, compact, makeGame, ISO_DATE, START_FEN, ENGINE_HEADERS } = require('./harness');
 
 const ctx = useServer();
 
@@ -117,7 +117,7 @@ describe('POST /api/analysis/engine', () => {
                 'http://localhost:8001/analyze',
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: ENGINE_HEADERS,
                     body: JSON.stringify({ fen: START_FEN, depth: 12 }),
                 },
             ],

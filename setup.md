@@ -49,6 +49,8 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
    NEXT_PUBLIC_SUPABASE_ANON_KEY="<your_supabase_anon_key>"
    NEXT_PUBLIC_SOCKET_URL="http://localhost:3001"
    SUPABASE_SERVICE_ROLE_KEY="<your_supabase_service_role_key>"
+   GAMBIT_ENGINE_URL="http://127.0.0.1:8001"
+   ENGINE_SHARED_SECRET="<any long random string; the same in all three services>"
    ```
    > **Note:** `SUPABASE_SERVICE_ROLE_KEY` has no `NEXT_PUBLIC_` prefix — it is only used in Server Actions and is never exposed to the browser. This key is required for the signup flow to create user profiles.
 
@@ -60,6 +62,7 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
    SUPABASE_URL="<your_supabase_url>"
    SUPABASE_SERVICE_KEY="<your_supabase_service_key>"
    GAMBIT_ENGINE_URL="http://127.0.0.1:8001"
+   ENGINE_SHARED_SECRET="<the same value as in frontend/.env.local>"
    FRONTEND_URL="http://localhost:3000"
    ```
 
@@ -70,7 +73,9 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
    PORT=8001
    SUPABASE_URL="<your_supabase_url>"
    SUPABASE_SERVICE_KEY="<your_supabase_service_key>"
+   ENGINE_SHARED_SECRET="<the same value as in frontend/.env.local and server/.env>"
    ```
+   > **Note:** `ENGINE_SHARED_SECRET` is required. Until it is set, every engine endpoint except `GET /health` answers 503, and callers that do not send the same value in the `X-Engine-Key` header get 401.
 
 ---
 

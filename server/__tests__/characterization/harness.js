@@ -21,6 +21,9 @@ const { makeGame, START_FEN } = require('../helpers/fixtures');
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const ISO_DATE = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 const DEFAULT_ENGINE = 'http://localhost:8001';
+const ENGINE_TEST_SECRET = 'test-engine-secret';
+/** Headers of every request the server sends to the engine. */
+const ENGINE_HEADERS = { 'Content-Type': 'application/json', 'X-Engine-Key': ENGINE_TEST_SECRET };
 const EVENT_TIMEOUT_MS = 1000;
 /** Matchmaking and the global clock tick every 1000 ms of real time. */
 const TICK_TIMEOUT_MS = 2500;
@@ -119,7 +122,9 @@ function useServer() {
         Object.assign(ctx, require('../../server'));
         await new Promise((resolve) => ctx.server.listen(0, '127.0.0.1', resolve));
         ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
-        for (const k of ['GAMBIT_ENGINE_URL', 'ENGINE_URL', 'FRONTEND_URL']) savedEnv[k] = process.env[k];
+        for (const k of ['GAMBIT_ENGINE_URL', 'ENGINE_URL', 'FRONTEND_URL', 'ENGINE_SHARED_SECRET']) {
+            savedEnv[k] = process.env[k];
+        }
     });
 
     afterAll(async () => {
@@ -136,6 +141,8 @@ function useServer() {
         delete process.env.GAMBIT_ENGINE_URL;
         delete process.env.ENGINE_URL;
         delete process.env.FRONTEND_URL;
+        // The engine client refuses to call the engine without its shared secret (ENG-AUTH).
+        process.env.ENGINE_SHARED_SECRET = ENGINE_TEST_SECRET;
         supabase.reset();
         redis._reset();
         ctx.matchmaking.queue.clear();
@@ -193,6 +200,7 @@ module.exports = {
     START_FEN,
     ISO_DATE,
     DEFAULT_ENGINE,
+    ENGINE_HEADERS,
     TICK_TIMEOUT_MS,
     makeGame,
     sleep,

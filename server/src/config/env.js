@@ -49,6 +49,8 @@ function engineUrl() {
 /**
  * @typedef {object} Env
  * @property {() => string} engineUrl chess-engine base URL (`GAMBIT_ENGINE_URL`, fallback `ENGINE_URL`).
+ * @property {() => string | undefined} engineSharedSecret sent to the engine as `X-Engine-Key`
+ *   (`ENGINE_SHARED_SECRET`); without it the engine client refuses to call the engine.
  * @property {() => string | undefined} frontendUrl extra CORS origin (`FRONTEND_URL`).
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
  * @property {() => string} redisUrl `REDIS_URL`, default local Redis.
@@ -58,9 +60,25 @@ function engineUrl() {
  * @property {() => string} supabaseServiceKeySource name of the variable the key came from.
  */
 
+/**
+ * `ENGINE_SHARED_SECRET`. The value is never logged.
+ * @returns {string | undefined}
+ */
+function engineSharedSecret() {
+    const secret = process.env.ENGINE_SHARED_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+        warnOnce(
+            'engine-secret-missing',
+            '[config] ENGINE_SHARED_SECRET is not set; analysis and game review are disabled.',
+        );
+    }
+    return secret;
+}
+
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
     engineUrl,
+    engineSharedSecret,
     frontendUrl: () => process.env.FRONTEND_URL,
     port: () => process.env.PORT || DEFAULT_PORT,
     redisUrl: () => process.env.REDIS_URL || DEFAULT_REDIS_URL,

@@ -16,3 +16,6 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      # Shared secret for X-Engine-Key; set the same value on Railway and Vercel.
+      - key: ENGINE_SHARED_SECRET
+        sync: false

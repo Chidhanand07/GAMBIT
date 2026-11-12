@@ -76,6 +76,7 @@ apt-get install -y stockfish && pip install -r requirements.txt
 | `SUPABASE_SERVICE_KEY` | service role key |
 | `STOCKFISH_PATH` | `/usr/bin/stockfish` |
 | `STOCKFISH_POOL_SIZE` | `2` (free tier) or `4` (paid) |
+| `ENGINE_SHARED_SECRET` | a long random string (`openssl rand -hex 32`). **Required**: until it is set every endpoint except `GET /health` answers 503. Use the same value on Railway and Vercel. |
 | `PYTHON_VERSION` | `3.11.0` |
 
 ### 3d. Get the URL
@@ -102,6 +103,7 @@ Go to your service → **Variables** tab and add:
 | `REDIS_URL` | `rediss://...` from Upstash |
 | `FRONTEND_URL` | `https://your-app.vercel.app` (set after Vercel deploy) |
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
+| `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
 | `PORT` | **do not set** — Railway injects this automatically |
 
 ### 4c. Get the URL
@@ -129,6 +131,8 @@ Go to **Settings → Environment Variables** and add all of these for **Producti
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
 | `NEXT_PUBLIC_SOCKET_URL` | Railway server URL (e.g. `https://gambit-server.up.railway.app`) |
+| `GAMBIT_ENGINE_URL` | Render engine URL. Server-side only (used by `/api/maverick-move`); the old `ENGINE_URL` still works. |
+| `ENGINE_SHARED_SECRET` | the same value as on Render. Server-side only: **never** prefix with `NEXT_PUBLIC_`. Without it "play the computer" answers 503. |
 
 ### 5c. Deploy
 Click **Deploy**. First build takes ~2 min.

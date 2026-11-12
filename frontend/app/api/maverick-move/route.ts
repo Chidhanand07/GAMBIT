@@ -12,6 +12,7 @@ import { schemas } from '@/lib/server/validation';
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 const HTTP_BAD_REQUEST = 400;
 const HTTP_BAD_GATEWAY = 502;
+const HTTP_SERVICE_UNAVAILABLE = 503;
 
 /** 'easy' | 'medium' | 'hard'; anything else (or missing) becomes 'medium'. */
 const pickDifficulty = (requested: string | undefined) =>
@@ -37,6 +38,10 @@ export async function POST(req: Request) {
 
     try {
         const res = await requestComputerMove(parsed.data.fen, difficulty);
+        if (!res) {
+            console.error('[maverick-move] ENGINE_SHARED_SECRET is not set; the engine cannot be called');
+            return NextResponse.json({ error: 'Engine not configured' }, { status: HTTP_SERVICE_UNAVAILABLE });
+        }
         if (!res.ok) {
             const detail = await res.text().catch(() => '');
             return NextResponse.json(

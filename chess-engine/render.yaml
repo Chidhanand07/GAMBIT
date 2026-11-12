@@ -7,3 +7,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      # Shared secret for X-Engine-Key; set the same value on Railway and Vercel.
+      - key: ENGINE_SHARED_SECRET
+        sync: false

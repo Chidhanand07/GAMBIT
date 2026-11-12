@@ -6,6 +6,7 @@ const env = require('../../src/config/env');
 const KEYS = [
     'GAMBIT_ENGINE_URL',
     'ENGINE_URL',
+    'ENGINE_SHARED_SECRET',
     'NODE_ENV',
     'FRONTEND_URL',
     'PORT',
@@ -107,6 +108,33 @@ describe('engine URL [G5]', () => {
         process.env.NODE_ENV = 'test';
         expect(env.engineUrl()).toBe('http://localhost:8001');
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('engine shared secret [ENG-AUTH]', () => {
+    let env;
+    let warn;
+    beforeEach(() => {
+        jest.isolateModules(() => {
+            env = require('../../src/config/env');
+        });
+        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    test('reads ENGINE_SHARED_SECRET at call time', () => {
+        expect(env.engineSharedSecret()).toBeUndefined();
+        process.env.ENGINE_SHARED_SECRET = 's3cret';
+        expect(env.engineSharedSecret()).toBe('s3cret');
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    test('warns once in production when it is missing, and never logs a value', () => {
+        process.env.NODE_ENV = 'production';
+        env.engineSharedSecret();
+        env.engineSharedSecret();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/ENGINE_SHARED_SECRET is not set/);
     });
 });
 

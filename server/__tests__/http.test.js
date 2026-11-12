@@ -14,6 +14,8 @@ let app, io, matchmaking, buildPgnFromMoveLog;
 const AUTH = { Authorization: 'Bearer good-token' };
 
 beforeAll(() => {
+    // The engine client refuses to call the engine without its shared secret (ENG-AUTH).
+    process.env.ENGINE_SHARED_SECRET = 'test-engine-secret';
     jest.spyOn(console, 'log').mockImplementation(() => {});
     ({ app, io, matchmaking, buildPgnFromMoveLog } = require('../server'));
 });

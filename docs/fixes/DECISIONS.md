@@ -29,6 +29,8 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-012](#f-012) | Route-handler identity: `requireUser()` on `auth.getUser()`; which routes stay public | 2 | S5 |
 | [F-013](#f-013) | Route input validation with zod; `.or()` filters only from UUIDs; two username rules | 2 | S7 |
 | [F-014](#f-014) | Response DTOs are allow-lists; invite token never leaves the server in a game response | 2 | S8 |
+| [F-015](#f-015) | Engine endpoints require `X-Engine-Key`; reviews only for existing, completed games | 2 | ENG-AUTH |
+| [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
 
 ---
 
@@ -535,3 +537,65 @@ instead of one file per ADR under `docs/refactor/adr/`.
     listed item; logged for the next phase).
 - **Behaviour change.** None for the UI: the keys kept are the ones the game, result, review,
   join and profile pages read (checked with `grep` over `features/` and `app/`).
+
+## F-015
+
+**Every engine endpoint except `GET /health` requires a shared secret (ENG-AUTH).**
+
+- **Context.** The FastAPI engine was open to the internet: anyone who knew the Render URL could
+  run Stockfish analyses (CPU), ask for computer moves, and POST `/analyse-game` with any
+  `game_id`, which **writes** accuracy and move classifications into that `games` row with the
+  service-role key.
+- **Options.**
+  1. Caller authentication: (a) network allow-list; (b) a shared secret header; (c) per-caller
+     signed tokens.
+  2. No secret configured: (a) run open (as today); (b) refuse.
+  3. `/analyse-game` target check: (a) trust the caller now that it is authenticated;
+     (b) also verify the game exists and is completed.
+  4. Callers without a secret: (a) send the request and let the engine refuse it; (b) do not
+     send it.
+- **Decision.** 1b, 2b, 3b, 4b.
+  - `chess-engine/auth.py`: `require_engine_key`, a FastAPI dependency comparing `X-Engine-Key`
+    with `ENGINE_SHARED_SECRET` using `hmac.compare_digest`. No secret → 503 and an error log;
+    wrong or missing key → 401. `main.py` attaches it to every router except health, and a test
+    walks `app.routes` so a new route cannot be added unprotected without failing.
+  - `/docs`, `/redoc` and `/openapi.json` are switched off.
+  - `/analyse-game`: `game_id` must be a UUID; `services/review.game_review_status` looks the game
+    up first (404 unknown, 409 not completed, 503 if the database is unconfigured or the lookup
+    fails); the write itself also filters on `status = 'completed'`.
+  - Callers: the game server's `engineClient` (validate / analyse / analyze) and the Next.js
+    `/api/maverick-move` proxy send the header. Both read `ENGINE_SHARED_SECRET` from server-side
+    env only; neither sends a request when it is unset (the server rejects the call, the proxy
+    answers 503). The frontend proxy also adopts `GAMBIT_ENGINE_URL` with `ENGINE_URL` as fallback.
+- **Why.**
+  - *Shared secret*: Render, Railway and Vercel have no shared private network or stable egress
+    IPs on the plans in use, so an allow-list is not available; per-caller tokens add key
+    management for two callers that are both ours. One secret, compared in constant time, is the
+    smallest thing that closes the hole.
+  - *Refuse without a secret*: "unset means open" is exactly the state being fixed.
+  - *Still check the game*: authentication says who is calling, not that the request makes
+    sense. The game server only asks for a review after it has completed the game, so the check
+    costs one indexed lookup and removes "overwrite the review of any game" even for a caller
+    that holds the secret.
+- **Deploy consequence (see the report's manual steps).** Set the same `ENGINE_SHARED_SECRET` on
+  Render, Railway and Vercel **before or together with** this deploy. An engine deployed without
+  it answers 503 to everything except `/health`; a game server without it skips analysis and
+  post-game review (moves and results are unaffected, they no longer use the engine).
+- **Not changed.** `/validate-move` and `engineClient.validateMove` still exist but nothing calls
+  them since F-007 (dead code, listed for removal). `scripts/test-deployment.sh` only probes
+  `/health`, which stays public.
+
+## F-016
+
+**`GET /health` returns its Stockfish instance to the pool (G18).**
+
+- **Context.** `/health` called `get_stockfish_instance()` and never released it. Render probes
+  `/health` continuously, so after `STOCKFISH_POOL_SIZE` probes the pool was empty and every
+  analysis answered 503 (after a 10 s wait) until the process restarted.
+- **Decision.** The handler uses the pool's context manager (`with seams.get_engine(1) as sf`),
+  which puts the instance back on exit, including on an exception.
+- **Why the context manager and not an explicit release.** It is the pool's own acquire/release
+  pairing, so there is no path that forgets the second half.
+- **Test.** `tests/test_health_pool.py` runs against the *real* pool functions (filled with fake
+  engines), not the acquire/release doubles the other tests patch in: it probes `/health` five
+  times the pool size and then runs an analysis successfully. The old code fails it.
