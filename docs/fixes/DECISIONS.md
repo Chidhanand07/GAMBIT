@@ -31,6 +31,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-014](#f-014) | Response DTOs are allow-lists; invite token never leaves the server in a game response | 2 | S8 |
 | [F-015](#f-015) | Engine endpoints require `X-Engine-Key`; reviews only for existing, completed games | 2 | ENG-AUTH |
 | [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
+| [F-017](#f-017) | Profiles: column privileges + owner policies; no client INSERT; dead server action removed | 3 | S11 |
 
 ---
 
@@ -599,3 +600,53 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Test.** `tests/test_health_pool.py` runs against the *real* pool functions (filled with fake
   engines), not the acquire/release doubles the other tests patch in: it probes `/health` five
   times the pool size and then runs an analysis successfully. The old code fails it.
+
+## F-017
+
+**`profiles`: users can change four cosmetic columns of their own row and nothing else (S11).**
+
+- **Context.** RLS decides which *rows* a role may touch, not which *columns*. The
+  `profiles_update` policy (`USING (auth.uid() = id)`) therefore let any signed-in user update
+  every column of their own row with the public API key: `rating_rapid`, `wins`,
+  `games_played`, … The `profiles_insert` policy was `WITH CHECK (true)`: anyone, signed in or
+  not, could insert a profile row for any id.
+- **Options.**
+  1. Protect ratings with: (a) a trigger that rejects changes to rating columns; (b) column
+     privileges; (c) move ratings to a separate table.
+  2. `INSERT` for `authenticated`: (a) grant it on the non-rating columns; (b) grant nothing.
+  3. Revoke only `INSERT, UPDATE` (the brief's wording), or also `DELETE` / `TRUNCATE`.
+- **Decision.** 1b, 2b, and revoke everything but `SELECT`.
+  - `REVOKE ALL … FROM PUBLIC, anon, authenticated`; `GRANT SELECT` to both API roles;
+    `GRANT UPDATE (display_name, bio, country, avatar_url)` to `authenticated`;
+    `GRANT ALL` to `service_role`.
+  - `profiles_insert`: `TO authenticated WITH CHECK ((select auth.uid()) = id)`.
+    `profiles_update`: `TO authenticated`, the same predicate on `USING` and `WITH CHECK`.
+- **Why.**
+  - *Column privileges*: this is the mechanism Postgres has for exactly this, it is enforced
+    before any policy or trigger runs, and it fails loudly (`42501`) rather than silently.
+    SEC-04 asks for it by name. A separate ratings table is the cleaner long-term shape but a
+    much larger change (every reader), so it is left for later.
+  - *Which columns*: derived from the code. `PATCH /api/profile/me` is the only profile edit
+    path and writes exactly `display_name`, `bio`, `country`, `avatar_url`. `sex` and
+    `is_public` exist in the schema but no code edits them, so they are not granted.
+  - *No INSERT grant*: every profile insert in the app goes through the service role (signup,
+    the OAuth callback, the auto-create in `GET /api/profile/me`); `grep` finds no client-side
+    `.from('profiles').insert`. The corrected policy stays in place as the second line of
+    defence if a grant is ever added back.
+  - *DELETE / TRUNCATE too*: no client path uses them, and `TRUNCATE` is not subject to RLS at
+    all. Least privilege costs nothing here.
+- **Unaffected.** The game server (ratings, statistics) and the Next.js routes use the
+  service-role / secret key, which bypasses RLS and keeps full privileges. Reading profiles is
+  unchanged.
+- **Also removed: `frontend/app/actions/auth.ts`.** A `'use server'` action,
+  `createProfile({ userId, username, email })`, that inserted a profile for **any caller-supplied
+  user id** with the service-role key and no authentication. Nothing imports it, so Next.js
+  does not expose it today and it could not have worked (it writes an `email` column that does
+  not exist). It was found while listing every writer of `profiles` for this item; leaving a
+  ready-made, unauthenticated service-role insert one import away from being live is the kind of
+  thing this phase exists to remove.
+- **Tests.** `supabase/tests/01_profiles_rls.test.sql` (31 assertions, as `authenticated`, `anon`
+  and `service_role`): rating/statistics updates raise `42501` and the row is checked unchanged;
+  display fields update; another user's row is affected 0 times; inserts are refused; the policy
+  definitions and the exact set of updatable columns are asserted. Run against the old schema,
+  22 of the 31 fail.
