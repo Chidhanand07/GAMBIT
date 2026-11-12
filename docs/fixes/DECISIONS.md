@@ -25,6 +25,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-008](#f-008) | The server decides results; one finalizer; `games.result` = `white` / `black` / `draw` | 1 | S3 (+G1) |
 | [F-009](#f-009) | No draw-offer or abort events: the UI has neither | 1 | S3 |
 | [F-010](#f-010) | Pre-PR review of PR 1: what was fixed, what was deferred | 1 | S1, S2, S3 |
+| [F-011](#f-011) | Next.js pinned to 14.2.35; `/login` gets the Suspense boundary the patch line requires | 2 | NEXT-CVE |
 
 ---
 
@@ -372,3 +373,27 @@ instead of one file per ADR under `docs/refactor/adr/`.
     tightening the schema risks rejecting values current clients send, so it needs its own pass.
   - A rejected `resign` shows nothing in the UI; a `make_move` can be acked `internal_error`
     after it was applied if finalization throws (the page ignores acks today). Low impact.
+
+## F-011
+
+**Next.js 14.0.3 → 14.2.35 (exact pin), and the one thing the upgrade broke (NEXT-CVE).**
+
+- **Context.** 14.0.3 is exposed to CVE-2025-29927 (middleware authorization bypass, fixed in
+  14.2.25) and CVE-2025-55184 / CVE-2025-67779 (RSC denial of service, fixed in 14.2.35). The
+  brief limits this phase to the 14.2.x line.
+- **Options.** (a) `^14.2.35` range; (b) exact `14.2.35`.
+- **Decision.** (b) for `next`; `@next/eslint-plugin-next` moves to `^14.2.35`. The repository
+  has no `eslint-config-next` (the flat config uses the plugin directly), so there was nothing
+  else to bump.
+- **Why exact.** The version *is* the fix. A range could resolve lower from a stale lockfile or a
+  mirror, and a guard test (`__tests__/security/nextVersion.test.ts`) asserts both the installed
+  version and the declared one.
+- **What the patch upgrade broke.** `next build` failed prerendering `/login`:
+  "useSearchParams() should be wrapped in a suspense boundary" (enforced since 14.1). Jest and
+  `tsc` do not catch this; it was found by running a production build. `app/login/page.tsx` now
+  renders its form inside `<Suspense>`. Nothing else needed changing: the full build completes
+  and the test, type and lint gates are unchanged.
+- **Not done.** NX-01 says 14.x must not ship after this stopgap; the move to 15.5 / 16.4 is
+  out of scope here and stays at the top of the next phase. `typescript.ignoreBuildErrors` and
+  `eslint.ignoreDuringBuilds` are still set in `next.config.js` (S12, not a listed item). CI does
+  not run `next build`, which is why this break was invisible to the test suite.
