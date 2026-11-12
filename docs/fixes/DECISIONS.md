@@ -33,6 +33,8 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
 | [F-017](#f-017) | Profiles: column privileges + owner policies; no client INSERT; dead server action removed | 3 | S11 |
 | [F-018](#f-018) | Invite tokens move to `game_invites` (service-role only), expand → deploy → contract | 3 | INV-TOKEN |
+| [F-019](#f-019) | Drop `matchmaking_queue`; a migration-time guard that every public table has RLS | 3 | MATCHMAKING-QUEUE |
+| [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
 
 ---
 
@@ -707,3 +709,61 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Tests.** `supabase/tests/02_game_invites.test.sql` (13 assertions): `anon` and `authenticated`
   get `42501` on any access to `game_invites`; a `games` row has no token columns;
   `service_role` reads the invite; one invite per game; cascade on delete.
+
+## F-019
+
+**`public.matchmaking_queue` is dropped; a guard fails the migration if any public table lacks RLS (MATCHMAKING-QUEUE).**
+
+- **Context.** The initial schema created `matchmaking_queue` and never enabled RLS on it. With
+  Supabase's default grants that means the public API key could read and write it freely.
+  Matchmaking has always run in the game server's memory; `grep -rn matchmaking_queue` over the
+  whole repository finds only the `CREATE TABLE` line.
+- **Options.** (a) enable RLS and leave the table; (b) drop it. For the "all tables have RLS"
+  check: (a) a pgTAP test only; (b) a check inside a migration; (c) both.
+- **Decision.** Drop the table (`DROP TABLE IF EXISTS`), and (c): the migration ends with a `DO`
+  block that raises, naming the tables, if any ordinary or partitioned table in `public` has
+  RLS disabled; `supabase/tests/00_schema_guards.test.sql` asserts the same thing.
+- **Why.** Dead, unprotected, API-reachable tables should not exist. The in-migration guard
+  catches drift on the *real* database at the moment the migration is applied (the live schema
+  has diverged from these files before), which a CI test against a freshly built database
+  cannot. The pgTAP test keeps the property true for every future migration.
+- **Operational note.** If the live database has some other table in `public` without RLS, this
+  migration stops with `Row level security is not enabled on: …`. That is intended: enable RLS
+  on it (or drop it) and re-run. Nothing has been changed at that point, because the migration
+  runs in one transaction.
+
+## F-020
+
+**A "Database (Supabase)" CI job; `supabase/config.toml`; one existing migration file renamed.**
+
+- **Context.** There was no automated check of the database at all (TEST-04), no
+  `supabase/config.toml` (so the CLI could not start a local stack), and two migration files
+  shared the version prefix `00005` (`00005_fix_rating_precision.sql`, `00005_schema_fixes.sql`).
+- **Decision.**
+  - `.github/workflows/tests.yml` gains a job that runs `supabase start`, `supabase db reset`
+    and `supabase test db` (pgTAP) on every pull request and on pushes to `main` / `preprod`.
+  - `supabase/config.toml` with only `project_id`; everything else is the CLI's default.
+  - `00005_schema_fixes.sql` is renamed to `00006_schema_fixes.sql`. **Its content is unchanged**
+    (`git` records a pure rename).
+- **Why the rename, given "never edit an existing migration".** The Supabase CLI keys applied
+  migrations by the numeric prefix. Two files with the same prefix cannot both be recorded, so
+  `supabase db reset` cannot build the database from these files, and the new CI job could not
+  run. The rename keeps the original order (`00005_fix_rating_precision` then the schema fixes),
+  changes no SQL, and is the one-time reconciliation SEC-08 itself asks for. It is the smallest
+  change that makes the listed CI job possible, so it is logged here rather than left out.
+- **What the owner must do because of it.** Nothing if the remote project has no migration
+  history (the old files say "run this in the SQL editor", which suggests it does not). If
+  `supabase migration list` does show `00005` as applied remotely, run
+  `supabase migration repair --status applied 00006` once so the renamed file is not re-run.
+- **What was and was not run.** The pgTAP tests have **not** been executed with pgTAP on this
+  machine: there is no Docker or Supabase CLI here, and downloading pgTAP was not permitted.
+  What *was* run locally, on a throwaway Postgres 17 cluster with hand-made stand-ins for the
+  Supabase roles, `auth.uid()` and the default grants:
+  - every migration, old and new, applied in order from an empty database;
+  - an invite created between "expand" and "contract" ends up in `game_invites`;
+  - the three test files, through a small local stand-in for the pgTAP functions they call:
+    8 + 31 + 13 assertions pass on the migrated schema, and 5 + 22 fail on the old one (the
+    third file cannot even start there, the table does not exist).
+  The first real pgTAP run is this PR's "Database (Supabase)" check. If it fails on something
+  the stand-in could not model (the real `auth.users` columns, the exact text pgTAP expects),
+  that is the place to look.
