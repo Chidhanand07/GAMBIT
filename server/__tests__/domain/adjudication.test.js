@@ -94,5 +94,8 @@ test('the reason strings are the ones shown to players', () => {
         THREEFOLD_REPETITION: 'Threefold repetition',
         FIFTY_MOVE_RULE: 'Fifty-move rule',
         RESIGNATION: 'Resignation',
+        // Decided by the clock, finalized through the same path [G3].
+        TIME: 'Time',
+        ABANDONMENT: 'Abandonment',
     });
 });

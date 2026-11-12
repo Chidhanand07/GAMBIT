@@ -13,6 +13,8 @@ const REASON = Object.freeze({
     THREEFOLD_REPETITION: 'Threefold repetition',
     FIFTY_MOVE_RULE: 'Fifty-move rule',
     RESIGNATION: 'Resignation',
+    TIME: 'Time',
+    ABANDONMENT: 'Abandonment',
 });
 
 /**

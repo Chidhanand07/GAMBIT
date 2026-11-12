@@ -49,6 +49,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
 | [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
 | [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
+| [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
 
 ---
 
@@ -1145,3 +1146,35 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Tests.** The characterization case "writes white_time_ms/black_time_ms (BUG pinned)" now
   asserts the canonical pair; a move's row update includes both clocks; a round-trip test on
   `gameStateFromRow`; the DTO test asserts the legacy pair is not exposed.
+
+## F-029
+
+**Timeouts and abandonment end games through the single finalizer (G3).**
+
+- **Context.** After S3 there were still two ways to finish a game. Moves and resignations
+  went through `gameFinalizer`. The clock had its own `finalizeExpiredGame`, which wrote only
+  `status`, `winner_id`, `ended_at` and `final_fen` (no `result`, no clocks), never triggered
+  the game review, did not store the reason in Redis, did not clear the session links, and
+  sent a `game_end` payload with two extra fields on flag fall and none on abandonment.
+- **Decision.**
+  - `gameFinalizer.endGameIf(gameId, decide)`: `decide(game)` runs on the state read inside the
+    per-game lock, in the same atomic active → completed transition, and returns a verdict or
+    null. `endGame(gameId, verdict)` is `endGameIf(gameId, () => verdict)`.
+  - `clockService` no longer finalizes anything. A tick broadcasts the clock and, when its
+    pure `clockVerdict` says the game is over, calls `finalizer.endGameIf` with that same
+    function, so the verdict is re-taken on fresh state (the guarantee F-010 added: a move or
+    a reconnect that lands first wins).
+  - `REASON.TIME` and `REASON.ABANDONMENT` join the other reasons in `domain/adjudication`.
+  - The composition root builds one finalizer and gives it to both the game service and the
+    clock. The legacy facade `services/clock.js` only owns the interval now;
+    `finalizeExpiredGame` is deleted.
+- **Why a function and not a verdict.** The clock's verdict depends on the time and on state
+  that changes every move. Passing the verdict would reintroduce the stale-read race; passing
+  the decision keeps one transition and one place that knows how a game ends (SOLID-01).
+- **Behaviour changes.**
+  - Games that end on time or by abandonment now have `result` and both clock columns in the
+    database, get a game review, and show their real reason ("Time", "Abandonment") when a
+    player re-joins later (it was "Game over").
+  - The `game_end` payload is the same five fields for every ending. The `is_rated` and
+    `time_control` extras on flag fall are gone; nothing in the web app read them.
+  - A rating failure after a clock ending is logged as `[clock] game <id> error: …`.

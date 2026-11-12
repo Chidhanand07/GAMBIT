@@ -188,9 +188,6 @@ export interface GameEndBroadcast {
     reason: string;
     white_id: string;
     black_id: string;
-    /** Only on flag fall. */
-    is_rated?: boolean | null;
-    time_control?: TimeControl;
 }
 
 export interface RatingChange {

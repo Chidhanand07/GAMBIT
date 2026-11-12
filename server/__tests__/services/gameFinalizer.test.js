@@ -174,3 +174,30 @@ test('a game with an empty seat cannot be finalized', async () => {
     expect(await ctx.finalizer.endGame('g', { winner: 'white', reason: 'Resignation' })).toBe(false);
     expect(ctx.emitter.sent).toEqual([]);
 });
+
+describe('endGameIf: the verdict is decided on the state under the lock [G3]', () => {
+    test('the decision function sees the current state and its verdict ends the game', async () => {
+        const ctx = setup(makeGame({ id: 'g', blackClockMs: 0 }));
+        const decide = jest.fn((game) => (game.blackClockMs === 0 ? { winner: 'white', reason: 'Time' } : null));
+        expect(await ctx.finalizer.endGameIf('g', decide)).toBe(true);
+        expect(decide).toHaveBeenCalledWith(expect.objectContaining({ id: 'g', status: 'active' }));
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'white', reason: 'Time' });
+        expect(ctx.emitter.named('game_end')).toHaveLength(1);
+    });
+
+    test('no verdict → nothing changes, nothing is broadcast or persisted', async () => {
+        const ctx = setup();
+        expect(await ctx.finalizer.endGameIf('g', () => null)).toBe(false);
+        expect(ctx.gameStore.state.get('g').status).toBe('active');
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('the decision function is not even asked about a game that is not active', async () => {
+        const ctx = setup(makeGame({ id: 'g', status: 'completed', result: 'black' }));
+        const decide = jest.fn(() => ({ winner: 'white', reason: 'Time' }));
+        expect(await ctx.finalizer.endGameIf('g', decide)).toBe(false);
+        expect(await ctx.finalizer.endGameIf('unknown', decide)).toBe(false);
+        expect(decide).not.toHaveBeenCalled();
+    });
+});

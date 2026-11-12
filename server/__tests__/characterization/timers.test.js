@@ -36,13 +36,22 @@ async function patchGame(id, patch) {
 
 const reviewCalls = () => ctx.fetch.mock.calls.filter(([url]) => String(url).endsWith('/analyse-game'));
 
-function finalizeOps(gameId, winnerId, fen) {
+/** The one finished-game update, identical for every kind of ending [G3]. */
+function finalizeOps(game, outcome, winnerId) {
     return [
         [
             'update',
-            { status: 'completed', winner_id: winnerId, ended_at: ISO_DATE, final_fen: fen },
+            {
+                status: 'completed',
+                result: outcome,
+                winner_id: winnerId,
+                ended_at: ISO_DATE,
+                final_fen: game.fen,
+                white_clock_ms: game.whiteClockMs,
+                black_clock_ms: game.blackClockMs,
+            },
         ],
-        ['eq', 'id', gameId],
+        ['eq', 'id', game.id],
         ['eq', 'status', 'active'],
         ['select', 'id'],
         ['maybeSingle'],
@@ -158,12 +167,12 @@ describe('global clock ticker', () => {
 
         expect(events.filter(([e]) => e !== 'queue_status').map(([e]) => e)).toEqual(['clock_sync', 'game_end', 'rating_updated']);
         expect(events.find(([e]) => e === 'rating_updated')[1]).toEqual(CHANGES);
-        expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome });
+        expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome, reason: 'Abandonment' });
         expect(await getActiveGameIds()).toEqual([]);
-        expect(opsFor('games')).toEqual([finalizeOps(game.id, winnerId, AFTER_E4)]);
+        expect(opsFor('games')).toEqual([finalizeOps(before, outcome, winnerId)]);
         expect(rating.processGameEnd.mock.calls).toEqual([[game.id, 'white-user', 'black-user', outcome, '10', true]]);
-        // finalizeExpiredGame never triggers a game review (BUG pinned).
-        expect(reviewCalls()).toEqual([]);
+        // An abandoned game is reviewed like any other finished game [G3].
+        expect(reviewCalls()).toHaveLength(1);
     });
 
     test('a disconnect inside the 20 s grace period only pauses (no game_end)', async () => {
@@ -206,8 +215,6 @@ describe('global clock ticker', () => {
             reason: 'Time',
             white_id: 'white-user',
             black_id: 'black-user',
-            is_rated: true,
-            time_control: '10',
         };
         expect(ended).toEqual(expected);
         expect(await whiteEnd).toEqual(expected);
@@ -216,19 +223,22 @@ describe('global clock ticker', () => {
         const relevant = events.filter(([e]) => e !== 'queue_status');
         expect(relevant[0]).toEqual(['clock_sync', { ...clocks, serverTs: expect.any(Number) }]);
         expect(relevant.map(([e]) => e)).toEqual(['clock_sync', 'game_end', 'rating_updated']);
-        expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome });
+        expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome, reason: 'Time' });
         expect(await getActiveGameIds()).toEqual([]);
-        // final_fen is the Redis fen; clocks and result columns are not written on timeout.
-        expect(opsFor('games')).toEqual([finalizeOps(game.id, winnerId, game.fen)]);
+        // The same finished row as any ending: result and clock columns included [G3].
+        expect(opsFor('games')).toEqual([finalizeOps(before, outcome, winnerId)]);
         expect(rating.processGameEnd.mock.calls).toEqual([[game.id, 'white-user', 'black-user', outcome, '10', true]]);
-        expect(reviewCalls()).toEqual([]);
+        expect(reviewCalls()).toHaveLength(1);
     });
 
-    test('flag fall passes Redis timeControl / isRated through to the payload and rating', async () => {
+    test('flag fall rates with the Redis timeControl / isRated; the payload carries neither [G3]', async () => {
         const { game, black } = await ctx.seatedGame({ timeControl: '3+2', isRated: false });
         await patchGame(game.id, { lastMoveAt: Date.now() - 700000 });
         supabase.queue('games', { data: { id: game.id }, error: null });
-        expect(await once(black, 'game_end', TICK_TIMEOUT_MS)).toMatchObject({ is_rated: false, time_control: '3+2' });
+        const ended = await once(black, 'game_end', TICK_TIMEOUT_MS);
+        expect(ended).toMatchObject({ reason: 'Time' });
+        expect(ended).not.toHaveProperty('is_rated');
+        expect(ended).not.toHaveProperty('time_control');
         await waitFor(() => rating.processGameEnd.mock.calls.length === 1, 500, 'rating');
         expect(rating.processGameEnd.mock.calls[0]).toEqual([game.id, 'white-user', 'black-user', 'black', '3+2', false]);
     });

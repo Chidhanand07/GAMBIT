@@ -38,6 +38,7 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {Pick<SessionRegistry, 'userIdOf' | 'activeGameOf' | 'hasActiveGame' | 'setActiveGame' | 'clearGame'>} sessions
  * @property {Emitter} emitter
+ * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {() => number} [now]
  */
 
@@ -247,8 +248,9 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
  */
 function createGameService(deps) {
     const now = deps.now ?? (() => Date.now());
+    const finalizer = deps.finalizer ?? createGameFinalizer(deps);
     /** @type {GameCtx} */
-    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }), finalizer: createGameFinalizer(deps) };
+    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }), finalizer };
     return {
         /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<void>} */
         joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),

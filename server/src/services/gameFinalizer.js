@@ -1,8 +1,8 @@
 // @ts-check
 /**
- * The single finalizer for games that end by a move or a resignation
- * (NODE-16, NODE-18). `endGame` is only ever called by the server with a
- * verdict it computed itself; no client payload reaches this module.
+ * The single finalizer: every way a game ends goes through here: a move, a
+ * resignation, a flag fall, an abandonment (NODE-16, NODE-18, G3). The verdict
+ * is always computed by the server; no client payload reaches this module.
  *
  * Exactly once: the Redis state is moved active → completed in one atomic
  * transition, so of any number of concurrent callers only one proceeds to
@@ -72,35 +72,52 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
         if (changes) emitter.toRoom(gameRoom(gameId), 'rating_updated', changes);
     }
 
+    /**
+     * End the game if `decide` says so. `decide` runs on the state read inside
+     * the per-game lock, in the same atomic active → completed transition, so a
+     * verdict is never taken on stale state (the clock relies on this: a move
+     * or a reconnect that lands first wins).
+     * @param {string} gameId
+     * @param {(game: any) => Verdict | null} decide only called for an active game with both players
+     * @returns {Promise<boolean>} true when this call ended the game
+     */
+    async function endGameIf(gameId, decide) {
+        /** @type {Outcome} */
+        let outcome = 'draw';
+        let reason = '';
+        const finished = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
+            if (!game || game.status !== 'active' || !game.whiteId || !game.blackId) return null;
+            const verdict = decide(game);
+            if (!verdict) return null;
+            outcome = verdict.winner ?? 'draw';
+            reason = verdict.reason;
+            return { ...game, status: 'completed', result: outcome, reason };
+        });
+        if (!finished) return false;
+
+        await gameStore.removeActiveGame(gameId);
+        emitter.toRoom(gameRoom(gameId), 'game_end', {
+            game_id: gameId,
+            result: resultLabel(outcome),
+            reason,
+            white_id: finished.whiteId,
+            black_id: finished.blackId,
+        });
+        sessions.clearGame(gameId);
+        await persist(gameId, finished, outcome);
+        return true;
+    }
+
     return {
+        endGameIf,
         /**
-         * End an active game with a server-computed verdict.
+         * End an active game with a verdict the caller already holds.
          * @param {string} gameId
          * @param {Verdict} verdict `winner` null is a draw
          * @returns {Promise<boolean>} true when this call ended the game; false
          *   when it was not active (unknown, already over, or missing a player)
          */
-        async endGame(gameId, { winner, reason }) {
-            /** @type {Outcome} */
-            const outcome = winner ?? 'draw';
-            const finished = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
-                if (!game || game.status !== 'active' || !game.whiteId || !game.blackId) return null;
-                return { ...game, status: 'completed', result: outcome, reason };
-            });
-            if (!finished) return false;
-
-            await gameStore.removeActiveGame(gameId);
-            emitter.toRoom(gameRoom(gameId), 'game_end', {
-                game_id: gameId,
-                result: resultLabel(outcome),
-                reason,
-                white_id: finished.whiteId,
-                black_id: finished.blackId,
-            });
-            sessions.clearGame(gameId);
-            await persist(gameId, finished, outcome);
-            return true;
-        },
+        endGame: (gameId, verdict) => endGameIf(gameId, () => verdict),
     };
 }
 
