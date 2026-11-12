@@ -230,10 +230,12 @@ describe('global clock ticker', () => {
         const relevant = events.filter(([e]) => e !== 'queue_status');
         expect(relevant[0]).toEqual(['clock_sync', { ...clocks, serverTs: expect.any(Number) }]);
         expect(relevant.map(([e]) => e)).toEqual(['clock_sync', 'game_end', 'rating_updated']);
-        expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome, reason: 'Time' });
+        // The side that ran out is stored and persisted with no time left [G11].
+        const final = { ...before, whiteClockMs: clocks.whiteMs, blackClockMs: clocks.blackMs };
+        expect(await getGame(game.id)).toEqual({ ...final, status: 'completed', result: outcome, reason: 'Time' });
         expect(await getActiveGameIds()).toEqual([]);
         // The same finished row as any ending: result and clock columns included [G3].
-        expect(opsFor('games')).toEqual([finalizeOps(before, outcome, winnerId)]);
+        expect(opsFor('games')).toEqual([finalizeOps(final, outcome, winnerId)]);
         expect(rating.processGameEnd.mock.calls).toEqual([[game.id, 'white-user', 'black-user', outcome, '10', true]]);
         expect(reviewCalls()).toHaveLength(1);
     });

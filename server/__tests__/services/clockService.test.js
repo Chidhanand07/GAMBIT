@@ -67,7 +67,8 @@ test('flag fall goes through the one finalizer: same payload, DB row, rating and
         ended_at: ISO,
         final_fen: 'after-e4',
         white_clock_ms: 600000,
-        black_clock_ms: 4000,
+        // The side that ran out is recorded with no time left [G11].
+        black_clock_ms: 0,
     });
     expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'white', '10', true);
     expect(emitter.named('rating_updated')).toHaveLength(1);

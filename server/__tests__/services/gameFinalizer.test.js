@@ -9,6 +9,8 @@ const { makeGame } = require('../helpers/fixtures');
 
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/);
+/** The injected server time at which every game in this file ends. */
+const NOW = 2_000_000;
 
 function setup(game = makeGame({ id: 'g' })) {
     const gameStore = fakeGameStore({ [game.id]: game });
@@ -20,7 +22,7 @@ function setup(game = makeGame({ id: 'g' })) {
     const gamesRepo = { finishIfActive: jest.fn(() => result({ id: game.id })) };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const finalizer = createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter });
+    const finalizer = createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter, now: () => NOW });
     return { finalizer, gameStore, emitter, sessions, gamesRepo, ratingService, reviewService };
 }
 
@@ -237,5 +239,55 @@ describe('an aborted game: no winner, no rating, no review [FIRST-MOVE]', () => 
         expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
         expect(ctx.reviewService.triggerGameReview).not.toHaveBeenCalled();
         expect(ctx.emitter.named('rating_updated')).toEqual([]);
+    });
+});
+
+describe('finalization uses server state only [G11]', () => {
+    const TWO_PLIES = [
+        { move: 'e2e4', fen: 'x', san: 'e4' },
+        { move: 'e7e5', fen: 'y', san: 'e5' },
+    ];
+
+    test('the final clocks include the time the side to move had used when the game ended', async () => {
+        // White to move, 7 s into the move, resigns: White's stored clock (as of the last move) is 60 s.
+        const game = makeGame({ id: 'g', whiteClockMs: 60000, blackClockMs: 45000, lastMoveAt: NOW - 7000, moveLog: TWO_PLIES });
+        const ctx = setup(game);
+        await ctx.finalizer.endGame('g', { winner: 'black', reason: 'Resignation' });
+
+        // Was 60000: the elapsed 7 s were never deducted from the persisted clock.
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ white_clock_ms: 53000, black_clock_ms: 45000 });
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ whiteClockMs: 53000, blackClockMs: 45000 });
+    });
+
+    test('a flag fall is persisted as a clock of 0 for the side that ran out', async () => {
+        const game = makeGame({ id: 'g', activeSide: 'b', blackClockMs: 4000, lastMoveAt: NOW - 5000, moveLog: TWO_PLIES });
+        const ctx = setup(game);
+        await ctx.finalizer.endGame('g', { winner: 'white', reason: 'Time' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ white_clock_ms: 600000, black_clock_ms: 0 });
+    });
+
+    test('frozen clocks (a disconnect) and clocks that never started are persisted as stored', async () => {
+        const away = { userId: 'white-user', side: 'white', at: NOW - 20000 };
+        const frozen = setup(makeGame({ id: 'g', whiteClockMs: 30000, lastMoveAt: NOW - 20000, disconnectInfo: away, moveLog: TWO_PLIES }));
+        await frozen.finalizer.endGame('g', { winner: 'black', reason: 'Abandonment' });
+        expect(frozen.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ white_clock_ms: 30000 });
+
+        const unstarted = setup(makeGame({ id: 'g', lastMoveAt: null }));
+        await unstarted.finalizer.endGame('g', { winner: null, reason: 'Aborted', aborted: true });
+        expect(unstarted.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ white_clock_ms: 600000, black_clock_ms: 600000 });
+    });
+
+    test('the reason is stored with the finished state, for anyone who joins later', async () => {
+        const ctx = setup();
+        await ctx.finalizer.endGame('g', { winner: 'white', reason: 'Checkmate' });
+        expect(ctx.gameStore.state.get('g').reason).toBe('Checkmate');
+    });
+
+    test('time control and rated flag come from the stored game; nothing a caller passes can change them', async () => {
+        const ctx = setup(makeGame({ id: 'g', timeControl: '3+2', isRated: false }));
+        // A verdict carries a winner and a reason only. Extra fields (what a client used to send) are ignored.
+        await ctx.finalizer.endGame('g', { winner: 'white', reason: 'Checkmate', time_control: '1+0', is_rated: true });
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith('g', 'white-user', 'black-user', 'white', '3+2', false);
+        expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledWith('g', expect.anything(), '3+2');
     });
 });

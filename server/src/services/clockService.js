@@ -20,7 +20,7 @@ const { gameRoom } = require('./emitter');
 /**
  * @typedef {object} ClockDeps
  * @property {{ getGame: (id: string) => Promise<any>, getActiveGameIds: () => Promise<string[]> }} gameStore
- * @property {{ endGameIf: (gameId: string, decide: (game: any) => Verdict | null) => Promise<boolean> }} finalizer
+ * @property {{ endGameIf: (gameId: string, decide: (game: any) => Verdict | null, at?: number) => Promise<boolean> }} finalizer
  * @property {Emitter} emitter
  * @property {() => number} now
  */
@@ -46,7 +46,7 @@ async function tickGame(deps, gameId) {
     }
 
     if (!clockVerdict(game, at)) return;
-    await deps.finalizer.endGameIf(gameId, (current) => clockVerdict(current, at));
+    await deps.finalizer.endGameIf(gameId, (current) => clockVerdict(current, at), at);
 }
 
 /**

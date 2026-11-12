@@ -174,7 +174,8 @@ async function makeMove(ctx, data, userId, client) {
     const outcome = await ctx.moves.submit(data, userId);
     if (outcome.accepted) {
         const verdict = adjudicate(outcome.played.position);
-        if (verdict) await ctx.finalizer.endGame(data.game_id, verdict);
+        // The game ended with this move, at this move's time: the opponent's clock is not charged.
+        if (verdict) await ctx.finalizer.endGame(data.game_id, verdict, outcome.state.lastMoveAt);
         return { ok: true };
     }
 
@@ -182,7 +183,7 @@ async function makeMove(ctx, data, userId, client) {
     if (outcome.reason === REJECTION.TIME_EXPIRED) {
         // Too late: the game is over on time now, not at the next tick (G7).
         const at = ctx.now();
-        await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at));
+        await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at), at);
     } else if (outcome.game) {
         sendState(ctx, outcome.game, client);
     }

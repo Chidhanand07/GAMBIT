@@ -54,6 +54,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
 | [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
 | [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
+| [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
 
 ---
 
@@ -1300,3 +1301,23 @@ instead of one file per ADR under `docs/refactor/adr/`.
   after a move is accepted, so it cannot rescue a move that was not.
 - **Client.** The sender gets `move_rejected { reason: 'time_expired' }` and the `game_end`
   broadcast; no extra state sync is sent because the game is over.
+
+## F-034
+
+**Final clocks are the clocks at the moment the game ended; the other two parts of G11 were already fixed by S3 (G11).**
+
+- **G11 has three parts** (docs/refactor/REPORT.md): (1) the reason was not stored in Redis;
+  (2) the persisted clocks lacked the elapsed deduction; (3) the client's `time_control` /
+  `is_rated` were used when Redis lacked them.
+- **(1) and (3): already fixed** by the high-risk phase (S3, F-008): the finalizer stores
+  `reason` with the finished state, and it takes the time control and the rated flag only
+  from the stored game; no payload reaches it. New tests state both explicitly, and they
+  passed before any change in this commit, which is the evidence.
+- **(2): fixed here.** The stored clocks are "time left as of the last move". When a game
+  ended by resignation, flag fall or abandonment, those values were written to the database
+  as the final clocks, so a player who resigned seven seconds into a move kept those seven
+  seconds, and a player who lost on time was recorded with time left. The finalizer now takes
+  `clocksAt(game, now)` inside the transition and stores that, both in Redis and in the row:
+  the loser of a flag fall has 0.
+- **Frozen and unstarted clocks** are stored as they are (`clocksAt` does not charge them).
+- **`now` is injected** into the finalizer (default `Date.now`), like in the other services.

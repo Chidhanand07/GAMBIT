@@ -9,6 +9,7 @@
  * broadcast. The database update is guarded the same way (`status = 'active'`),
  * so the rating and the review run once even if the clock path got there first.
  */
+const { clocksAt } = require('../domain/clock');
 const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
 
@@ -27,6 +28,7 @@ const DEFAULT_TIME_CONTROL = '10';
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {{ clearGame: (gameId: string) => void }} sessions
  * @property {import('./emitter').Emitter} emitter
+ * @property {() => number} [now]
  */
 
 /**
@@ -52,7 +54,15 @@ function finishedRow(game, outcome) {
 /**
  * @param {FinalizerDeps} deps
  */
-function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter }) {
+function createGameFinalizer({
+    gameStore,
+    gamesRepo,
+    ratingService,
+    reviewService,
+    sessions,
+    emitter,
+    now = () => Date.now(),
+}) {
     /**
      * Persist the result; if this call won the database transition, start the
      * review and update ratings (time control and rated flag from server state).
@@ -82,9 +92,10 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
      * or a reconnect that lands first wins).
      * @param {string} gameId
      * @param {(game: any) => Verdict | null} decide only called for an active game with both players
+     * @param {number} [at] the instant the verdict refers to (a move's time, a tick's time); default: now
      * @returns {Promise<boolean>} true when this call ended the game
      */
-    async function endGameIf(gameId, decide) {
+    async function endGameIf(gameId, decide, at = now()) {
         /** @type {Outcome} */
         let outcome = 'draw';
         let reason = '';
@@ -94,7 +105,17 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
             if (!verdict) return null;
             outcome = verdict.aborted ? 'aborted' : (verdict.winner ?? 'draw');
             reason = verdict.reason;
-            return { ...game, status: 'completed', result: outcome, reason };
+            // The clocks as they stood when the game ended: the side to move is charged
+            // for the time it had used since the last move (G11).
+            const { whiteMs, blackMs } = clocksAt(game, at);
+            return {
+                ...game,
+                whiteClockMs: whiteMs,
+                blackClockMs: blackMs,
+                status: 'completed',
+                result: outcome,
+                reason,
+            };
         });
         if (!finished) return false;
 
@@ -117,10 +138,11 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
          * End an active game with a verdict the caller already holds.
          * @param {string} gameId
          * @param {Verdict} verdict `winner` null is a draw
+         * @param {number} [at] the instant the game ended; default: now
          * @returns {Promise<boolean>} true when this call ended the game; false
          *   when it was not active (unknown, already over, or missing a player)
          */
-        endGame: (gameId, verdict) => endGameIf(gameId, () => verdict),
+        endGame: (gameId, verdict, at) => endGameIf(gameId, () => verdict, at),
     };
 }
 
