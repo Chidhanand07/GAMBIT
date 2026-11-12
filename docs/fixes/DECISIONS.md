@@ -48,6 +48,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
 | [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
 | [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
+| [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
 
 ---
 
@@ -1116,3 +1117,31 @@ instead of one file per ADR under `docs/refactor/adr/`.
   played at that speed, not at 10 minutes. "Daily" is a 1440-minute clock, as its card always
   implied; there is still no per-move correspondence mode.
 - **Not verified.** No browser run; the queue was exercised through the socket tests only.
+
+## F-028
+
+**Clocks are stored in one column pair, `white_clock_ms` / `black_clock_ms`, written with every move; the legacy pair is left in place, unused (G2).**
+
+- **Context.** `games` has two pairs of clock columns. The disconnect snapshot wrote
+  `white_time_ms` / `black_time_ms`; the restore after a server restart read
+  `white_clock_ms` / `black_clock_ms`, which were written only when a game ended. So a game
+  restored mid-play always came back with full starting clocks.
+- **Decision.**
+  - Canonical pair: `white_clock_ms` / `black_clock_ms` (the pair in the initial schema, and
+    the one the finalizer and the restore already used).
+  - The server writes that pair in three places: with every move (together with the FEN),
+    at a disconnect, and when the game ends. It never reads or writes `*_time_ms`.
+  - The web DTO no longer exposes `*_time_ms`.
+- **Why write the clocks with every move.** "Read and written consistently" is only useful if
+  the row is current. The move already updates the `games` row (the FEN), so this adds two
+  integers to an existing statement, not a new query.
+- **Why the legacy columns are not dropped here.** No migration is needed to *fix* G2, and
+  dropping columns the previous release still writes would turn its (fire-and-forget)
+  disconnect snapshot into a logged error during a rollback. They are dead weight, not a
+  hazard. Dropping them is a one-line migration for a later release, once this one is the
+  oldest version that can run; it is listed in the report's remaining issues.
+- **Behaviour change.** A game restored after a server restart resumes with the clocks of
+  its last move instead of full clocks.
+- **Tests.** The characterization case "writes white_time_ms/black_time_ms (BUG pinned)" now
+  asserts the canonical pair; a move's row update includes both clocks; a round-trip test on
+  `gameStateFromRow`; the DTO test asserts the legacy pair is not exposed.

@@ -91,8 +91,7 @@ describe('join_game: game in Redis', () => {
 });
 
 describe('join_game: restore from the database (Redis empty)', () => {
-    // NOTE: the column list reads white_clock_ms/black_clock_ms, while the disconnect
-    // handler writes white_time_ms/black_time_ms (BUG pinned in timers.test.js).
+    // The restore reads white_clock_ms/black_clock_ms, the same pair every write uses (G2).
     test('queries games by id with a fixed column list; unknown game → nothing emitted', async () => {
         const s = await ctx.connect();
         const events = recordAll(s);
@@ -296,7 +295,9 @@ describe('make_move', () => {
             moveLog: [{ move: 'e2e4', fen: AFTER_E4, san: 'e4' }],
         });
         await sleep(20);
-        expect(opsFor('games')).toEqual([[['update', { fen: AFTER_E4 }], ['eq', 'id', game.id]]]);
+        expect(opsFor('games')).toEqual([
+            [['update', { fen: AFTER_E4, white_clock_ms: 600000, black_clock_ms: 600000 }], ['eq', 'id', game.id]],
+        ]);
         expect(opsFor('moves')).toEqual([
             [
                 [

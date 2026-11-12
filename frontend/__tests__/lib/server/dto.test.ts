@@ -58,6 +58,13 @@ describe('toGameDto', () => {
         })
     })
 
+    test('clocks leave the server in the one canonical pair; the legacy *_time_ms columns do not [G2]', () => {
+        const dto = toGameDto(gameRow)
+        expect(dto).toMatchObject({ white_clock_ms: 1, black_clock_ms: 2 })
+        expect(dto).not.toHaveProperty('white_time_ms')
+        expect(dto).not.toHaveProperty('black_time_ms')
+    })
+
     test.each(['invite_token', 'invite_expires_at', 'clock_deadline', 'some_future_internal_column'])(
         'never includes %s',
         (key) => {

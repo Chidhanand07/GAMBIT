@@ -72,8 +72,9 @@ function moveMadePayload(request, played, state) {
  */
 function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = () => Date.now() }) {
     /**
-     * Fire-and-forget: update the games row FEN and append the move row
-     * (H10: clocks are flushed when the game ends).
+     * Fire-and-forget: update the games row (position and both clocks, in the
+     * canonical clock columns, so the row alone can restore the game: G2) and
+     * append the move row.
      * @param {string} gameId
      * @param {any} state state after the move
      * @param {PlayedMove} played
@@ -82,7 +83,11 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
         const movedColor = sideToColor(state.activeSide === 'w' ? 'b' : 'w');
         const clockMs = movedColor === 'white' ? state.whiteClockMs : state.blackClockMs;
         Promise.all([
-            gamesRepo.updateById(gameId, { fen: played.fen }),
+            gamesRepo.updateById(gameId, {
+                fen: played.fen,
+                white_clock_ms: Math.round(state.whiteClockMs),
+                black_clock_ms: Math.round(state.blackClockMs),
+            }),
             movesRepo.insert({
                 game_id: gameId,
                 move_number: state.moveLog.length,

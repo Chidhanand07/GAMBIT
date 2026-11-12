@@ -50,7 +50,7 @@ function finalizeOps(gameId, winnerId, fen) {
 }
 
 describe('disconnect during an active game', () => {
-    test('snapshots the clock, writes white_time_ms/black_time_ms (BUG pinned), stores disconnectInfo, notifies the room', async () => {
+    test('snapshots the clock, writes the canonical white_clock_ms/black_clock_ms, stores disconnectInfo, notifies the room [G2]', async () => {
         const { game, white, black } = await ctx.seatedGame({ whiteClockMs: 60000 });
         const T = Date.now();
         const before = await patchGame(game.id, { lastMoveAt: T - 5000 });
@@ -70,7 +70,7 @@ describe('disconnect during an active game', () => {
         await sleep(20);
         expect(opsFor('games')).toEqual([
             [
-                ['update', { white_time_ms: 55000, black_time_ms: 600000 }],
+                ['update', { white_clock_ms: 55000, black_clock_ms: 600000 }],
                 ['eq', 'id', game.id],
                 ['eq', 'status', 'active'],
             ],
@@ -87,7 +87,7 @@ describe('disconnect during an active game', () => {
         expect(await notice).toEqual({ userId: 'black-user', timeoutSeconds: 20 });
         expect((await getGame(game.id)).disconnectInfo).toEqual({ userId: 'black-user', side: 'black', at: expect.any(Number) });
         await sleep(20);
-        expect(supabase.op(supabase.callsFor('games')[0], 'update')[0]).toEqual({ white_time_ms: 1235, black_time_ms: 30000 });
+        expect(supabase.op(supabase.callsFor('games')[0], 'update')[0]).toEqual({ white_clock_ms: 1235, black_clock_ms: 30000 });
     });
 
     test('a non-player who joined the room is a spectator: their disconnect changes nothing [S9]', async () => {

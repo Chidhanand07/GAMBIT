@@ -7,8 +7,8 @@
  * The server is the authority: moves are validated here (moveRecorder), the
  * position after each move is adjudicated here (domain/adjudication), and a
  * game ends only through gameFinalizer. Clients cannot report a result.
- * Known bug still kept (see the refactor report): the disconnect snapshot
- * writes `white_time_ms`/`black_time_ms`.
+ * Clocks are persisted in one column pair, `white_clock_ms` / `black_clock_ms`
+ * (G2): the same pair the restore reads.
  */
 const { clocksAt } = require('../domain/clock');
 const { adjudicate, REASON } = require('../domain/adjudication');
@@ -231,8 +231,8 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
     // Persist clock snapshot to Supabase (fire-and-forget)
     gamesRepo
         .updateIfActive(gameId, {
-            white_time_ms: Math.round(frozen.whiteClockMs),
-            black_time_ms: Math.round(frozen.blackClockMs),
+            white_clock_ms: Math.round(frozen.whiteClockMs),
+            black_clock_ms: Math.round(frozen.blackClockMs),
         })
         .then(() => {});
 

@@ -150,7 +150,12 @@ describe('makeMove: the server is the authority [S1][S10]', () => {
             fen_after: NEXT_FEN,
             clock_ms_remaining: 599000,
         });
-        expect(ctx.gamesRepo.updateById).toHaveBeenCalledWith('g', { fen: NEXT_FEN });
+        // G2: the canonical clock columns are written with every move, so the row can restore the game.
+        expect(ctx.gamesRepo.updateById).toHaveBeenCalledWith('g', {
+            fen: NEXT_FEN,
+            white_clock_ms: 599000,
+            black_clock_ms: 600000,
+        });
     });
 
     test('a promotion reports the promoted piece', async () => {
@@ -340,8 +345,8 @@ describe('disconnect and reconnect', () => {
             disconnectInfo: { userId: 'black-user', side: 'black', at: T },
         });
         expect(ctx.gamesRepo.updateIfActive).toHaveBeenCalledWith('g', {
-            white_time_ms: 598000,
-            black_time_ms: 600000,
+            white_clock_ms: 598000,
+            black_clock_ms: 600000,
         });
         expect(ctx.emitter.sent).toEqual([
             { room: 'game_g', event: 'opponent_disconnected', args: [{ userId: 'black-user', timeoutSeconds: 20 }] },
