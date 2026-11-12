@@ -176,6 +176,8 @@ async function joinPrivateGame({ gamesRepo, gameStore }, findGame, { token, user
             blackId: data.black_id,
             timeControl: data.time_control,
             isRated: data.is_rated ?? false,
+            // The first-move window opens now that both players are seated.
+            startedAt: Date.now(),
         }),
     );
     await gameStore.addActiveGame(data.id);

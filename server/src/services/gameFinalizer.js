@@ -16,7 +16,7 @@ const DEFAULT_TIME_CONTROL = '10';
 
 /**
  * @typedef {import('../domain/adjudication').Verdict} Verdict
- * @typedef {'white' | 'black' | 'draw'} Outcome
+ * @typedef {'white' | 'black' | 'draw' | 'aborted'} Outcome
  */
 
 /**
@@ -31,14 +31,16 @@ const DEFAULT_TIME_CONTROL = '10';
 
 /**
  * The `games` row of a finished game. `result` is the outcome
- * ('white' | 'black' | 'draw'); see docs/fixes/DECISIONS.md F-008.
+ * ('white' | 'black' | 'draw'); see docs/fixes/DECISIONS.md F-008. An aborted
+ * game has `status = 'aborted'` and no result.
  * @param {any} game state after the transition
  * @param {Outcome} outcome
  */
 function finishedRow(game, outcome) {
+    const aborted = outcome === 'aborted';
     return {
-        status: 'completed',
-        result: outcome,
+        status: aborted ? 'aborted' : 'completed',
+        result: aborted ? null : outcome,
         winner_id: winnerIdFor(outcome, game),
         ended_at: new Date().toISOString(),
         final_fen: game.fen ?? null,
@@ -60,7 +62,8 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
      */
     async function persist(gameId, game, outcome) {
         const { data: updated } = await gamesRepo.finishIfActive(gameId, finishedRow(game, outcome));
-        if (!updated) return;
+        // An aborted game was never played: nothing to review, nothing to rate.
+        if (!updated || outcome === 'aborted') return;
 
         const timeControl = game.timeControl ?? DEFAULT_TIME_CONTROL;
         // Full Game Review in the engine (depth-18 Stockfish per move); fire-and-forget.
@@ -89,7 +92,7 @@ function createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewServic
             if (!game || game.status !== 'active' || !game.whiteId || !game.blackId) return null;
             const verdict = decide(game);
             if (!verdict) return null;
-            outcome = verdict.winner ?? 'draw';
+            outcome = verdict.aborted ? 'aborted' : (verdict.winner ?? 'draw');
             reason = verdict.reason;
             return { ...game, status: 'completed', result: outcome, reason };
         });

@@ -66,7 +66,7 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
         await gameStore.addActiveGame(gameId);
         return restored;
     }
-    if (dbGame && dbGame.status === 'completed') {
+    if (dbGame && (dbGame.status === 'completed' || dbGame.status === 'aborted')) {
         client.emit('game_end', {
             game_id: gameId,
             result: resultLabel(outcomeOfRow(dbGame)),

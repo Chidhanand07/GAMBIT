@@ -1,14 +1,14 @@
 // @ts-check
 /**
  * The global clock tick: sync running clocks, and end games the clock decides
- * (flag fall, abandonment after the disconnect grace period). Ending a game is
+ * (flag fall, abandonment after the disconnect grace period, a first move that
+ * never came: domain/clockVerdict). Ending a game is
  * not done here: the tick hands its verdict to the one finalizer, so a game
  * that ends on time gets the same database row, rating, review and `game_end`
  * payload as any other ending (G3, NODE-18).
  */
-const { REASON } = require('../domain/adjudication');
-const { activeRemainingMs, clocksAt, isGraceExpired } = require('../domain/clock');
-const { opponentColor, sideToColor } = require('../domain/result');
+const { clocksAt } = require('../domain/clock');
+const { clockVerdict } = require('../domain/clockVerdict');
 const { gameRoom } = require('./emitter');
 
 /**
@@ -26,29 +26,6 @@ const { gameRoom } = require('./emitter');
  */
 
 /**
- * Whether the clock ends `game` at `at`, and for whom. Pure. A disconnected
- * player's clock is paused; after the grace period the opponent wins by
- * abandonment. Otherwise the side to move loses when its time is up.
- * @param {GameState} game an active game whose clock has started
- * @param {number} at
- * @returns {Verdict | null}
- */
-function clockVerdict(game, at) {
-    const disconnectInfo = /** @type {{ side: string, at: number } | null} */ (game.disconnectInfo);
-    // ── Disconnect grace period check (20 s) ──
-    if (disconnectInfo) {
-        if (!isGraceExpired(disconnectInfo, at)) return null; // clock paused while opponent is disconnected
-        return { winner: opponentColor(disconnectInfo.side), reason: REASON.ABANDONMENT };
-    }
-    // ── Clock timeout ──
-    if (activeRemainingMs(game, at) > 0) return null;
-    return { winner: opponentColor(sideToColor(game.activeSide)), reason: REASON.TIME };
-}
-
-/** @param {any} game */
-const isRunning = (game) => Boolean(game && game.status === 'active' && game.lastMoveAt);
-
-/**
  * One game's tick: broadcast the running clock, then let the finalizer end the
  * game if the clock says so. The verdict is taken again on the state the
  * finalizer reads inside the per-game lock, not on this tick's earlier read:
@@ -58,15 +35,18 @@ const isRunning = (game) => Boolean(game && game.status === 'active' && game.las
  */
 async function tickGame(deps, gameId) {
     const game = await deps.gameStore.getGame(gameId);
-    if (!isRunning(game)) return;
+    if (!game || game.status !== 'active') return;
 
     const at = deps.now();
-    // Real remaining for the active player (frozen while a player is disconnected)
-    const { whiteMs, blackMs } = clocksAt(game, at);
-    deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
+    // Nothing to show before the first move: no clock has started.
+    if (game.lastMoveAt) {
+        // Real remaining for the active player (frozen while a player is disconnected)
+        const { whiteMs, blackMs } = clocksAt(game, at);
+        deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
+    }
 
     if (!clockVerdict(game, at)) return;
-    await deps.finalizer.endGameIf(gameId, (current) => (isRunning(current) ? clockVerdict(current, at) : null));
+    await deps.finalizer.endGameIf(gameId, (current) => clockVerdict(current, at));
 }
 
 /**

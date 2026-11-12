@@ -299,6 +299,7 @@ describe('POST /api/games/join/:token', () => {
             isRated: true,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect(await getActiveGameIds()).toEqual(['pg-1']);
     });

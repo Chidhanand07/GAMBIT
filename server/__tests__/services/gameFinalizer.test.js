@@ -201,3 +201,41 @@ describe('endGameIf: the verdict is decided on the state under the lock [G3]', (
         expect(decide).not.toHaveBeenCalled();
     });
 });
+
+describe('an aborted game: no winner, no rating, no review [FIRST-MOVE]', () => {
+    const ABORT = { winner: null, reason: 'Aborted', aborted: true };
+
+    test('Redis, broadcast and the database row', async () => {
+        const game = makeGame({ id: 'g', isRated: true });
+        const ctx = setup(game);
+        expect(await ctx.finalizer.endGame('g', ABORT)).toBe(true);
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'aborted', reason: 'Aborted' });
+        expect(ctx.gameStore.active.has('g')).toBe(false);
+        expect(ctx.emitter.named('game_end')[0].args[0]).toEqual({
+            game_id: 'g',
+            result: 'Aborted',
+            reason: 'Aborted',
+            white_id: 'white-user',
+            black_id: 'black-user',
+        });
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledWith('g', {
+            status: 'aborted',
+            result: null,
+            winner_id: null,
+            ended_at: ISO,
+            final_fen: game.fen,
+            white_clock_ms: 600000,
+            black_clock_ms: 600000,
+        });
+        expect(ctx.sessions.activeGameOf('white-user')).toBeUndefined();
+    });
+
+    test('a rated game that is aborted changes no rating and is not reviewed', async () => {
+        const ctx = setup(makeGame({ id: 'g', isRated: true }));
+        await ctx.finalizer.endGame('g', ABORT);
+        expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
+        expect(ctx.reviewService.triggerGameReview).not.toHaveBeenCalled();
+        expect(ctx.emitter.named('rating_updated')).toEqual([]);
+    });
+});

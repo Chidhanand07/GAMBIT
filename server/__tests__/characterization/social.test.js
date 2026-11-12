@@ -153,6 +153,7 @@ describe('rematch', () => {
             isRated: false,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect([...redis._sets.get('active_games')]).toEqual(['rm-1']);
         expect(redis._strings.has('pending:rematch:alice:bob')).toBe(false);

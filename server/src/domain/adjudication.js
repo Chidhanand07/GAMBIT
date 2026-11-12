@@ -15,11 +15,13 @@ const REASON = Object.freeze({
     RESIGNATION: 'Resignation',
     TIME: 'Time',
     ABANDONMENT: 'Abandonment',
+    ABORTED: 'Aborted',
 });
 
 /**
  * @typedef {'white' | 'black'} Color
- * @typedef {{ winner: Color | null, reason: string }} Verdict `winner` null is a draw
+ * @typedef {{ winner: Color | null, reason: string, aborted?: boolean }} Verdict `winner` null is a draw,
+ *   unless `aborted`: then no game was played and nothing is rated
  * @typedef {Pick<import('chess.js').Chess, 'turn' | 'isCheckmate' | 'isStalemate' | 'isInsufficientMaterial' |
  *   'isThreefoldRepetition' | 'isDrawByFiftyMoves'>} Position
  */

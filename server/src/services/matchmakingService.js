@@ -97,7 +97,7 @@ async function requestMatch(mm, data, socketId) {
  * @param {QueueEntry} p1
  * @param {QueueEntry} p2
  */
-async function createGame({ queue, gamesRepo, gameStore, emitter, random }, p1, p2) {
+async function createGame({ queue, gamesRepo, gameStore, emitter, random, now }, p1, p2) {
     queue.delete(p1.user_id);
     queue.delete(p2.user_id);
 
@@ -126,6 +126,7 @@ async function createGame({ queue, gamesRepo, gameStore, emitter, random }, p1, 
             blackId: black.user_id,
             timeControl: p1.time_control,
             isRated: p1.isRated ?? true,
+            startedAt: now(),
         }),
     );
     await gameStore.addActiveGame(data.id);

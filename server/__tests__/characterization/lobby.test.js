@@ -272,6 +272,7 @@ describe('pairing', () => {
             isRated: true,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect([...redis._sets.get('active_games')]).toEqual(['match-1']);
     });

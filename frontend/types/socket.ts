@@ -182,9 +182,9 @@ export interface ChatMessagePayload extends SendMessagePayload {
  */
 export interface GameEndBroadcast {
     game_id: string;
-    /** 'White wins' | 'Black wins' | 'Draw'. */
+    /** 'White wins' | 'Black wins' | 'Draw' | 'Aborted' (a side never made its first move). */
     result: string;
-    /** e.g. 'Checkmate', 'Stalemate', 'Resignation', 'Time', 'Abandonment', 'Game over'. */
+    /** e.g. 'Checkmate', 'Stalemate', 'Resignation', 'Time', 'Abandonment', 'Aborted', 'Game over'. */
     reason: string;
     white_id: string;
     black_id: string;

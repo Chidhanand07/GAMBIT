@@ -140,6 +140,7 @@ describe('join_game: restore from the database (Redis empty)', () => {
             isRated: true,
             lastMoveAt: expect.any(Number),
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect([...redis._sets.get('active_games')]).toEqual(['db-1']);
         expect(sync).toEqual({

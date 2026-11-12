@@ -97,5 +97,6 @@ test('the reason strings are the ones shown to players', () => {
         // Decided by the clock, finalized through the same path [G3].
         TIME: 'Time',
         ABANDONMENT: 'Abandonment',
+        ABORTED: 'Aborted',
     });
 });

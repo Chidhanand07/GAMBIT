@@ -189,14 +189,14 @@ describe('global clock ticker', () => {
         expect((await getGame(game.id)).status).toBe('active');
     });
 
-    test('a disconnect before the first move is never adjudicated (lastMoveAt null, BUG pinned)', async () => {
+    test('a disconnect before the first move IS adjudicated once the grace period is over', async () => {
+        // Was "never adjudicated (lastMoveAt null, BUG pinned)": the ticker skipped games without a move.
         const { game, black } = await ctx.seatedGame({ lastMoveAt: null });
         await patchGame(game.id, { disconnectInfo: { userId: 'white-user', side: 'white', at: Date.now() - 60000 } });
-        const ends = record(black, 'game_end');
-        await sleep(ONE_TICK_MS);
-        expect(ends).toEqual([]);
-        expect((await getGame(game.id)).status).toBe('active');
-        expect(supabase.calls).toEqual([]);
+        supabase.queue('games', { data: { id: game.id }, error: null });
+        const ended = await once(black, 'game_end', TICK_TIMEOUT_MS);
+        expect(ended).toMatchObject({ game_id: game.id, white_id: 'white-user', black_id: 'black-user' });
+        expect((await getGame(game.id)).status).toBe('completed');
     });
 
     test.each([

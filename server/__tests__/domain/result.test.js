@@ -86,3 +86,16 @@ describe('winnerIdFor', () => {
         ['other', null],
     ])('%p → %p', (outcome, id) => expect(winnerIdFor(outcome, players)).toBe(id));
 });
+
+describe('aborted games [FIRST-MOVE]', () => {
+    const { resultLabel, outcomeOfRow, winnerIdFor } = require('../../src/domain/result');
+
+    test("label 'Aborted'; nobody wins", () => {
+        expect(resultLabel('aborted')).toBe('Aborted');
+        expect(winnerIdFor('aborted', { whiteId: 'w', blackId: 'b' })).toBeNull();
+    });
+
+    test('a row with status aborted is an aborted game, not a draw', () => {
+        expect(outcomeOfRow({ status: 'aborted', result: null, winner_id: null, white_id: 'w', black_id: 'b' })).toBe('aborted');
+    });
+});

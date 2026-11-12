@@ -51,6 +51,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
 | [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
 | [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
+| [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
 
 ---
 
@@ -1216,3 +1217,40 @@ instead of one file per ADR under `docs/refactor/adr/`.
   characterization cases "clock_sync subtracts the elapsed time AGAIN (pinned)" and
   "lastMoveAt is reset to now … starts white's clock before the first move (pinned)" now
   assert the correct behaviour.
+
+## F-031
+
+**A side that never makes its first move gets the game aborted, unrated, after 30 seconds (FIRST-MOVE).**
+
+- **Context.** A game with no move had no running clock, and the ticker skipped it, so a
+  player who was paired and walked away left the opponent in a game that never ended.
+- **Decision.**
+  - `FIRST_MOVE_TIMEOUT_MS = 30000` in `domain/clockVerdict.js`. White has 30 s from the moment
+    the game becomes active; once White has moved, Black has 30 s from that move. After both
+    sides have moved the rule no longer applies.
+  - The game state gains `startedAt` (set when the game is created, or when it is restored
+    from the database after a restart, which gives a fresh 30 s).
+  - The verdict is `{ winner: null, reason: 'Aborted', aborted: true }`. The finalizer stores
+    Redis `status: 'completed', result: 'aborted'`, writes the row with `status = 'aborted'`
+    (a status the schema has always listed) and no result or winner, and does **not** rate or
+    review the game. `game_end` carries `result: 'Aborted'`.
+  - Time-based endings are now one pure, ordered table in the domain (`clockVerdict`):
+    abandonment → first-move timeout → flag fall. The clock service only ticks; it walks every
+    active game, started or not, and broadcasts `clock_sync` only once a clock has started.
+- **Why abort instead of a win for the waiting player.** No chess was played. Awarding rating
+  points for it would make "pair and wait" a way to farm rating against people with a bad
+  connection, and "pair and leave" a way to give points away. An abort costs nobody anything.
+- **Why Black's window is 30 s although Black's clock is already running.** After White's
+  first move Black's clock counts down normally. In a 10-minute game a Black player who never
+  shows up would otherwise make White wait 10 minutes for a flag fall. If Black's clock is
+  shorter than 30 s the first-move rule still decides (abort), because it comes first in the
+  table: a game with one move is not a game.
+- **Disconnects.** While a player is disconnected the abandonment rule decides (20 s grace);
+  what happens when that grace expires before both sides have moved is G10.
+- **States created before this release** have no `startedAt` and are simply not subject to the
+  rule; nothing is aborted retroactively at deploy time.
+- **Web client.** `GameOverModal` treats `Aborted` as its own outcome: title "Game aborted",
+  the line "No game was played · not rated", neutral icon. Before, any result that was not a
+  win or a draw rendered as "You Lost". There is no on-board countdown for the 30 s; that is a
+  UI addition for a later phase.
+- **Not verified.** No browser run of the modal.

@@ -185,3 +185,35 @@ describe('the clock decides on the state it holds the lock on (review finding 5)
         expect(gameStore.state.get(game.id).moveLog).toHaveLength(1);
     });
 });
+
+describe('first-move timeout [FIRST-MOVE]', () => {
+    test('a game where White never moves is aborted by the ticker, unrated', async () => {
+        const { svc, emitter, gameStore, rating, advance } = setup(makeGame({ startedAt: T, lastMoveAt: null }));
+        advance(29000);
+        await svc.tick();
+        expect(emitter.named('game_end')).toEqual([]);
+        // No clock has started, so there is nothing to sync.
+        expect(emitter.named('clock_sync')).toEqual([]);
+
+        advance(1000);
+        await svc.tick();
+        expect(emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'Aborted', reason: 'Aborted' });
+        expect(gameStore.state.get('game-1')).toMatchObject({ status: 'completed', result: 'aborted' });
+        expect(rating.processGameEnd).not.toHaveBeenCalled();
+    });
+
+    test('a first move that lands before the abort wins the race', async () => {
+        const game = makeGame({ startedAt: T, lastMoveAt: null });
+        const { svc, emitter, gameStore, advance } = setup(game);
+        advance(30000);
+        gameStore.getGame.mockImplementationOnce(async () => {
+            const stale = structuredClone(gameStore.state.get(game.id));
+            const move = { move: 'e2e4', fen: 'x', san: 'e4' };
+            gameStore.state.set(game.id, { ...stale, moveLog: [move], activeSide: 'b', lastMoveAt: T + 29999 });
+            return stale;
+        });
+        await svc.tick();
+        expect(emitter.named('game_end')).toEqual([]);
+        expect(gameStore.state.get(game.id).status).toBe('active');
+    });
+});
