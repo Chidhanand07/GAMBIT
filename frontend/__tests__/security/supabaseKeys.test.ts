@@ -132,7 +132,7 @@ describe('secret keys cannot reach the browser bundle', () => {
     })
 
     test('no secret is exposed through a NEXT_PUBLIC_ variable name anywhere in the source', () => {
-        const all = ['app', 'components', 'features', 'lib', 'types', 'middleware.ts'].flatMap((d) => {
+        const all = ['app', 'components', 'features', 'lib', 'types', 'proxy.ts'].flatMap((d) => {
             const full = path.join(ROOT, d)
             return fs.statSync(full).isDirectory() ? sourceFiles(full) : [full]
         })

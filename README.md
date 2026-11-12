@@ -3,7 +3,7 @@
 A production-ready, full-stack chess platform with an accuracy-based rating system, real-time smart matchmaking, and a friends system.
 
 ## Architecture & Tech Stack
-- **Frontend**: Next.js 14, Tailwind CSS, TypeScript (deployed to Vercel)
+- **Frontend**: Next.js 16, React 19, Tailwind CSS, TypeScript (deployed to Vercel)
 - **Backend API Server**: Node.js, Express, Socket.io (deployed to Railway)
 - **Chess Engine Microservice**: Python FastAPI, `python-chess`, Stockfish (deployed to Render)
 - **Database / Auth**: Supabase (PostgreSQL, Realtime subscriptions, Auth)
@@ -41,7 +41,7 @@ GitHub Actions runs them on every push and pull request
 ```bash
 npm test                     # all three suites
 npm run test:server          # Node server (Jest + Supertest + Socket.IO)
-npm run test:frontend        # Next.js API routes, middleware, components (Jest)
+npm run test:frontend        # Next.js API routes, proxy, components (Jest)
 npm run test:engine          # Python engine (pytest)
 ```
 

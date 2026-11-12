@@ -79,7 +79,7 @@ describe('GET /api/profile/[username]', () => {
 
     test('returns the profile', async () => {
         db.queue('profiles', { data: { username: 'bob' }, error: null })
-        expect((await json(await getProfile(req('/x'), { params: { username: 'bob' } }))).body).toEqual({ username: 'bob' })
+        expect((await json(await getProfile(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))).body).toEqual({ username: 'bob' })
     })
 
     test('returns only public columns of another user (no sex, is_public, Glicko internals) [S8]', async () => {
@@ -87,15 +87,15 @@ describe('GET /api/profile/[username]', () => {
             data: { username: 'bob', rating_rapid: 1500, wins: 3, sex: 'm', is_public: true, rating_rd: 80, rating_vol: 0.06 },
             error: null,
         })
-        const { body } = await json(await getProfile(req('/x'), { params: { username: 'bob' } }))
+        const { body } = await json(await getProfile(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
         expect(body).toEqual({ username: 'bob', rating_rapid: 1500, wins: 3 })
     })
 
     test('404 when unknown, 500 on database error, 400 without a username', async () => {
-        expect((await getProfile(req('/x'), { params: { username: 'ghost' } })).status).toBe(404)
+        expect((await getProfile(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
         db.queue('profiles', { data: null, error: { message: 'x' } })
-        expect((await getProfile(req('/x'), { params: { username: 'bob' } })).status).toBe(500)
-        expect((await getProfile(req('/x'), { params: { username: '' } })).status).toBe(400)
+        expect((await getProfile(req('/x'), { params: Promise.resolve({ username: 'bob' }) })).status).toBe(500)
+        expect((await getProfile(req('/x'), { params: Promise.resolve({ username: '' }) })).status).toBe(400)
     })
 })
 
@@ -116,7 +116,7 @@ describe('GET /api/profile/[username]/stats', () => {
             ],
             error: null,
         })
-        const { body } = await json(await getStats(req('/x'), { params: { username: 'bob' } }))
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
         expect(body).toMatchObject({
             total: 5, wins: 2, losses: 2, draws: 1,
             ratings: { bullet: 1200, blitz: 1500, rapid: 1200, classical: 1200 },
@@ -130,7 +130,7 @@ describe('GET /api/profile/[username]/stats', () => {
     })
 
     test('404 for an unknown user', async () => {
-        expect((await getStats(req('/x'), { params: { username: 'ghost' } })).status).toBe(404)
+        expect((await getStats(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
     })
 
     test.todo('stats count 16–60 min games as "classical" but the server rates them as "rapid" — pick one cutoff and share it')
@@ -143,7 +143,7 @@ describe('GET /api/profile/[username]/games', () => {
     test('pages through completed games, newest first', async () => {
         db.queue('profiles', { data: { id: uid('p') }, error: null })
         db.queue('games', { data: [{ id: uid('g') }], error: null })
-        const res = await json(await getGames(req('/x?limit=10&offset=20'), { params: { username: 'bob' } }))
+        const res = await json(await getGames(req('/x?limit=10&offset=20'), { params: Promise.resolve({ username: 'bob' }) }))
         expect(res.body).toEqual({ games: [{ id: uid('g') }], profileId: uid('p') })
         expect(db.callsFor('games')[0].ops).toEqual(expect.arrayContaining([
             ['or', `white_id.eq.${uid('p')},black_id.eq.${uid('p')}`], ['range', 20, 29], ['order', 'created_at', { ascending: false }],
@@ -152,18 +152,18 @@ describe('GET /api/profile/[username]/games', () => {
 
     test('limit is capped at 50 and defaults to 15', async () => {
         db.queue('profiles', { data: { id: uid('p') }, error: null }, { data: { id: uid('p') }, error: null })
-        await getGames(req('/x?limit=500'), { params: { username: 'bob' } })
-        await getGames(req('/x'), { params: { username: 'bob' } })
+        await getGames(req('/x?limit=500'), { params: Promise.resolve({ username: 'bob' }) })
+        await getGames(req('/x'), { params: Promise.resolve({ username: 'bob' }) })
         const [big, dflt] = db.callsFor('games')
         expect(db.op(big, 'range')).toEqual([0, 49])
         expect(db.op(dflt, 'range')).toEqual([0, 14])
     })
 
     test('404 for an unknown user, 500 on database error', async () => {
-        expect((await getGames(req('/x'), { params: { username: 'ghost' } })).status).toBe(404)
+        expect((await getGames(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
         db.queue('profiles', { data: { id: uid('p') }, error: null })
         db.queue('games', { data: null, error: { message: 'x' } })
-        expect((await getGames(req('/x'), { params: { username: 'bob' } })).status).toBe(500)
+        expect((await getGames(req('/x'), { params: Promise.resolve({ username: 'bob' }) })).status).toBe(500)
     })
 
     test.each([
@@ -174,7 +174,7 @@ describe('GET /api/profile/[username]/games', () => {
         ['a fractional limit', '?limit=1.5'],
         ['an exponent', '?offset=1e9'],
     ])('%s → 400 and no query (was: NaN reached the range) [S7]', async (_label, query) => {
-        const res = await getGames(req(`/x${query}`), { params: { username: 'bob' } })
+        const res = await getGames(req(`/x${query}`), { params: Promise.resolve({ username: 'bob' }) })
         expect(res.status).toBe(400)
         expect(db.calls).toEqual([])
     })

@@ -1,5 +1,6 @@
 'use client';
 
+import { use } from 'react';
 import { FriendsTab } from '@/features/profile/components/FriendsTab';
 import { GamesTab } from '@/features/profile/components/GamesTab';
 import { OverviewTab } from '@/features/profile/components/OverviewTab';
@@ -20,7 +21,8 @@ import { useProfileTab } from '@/features/profile/hooks/useProfileTab';
  * Public profile page. The hooks below are called in the same order as the
  * effects of the pre-split page, so their effects still run in that order.
  */
-export default function ProfilePage({ params }: { params: { username: string } }) {
+export default function ProfilePage(props: { params: Promise<{ username: string }> }) {
+    const params = use(props.params);
     const username = params.username;
     const { activeTab, setActiveTab } = useProfileTab();
     const { profile, meProfile, isOwnProfile } = useProfileData(username);

@@ -1,7 +1,7 @@
 # Gambit – Deployment Guide
 
 ## Architecture
-- **Frontend** → Vercel (Next.js 14)
+- **Frontend** → Vercel (Next.js 16)
 - **Server** → Railway (Node/Express/Socket.io)
 - **Engine** → Render (Python/FastAPI/Stockfish)
 - **Database** → Supabase (PostgreSQL + Auth)

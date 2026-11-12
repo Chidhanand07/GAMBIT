@@ -7,7 +7,7 @@ import { supabasePublicKey } from '@/lib/supabase/publicEnv';
 import { supabaseSecretKey } from './env';
 
 /** The `cookies()` store of the current request (next/headers). */
-export type RequestCookieStore = ReturnType<typeof cookies>;
+export type RequestCookieStore = Awaited<ReturnType<typeof cookies>>;
 
 type ResponseCookieOptions = Parameters<NextResponse['cookies']['set']>[2];
 type CookieToSet = { name: string; value: string; options?: object };
@@ -17,8 +17,7 @@ const noSessionPersistence = () => ({ autoRefreshToken: false, persistSession: f
 
 /**
  * Session cookies stay in the "raw" JSON form @supabase/ssr 0.1 wrote, so sessions created
- * before this upgrade keep working and `middleware.ts` (which reads the cookie for its
- * optimistic redirect) keeps understanding it. The browser client uses the same setting.
+ * before this upgrade keep working. The browser client and the proxy use the same setting.
  */
 export const SESSION_COOKIE_ENCODING = 'raw' as const;
 
@@ -72,10 +71,12 @@ export function createResponseCookieClient(request: NextRequest, response: NextR
         cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
             getAll: () => request.cookies.getAll(),
-            setAll: (cookiesToSet: CookieToSet[]) => {
+            setAll: (cookiesToSet: CookieToSet[], headers?: Record<string, string>) => {
                 for (const { name, value, options } of cookiesToSet) {
                     response.cookies.set(name, value, options as ResponseCookieOptions);
                 }
+                // A response that sets auth cookies must never be cached (Supabase passes no-store).
+                for (const [key, value] of Object.entries(headers ?? {})) response.headers.set(key, value);
             },
         },
     });

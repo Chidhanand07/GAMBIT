@@ -9,10 +9,11 @@ import type { SeatColor } from '@/types/game';
 // Per-user data: never prerendered or cached (NX-11).
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // GET /api/games/[id] — the game with both players plus the caller's seat (signed-in callers only)
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(_req: Request, props: Params) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
     const id = parseInput(schemas.uuid, params.id, 'Game not found');
@@ -34,7 +35,8 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 // PATCH /api/games/[id] — participants may set draw_offer / rematch_requested only
-export async function PATCH(req: Request, { params }: Params) {
+export async function PATCH(req: Request, props: Params) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
 

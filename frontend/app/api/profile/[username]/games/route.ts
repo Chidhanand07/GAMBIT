@@ -8,7 +8,8 @@ import { parseInput, schemas } from '@/lib/server/validation';
 export const dynamic = 'force-dynamic';
 
 // GET /api/profile/[username]/games?limit=&offset= — finished games, newest first
-export async function GET(request: NextRequest, { params }: { params: { username: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ username: string }> }) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
 

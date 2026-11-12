@@ -36,7 +36,8 @@ export const cookieStore = {
     set: jest.fn(),
 }
 
-export const nextHeadersMock = { cookies: () => cookieStore, headers: () => new Headers() }
+// Next 15+: cookies() and headers() are async.
+export const nextHeadersMock = { cookies: async () => cookieStore, headers: async () => new Headers() }
 export const supabaseJsMock = { createClient: jest.fn(() => db) }
 export const supabaseSsrMock = { createServerClient: jest.fn(() => db) }
 

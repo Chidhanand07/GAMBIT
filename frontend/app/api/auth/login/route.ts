@@ -10,10 +10,8 @@ export async function POST(request: NextRequest) {
     if (!body.ok) return body.response;
     const { email, password } = body.data;
 
-    // Auth is performed server-side so session cookies are set directly on the
-    // HTTP response. This guarantees the middleware can read them on the next
-    // request, which @supabase/ssr@0.1.0 browser client can't ensure (large
-    // JWTs fall back to localStorage, invisible to server cookies).
+    // Auth is performed server-side so the session cookies are set directly on the HTTP
+    // response: the proxy and the route handlers can read them on the very next request.
     const authResponse = NextResponse.json({ ok: true });
     const supabase = createResponseCookieClient(request, authResponse);
 

@@ -19,7 +19,7 @@ export async function getVerifiedUserId(): Promise<string | null> {
     // Outside the try on purpose: during `next build`, cookies() throws Next's "dynamic server
     // usage" signal, which is how a route is marked dynamic. Swallowing it would let Next
     // prerender the handler once and serve that 401 to everyone.
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     try {
         const { data, error } = await createSessionClient(cookieStore).auth.getUser();
         if (error || !data?.user?.id) return null;

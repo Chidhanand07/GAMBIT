@@ -24,7 +24,7 @@ export async function GET() {
     const { profileResult, profileError } = await readProfile(auth.userId);
 
     return NextResponse.json({
-        cookieNames: cookies()
+        cookieNames: (await cookies())
             .getAll()
             .map((c) => c.name),
         authError: null,

@@ -44,6 +44,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 |---|---|---|---|
 | [F-022](#f-022) | Medium phase is based on local `fix/high-3-supabase-lockdown` @ `70a94f9`; local-only work | M1 | — |
 | [F-023](#f-023) | Node 26 everywhere; Railway builds the Dockerfile; Supabase client pins lifted | M1 | NODE-RUNTIME |
+| [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
 
 ---
 
@@ -911,3 +912,74 @@ instead of one file per ADR under `docs/refactor/adr/`.
   and if the service was configured in the Railway dashboard to use Nixpacks, the dashboard
   setting may need to be changed to "Dockerfile" by hand.
 - **Rollback.** Revert the commit; nothing persistent changes.
+
+## F-024
+
+**Next.js 16.4.6 and React 19; `middleware.ts` becomes `proxy.ts`, which refreshes the session and redirects only on verified identity (NEXT-16).**
+
+- **Context.** NX-01: 14.x must not ship after the stopgap (F-011). `npm audit` listed
+  advisories for the 14.x line that are fixed only in 15/16.
+- **What was done.**
+  - `next` pinned to exactly `16.4.6` (the brief asks for ≥ 16.4.5), `react` / `react-dom`
+    `^19`, `@types/react*` `^19`, `@next/eslint-plugin-next` `^16.4.6`, `@types/node` `^26`.
+  - Official codemods: `next-async-request-api` (14 files: `await cookies()`, `params` as a
+    Promise in route handlers, `use(props.params)` in client pages) and `middleware-to-proxy`.
+    Their output was reviewed and tidied by hand (a stray `;;`, import formatting).
+  - `next.config.js`: the `eslint` key is gone (Next 16 rejects it; ESLint is a separate CI
+    step), and `turbopack.root` / `outputFileTracingRoot` are set to `frontend/`, because the
+    monorepo has a second lockfile at the repository root and Next otherwise guesses the root.
+  - `tsconfig.json`: `jsx: react-jsx` and the `.next/dev/types` include, both written by Next.
+- **Libraries that had to move for React 19** (their peer ranges excluded it): `framer-motion`
+  10 → `^11.18.2`, `lucide-react` 0.292 → `^0.469.0`, `qrcode.react` 3 → `^4.2.0`. Each is the
+  *smallest* step that accepts React 19, not the newest release (`framer-motion` is at 14,
+  `lucide-react` at 1.x), to keep icon names and animation APIs unchanged. `recharts` and
+  `@testing-library/react` already accepted React 19.
+- **The proxy: options.**
+  1. Keep the old logic (decode the cookie's JWT without verifying it, accept if not expired).
+  2. Follow the current `@supabase/ssr` guidance: a server client on the request cookies with
+     `getAll` / `setAll`, call `auth.getClaims()`, return the response the client built.
+  3. Matcher: (a) everything except static files (the old matcher, and Supabase's example);
+     (b) an allow-list of the protected page prefixes.
+- **Decision.** 2 and 3b.
+  - `lib/server/sessionRefresh.ts` (`server-only`) builds the client, lets it refresh an
+    expired access token, copies refreshed cookies onto both the forwarded request and the
+    response, applies the `Cache-Control: no-store` headers Supabase passes to `setAll`, and
+    reports the verified user id. `proxy.ts` redirects to `/login?redirect=…` when there is
+    none, carrying over any cookies Supabase set or cleared.
+  - The matcher lists `/lobby`, `/game`, `/profile`, `/leaderboard`, `/settings`,
+    `/challenge` (each with `/:path*`). API routes, public pages and static files never run
+    the proxy.
+- **Why.**
+  - *Verified claims*: the old check accepted any well-formed cookie, so it was decoration.
+    `getClaims()` verifies the signature (locally with asymmetric signing keys; through
+    Supabase Auth otherwise). The proxy is still only an optimistic redirect: every route
+    handler keeps its own `requireUser()`, which is where data is protected (NX-07, NX-09).
+  - *Allow-list matcher*: NX-09 asks for one. It also bounds the cost: on a project that still
+    uses the legacy symmetric JWT secret, `getClaims()` is a network call to Supabase Auth, and
+    running it for every API request would double the calls `requireUser()` already makes.
+    Route handlers refresh cookies themselves through their own `setAll`.
+  - *Fail closed*: if verification errors or throws, protected pages redirect to `/login`
+    (SEC-09). During a Supabase Auth outage signed-in users therefore land on the login page;
+    the alternative is to show protected page shells to anyone, and the data routes would
+    refuse them anyway.
+- **Behaviour changes.**
+  - A cookie that is well-formed but not verifiable no longer opens protected pages.
+  - "A token that expired under a minute ago is still accepted" is gone; an expired token is
+    refreshed with the refresh token, or the visitor is sent to `/login`.
+  - `/login` and other public pages are not touched by the proxy at all.
+- **Caching (NX-11).** Nothing in the app uses `"use cache"`, `unstable_cache`, `force-static`
+  or `revalidate`; a source-scan test keeps it that way. Route handlers stay `force-dynamic`.
+  `cacheComponents` is not enabled. The login and OAuth-callback responses now also carry the
+  no-store headers Supabase supplies when it sets cookies.
+- **Tests.** `__tests__/proxy.test.ts` (41 cases) replaces `middleware.test.ts`;
+  `__tests__/security/nextVersion.test.ts` pins the line, React 19, the file rename and the
+  no-caching scan. Page tests pass `params` as an already-settled promise
+  (`__tests__/helpers/params.ts`); route tests pass `Promise.resolve(params)`.
+- **Verified / not verified.** `next build` (Turbopack) passes on Node 26.13.1. The built app
+  was started and probed with curl: protected pages redirect with the return path, a forged
+  cookie redirects, `/api/profile/me` answers 401, public pages answer 200. **Not verified:**
+  a real sign-in, a real token refresh through the proxy, the Vercel build, and how the pages
+  look and animate under React 19 with the three bumped UI libraries (no browser was used).
+- **Lint.** `@next/eslint-plugin-next` 16 adds a warning for `window.location.assign('/lobby')`
+  in `features/auth/signup.ts`. It is intentional there (a full reload so the new session
+  cookie is sent; documented in `readme_first.md`), so it stays a warning and is not changed.
