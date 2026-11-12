@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loginErrorMessage } from '@/lib/server/auth';
-import { createLoginClient } from '@/lib/server/supabase';
+import { createResponseCookieClient } from '@/lib/server/supabase';
 
 // POST /api/auth/login — body { email, password }
+// PUBLIC on purpose: this is how a session is created (docs/fixes/DECISIONS.md F-012).
 export async function POST(request: NextRequest) {
     const { email, password } = await request.json();
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
     // request, which @supabase/ssr@0.1.0 browser client can't ensure (large
     // JWTs fall back to localStorage, invisible to server cookies).
     const authResponse = NextResponse.json({ ok: true });
-    const supabase = createLoginClient(request, authResponse);
+    const supabase = createResponseCookieClient(request, authResponse);
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 

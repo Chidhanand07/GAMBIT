@@ -74,6 +74,9 @@ describe('PATCH /api/profile/me', () => {
 })
 
 describe('GET /api/profile/[username]', () => {
+    // Profile pages are behind the login wall; so are the routes that feed them [S5].
+    beforeEach(() => signInWithCookie('viewer'))
+
     test('returns the profile', async () => {
         db.queue('profiles', { data: { username: 'bob' }, error: null })
         expect((await json(await getProfile(req('/x'), { params: { username: 'bob' } }))).body).toEqual({ username: 'bob' })
@@ -88,6 +91,9 @@ describe('GET /api/profile/[username]', () => {
 })
 
 describe('GET /api/profile/[username]/stats', () => {
+    // Profile pages are behind the login wall; so are the routes that feed them [S5].
+    beforeEach(() => signInWithCookie('viewer'))
+
     test('totals, ratings with 1200 defaults, and per-category W/L/D', async () => {
         db.queue('profiles', { data: { id: 'p', games_played: 5, wins: 2, losses: 2, draws: 1, rating_blitz: 1500 }, error: null })
         db.queue('games', {
@@ -122,6 +128,9 @@ describe('GET /api/profile/[username]/stats', () => {
 })
 
 describe('GET /api/profile/[username]/games', () => {
+    // Profile pages are behind the login wall; so are the routes that feed them [S5].
+    beforeEach(() => signInWithCookie('viewer'))
+
     test('pages through completed games, newest first', async () => {
         db.queue('profiles', { data: { id: 'p' }, error: null })
         db.queue('games', { data: [{ id: 'g' }], error: null })

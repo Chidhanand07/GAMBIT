@@ -8,6 +8,8 @@ const VALID_FIELDS = new Set<string>(['rating_rapid', 'rating_bullet', 'rating_b
 const isRatingField = (field: string): field is RatingField => VALID_FIELDS.has(field);
 
 // GET /api/leaderboard?field=rating_<bucket> — top 50 (default rapid)
+// PUBLIC on purpose: usernames, ratings and totals only, the same for every caller
+// (docs/fixes/DECISIONS.md F-012).
 export async function GET(request: NextRequest) {
     const field = request.nextUrl.searchParams.get('field') ?? 'rating_rapid';
 

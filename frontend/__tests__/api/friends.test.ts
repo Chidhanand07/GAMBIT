@@ -39,9 +39,9 @@ describe('GET /api/friends', () => {
         expect(db.callsFor('friendships')[0].ops).toContainEqual(['or', 'requester_id.eq.other,addressee_id.eq.other'])
     })
 
-    test('anonymous with no userId → [] without querying', async () => {
+    test('signed out → 401 without querying (was: [] ) [S5]', async () => {
         resetHarness()
-        expect((await json(await listFriends(req('/api/friends')))).body).toEqual([])
+        expect((await listFriends(req('/api/friends'))).status).toBe(401)
         expect(db.calls).toEqual([])
     })
 

@@ -34,7 +34,7 @@ function b64url(obj: object) {
     return Buffer.from(JSON.stringify(obj)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-/** A JWT-shaped access token (signature is not checked by the app). */
+/** A JWT-shaped access token with a fake signature (only Supabase Auth can tell it is not real). */
 export function makeJwt(sub: string, expSecondsFromNow = 3600) {
     const exp = Math.floor(Date.now() / 1000) + expSecondsFromNow
     return `${b64url({ alg: 'HS256' })}.${b64url({ sub, exp })}.sig`
@@ -45,8 +45,24 @@ export function sessionCookie(userId: string, expSecondsFromNow = 3600) {
     return JSON.stringify({ access_token: makeJwt(userId, expSecondsFromNow) })
 }
 
-/** Sign a user in for routes that read the auth cookie via next/headers. */
+/**
+ * Sign a user in: the session cookie is present AND Supabase Auth (`auth.getUser()`)
+ * confirms it. This is a genuine session; see {@link forgeCookie} for a fake one.
+ */
 export function signInWithCookie(userId: string, opts: { expSecondsFromNow?: number; chunked?: boolean; encoded?: boolean } = {}) {
+    setSessionCookie(userId, opts)
+    db.signIn(userId)
+}
+
+/**
+ * A session cookie whose (unsigned) JWT *claims* to be `userId`, which Supabase Auth does
+ * not confirm. The route handlers used to trust exactly this (S5).
+ */
+export function forgeCookie(userId: string, opts: { expSecondsFromNow?: number; chunked?: boolean; encoded?: boolean } = {}) {
+    setSessionCookie(userId, opts)
+}
+
+function setSessionCookie(userId: string, opts: { expSecondsFromNow?: number; chunked?: boolean; encoded?: boolean }) {
     let value = sessionCookie(userId, opts.expSecondsFromNow)
     if (opts.encoded) value = encodeURIComponent(value)
     if (opts.chunked) {

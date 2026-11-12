@@ -26,6 +26,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-009](#f-009) | No draw-offer or abort events: the UI has neither | 1 | S3 |
 | [F-010](#f-010) | Pre-PR review of PR 1: what was fixed, what was deferred | 1 | S1, S2, S3 |
 | [F-011](#f-011) | Next.js pinned to 14.2.35; `/login` gets the Suspense boundary the patch line requires | 2 | NEXT-CVE |
+| [F-012](#f-012) | Route-handler identity: `requireUser()` on `auth.getUser()`; which routes stay public | 2 | S5 |
 
 ---
 
@@ -397,3 +398,61 @@ instead of one file per ADR under `docs/refactor/adr/`.
   out of scope here and stays at the top of the next phase. `typescript.ignoreBuildErrors` and
   `eslint.ignoreDuringBuilds` are still set in `next.config.js` (S12, not a listed item). CI does
   not run `next build`, which is why this break was invisible to the test suite.
+
+## F-012
+
+**Next.js route handlers identify the caller with `supabase.auth.getUser()` (S5).**
+
+- **Context.** `lib/server/identity.ts` base64-decoded the access token in the
+  `sb-<ref>-auth-token` cookie, read `sub` and `exp`, and never checked the signature. The
+  handlers then queried with the service-role client (which bypasses RLS). A hand-made cookie
+  with someone else's id acted as that user on every route. `/api/games/[id]` used
+  `getSession()`, which also only reads the cookie.
+- **Options.**
+  1. Verification: (a) verify the JWT locally with the JWT secret; (b) `getClaims()` (local
+     verification against the JWKS, falling back to a network call for HS256 projects);
+     (c) `getUser()` (Supabase Auth checks signature, expiry and revocation).
+  2. `@supabase/ssr`: (a) stay on 0.1.0 with the `get/set/remove` cookie API; (b) upgrade to
+     current and use `getAll/setAll`.
+  3. Cookie encoding after the upgrade: (a) the new default (`base64url`); (b) `raw`.
+  4. Routes that used to answer signed-out callers with an empty 200 (`friends/pending`,
+     `friends/status`, `games/active`, `friends`): (a) keep the soft answer; (b) 401.
+  5. Public-profile routes (`profile/[username]`, `/games`, `/stats`), which had no check at
+     all: (a) leave public; (b) require a signed-in caller.
+- **Decision.** 1c, 2b, 3b, 4b, 5b.
+  - `requireUser()` → `{ ok: true, userId } | { ok: false, response: 401 }`, built on
+    `createSessionClient(cookies()).auth.getUser()`. Any error, missing user or thrown lookup is
+    "not signed in" (fail closed). The old decoders and `getSessionUser` are deleted.
+  - Every handler under `app/api/**` calls `requireUser()` before creating the service-role
+    client, except four that are public on purpose, each marked with a comment:
+    `auth/login` and `auth/signup` (they create the session/account), `leaderboard` (usernames
+    and ratings, identical for every caller), `maverick-move` (the offline "play the computer"
+    page works signed out and touches no user data).
+  - `@supabase/ssr` 0.1.0 → 0.12.7. Its peer dependency forced `@supabase/supabase-js` in the
+    frontend to ^2.119 here rather than in PR 3 (logged; the server and engine upgrades stay in PR 3).
+  - Every identity-reading route exports `dynamic = 'force-dynamic'` (NX-11).
+- **Why.**
+  - *`getUser()`*: it is what the brief specifies, works for HS256 and asymmetric projects alike,
+    and honours sign-out/revocation. Cost: one Auth round trip per API request, where there was
+    none. `getClaims()` removes that cost once the project is on asymmetric signing keys; that
+    switch is a one-line change in `getVerifiedUserId` and is listed for the next phase.
+  - *`raw` cookie encoding*: `middleware.ts` parses the session cookie itself for its optimistic
+    redirect, and existing browsers hold cookies in the old raw format. `base64url` would have
+    logged everyone out and made the middleware redirect every protected page to `/login`.
+    `raw` keeps both working with no migration (backwards-compatible rollout).
+  - *401 instead of soft answers*: every caller already handles a non-OK response
+    (`res.ok ? … : fallback`), so the UI is unchanged, and "unauthenticated → 401" becomes
+    uniform and testable.
+  - *Profile routes need a session*: `/profile`, `/challenge` and `/leaderboard` are behind the
+    login wall in `middleware.ts`, so no signed-out page reads them. Leaving them open would let
+    anyone enumerate users through a service-role query with no session at all.
+- **Found while verifying (would not have been caught by Jest).** A production `next build`
+  showed that a `try/catch` around `cookies()` swallowed Next's "dynamic server usage" signal,
+  so GET handlers such as `/api/notifications` were candidates for prerendering: a 401 baked in
+  at build time and served to everyone. `cookies()` is now called outside the `try`, the routes
+  are `force-dynamic`, and a test asserts the signal propagates.
+- **Not changed.** `middleware.ts` still makes its redirect decision from the unverified cookie.
+  That is allowed as an optimistic check (NX-09) and is no longer the last line of defence, since
+  every route handler verifies. `/api/debug/session` still exists in production (S12, not a
+  listed item); it now answers only its own signed-in caller. `lib/supabase/middleware.ts`
+  (unused `updateSession`) still uses the deprecated cookie API.

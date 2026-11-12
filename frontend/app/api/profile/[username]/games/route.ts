@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listFinishedGamesPage } from '@/lib/server/games';
+import { requireUser } from '@/lib/server/identity';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
 
@@ -10,6 +11,9 @@ const MAX_PAGE_SIZE = 50;
 
 // GET /api/profile/[username]/games?limit=&offset= — finished games, newest first
 export async function GET(request: NextRequest, { params }: { params: { username: string } }) {
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
+
     const limit = Math.min(Number(request.nextUrl.searchParams.get('limit') ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
     const offset = Number(request.nextUrl.searchParams.get('offset') ?? '0');
 

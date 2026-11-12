@@ -4,6 +4,7 @@ import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
 
 // POST /api/auth/signup — body { email, password, username }
+// PUBLIC on purpose: this is how an account is created (docs/fixes/DECISIONS.md F-012).
 export async function POST(request: NextRequest) {
     const { email, password, username } = await request.json();
 

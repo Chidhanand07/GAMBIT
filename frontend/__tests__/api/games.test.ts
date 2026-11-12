@@ -30,12 +30,20 @@ describe('GET /api/games/[id]', () => {
         expect(res.body).toMatchObject({ id: 'g1', myColor: color })
     })
 
-    test('signed-out callers are spectators', async () => {
+    test('signed-out callers get 401 and the game is not read (was: the whole row, as a spectator) [S5][S8]', async () => {
+        db.queue('games', { data: game, error: null })
+        expect((await getGame(req('/api/games/g1'), { params: { id: 'g1' } })).status).toBe(401)
+        expect(db.calls).toEqual([])
+    })
+
+    test('a signed-in non-player is a spectator', async () => {
+        signInWithCookie('someone-else')
         db.queue('games', { data: game, error: null })
         expect((await json(await getGame(req('/api/games/g1'), { params: { id: 'g1' } }))).body.myColor).toBe('spectator')
     })
 
     test('unknown game → 404', async () => {
+        signInWithCookie('me')
         db.queue('games', { data: null, error: { message: 'not found' } })
         expect((await getGame(req('/api/games/x'), { params: { id: 'x' } })).status).toBe(404)
     })

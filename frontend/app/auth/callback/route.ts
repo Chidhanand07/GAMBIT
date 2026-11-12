@@ -2,7 +2,7 @@ import type { User } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeWithRetry } from '@/lib/server/auth';
 import { ensureOAuthProfile } from '@/lib/server/profiles';
-import { createOAuthCallbackClient } from '@/lib/server/supabase';
+import { createResponseCookieClient } from '@/lib/server/supabase';
 
 const loginErrorRedirect = (message: string, request: NextRequest) =>
     NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     const response = NextResponse.redirect(new URL(next, request.url));
-    const supabase = createOAuthCallbackClient(request, response);
+    const supabase = createResponseCookieClient(request, response);
 
     // Retry up to 3 times with backoff if rate-limited
     const { user: exchangedUser, lastError } = await exchangeCodeWithRetry(supabase, code);

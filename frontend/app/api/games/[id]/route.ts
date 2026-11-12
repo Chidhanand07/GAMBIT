@@ -1,15 +1,18 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { getGameParticipants, getGameWithPlayers, pickClientWritableFields, updateGame } from '@/lib/server/games';
-import { getSessionUser } from '@/lib/server/identity';
+import { requireUser } from '@/lib/server/identity';
 import { createAdminClient } from '@/lib/server/supabase';
 import type { SeatColor } from '@/types/game';
 
+// Per-user data: never prerendered or cached (NX-11).
+export const dynamic = 'force-dynamic';
+
 type Params = { params: { id: string } };
 
-// GET /api/games/[id] — the game with both players plus the caller's seat
+// GET /api/games/[id] — the game with both players plus the caller's seat (signed-in callers only)
 export async function GET(_req: Request, { params }: Params) {
-    const user = await getSessionUser(cookies());
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
 
     const { data: game, error } = await getGameWithPlayers(createAdminClient(), params.id);
 
@@ -19,18 +22,16 @@ export async function GET(_req: Request, { params }: Params) {
 
     // Determine caller's color
     let myColor: SeatColor = 'spectator';
-    if (user) {
-        if (game.white_id === user.id) myColor = 'white';
-        else if (game.black_id === user.id) myColor = 'black';
-    }
+    if (game.white_id === auth.userId) myColor = 'white';
+    else if (game.black_id === auth.userId) myColor = 'black';
 
     return NextResponse.json({ ...game, myColor });
 }
 
 // PATCH /api/games/[id] — participants may set draw_offer / rematch_requested only
 export async function PATCH(req: Request, { params }: Params) {
-    const user = await getSessionUser(cookies());
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
 
     const admin = createAdminClient();
 
@@ -38,7 +39,7 @@ export async function PATCH(req: Request, { params }: Params) {
     const { data: game } = await getGameParticipants(admin, params.id);
 
     if (!game) return NextResponse.json({ error: 'Game not found' }, { status: 404 });
-    if (game.white_id !== user.id && game.black_id !== user.id) {
+    if (game.white_id !== auth.userId && game.black_id !== auth.userId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requestComputerMove } from '@/lib/server/engine';
 
+// PUBLIC on purpose: the offline "play the computer" page works signed out and no user data
+// is read or written (docs/fixes/DECISIONS.md F-012).
 // POST /api/maverick-move — proxies to the chess-engine /computer-move endpoint so
 // the browser never needs the engine URL directly (avoids CORS + keeps it server-side).
 // Body: { fen: string, difficulty: 'easy' | 'medium' | 'hard' }
