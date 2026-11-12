@@ -12,6 +12,7 @@ const KEYS = [
     'PORT',
     'REDIS_URL',
     'SUPABASE_URL',
+    'SUPABASE_SECRET_KEY',
     'SUPABASE_SERVICE_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
 ];
@@ -60,10 +61,21 @@ test('empty strings fall back to the defaults (|| semantics)', () => {
     expect(env.port()).toBe(3001);
 });
 
-test('service key prefers SUPABASE_SERVICE_KEY over SUPABASE_SERVICE_ROLE_KEY', () => {
+test('secret key: SUPABASE_SECRET_KEY, then SUPABASE_SERVICE_KEY, then SUPABASE_SERVICE_ROLE_KEY [SUPABASE-KEYS]', () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'role';
     expect(env.supabaseServiceKey()).toBe('role');
     expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_ROLE_KEY');
+    process.env.SUPABASE_SERVICE_KEY = 'service';
+    expect(env.supabaseServiceKey()).toBe('service');
+    expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_KEY');
+    // The new key name wins over both legacy names.
+    process.env.SUPABASE_SECRET_KEY = 'sb_secret_new';
+    expect(env.supabaseServiceKey()).toBe('sb_secret_new');
+    expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SECRET_KEY');
+});
+
+test('an empty SUPABASE_SECRET_KEY falls through to the legacy names', () => {
+    process.env.SUPABASE_SECRET_KEY = '';
     process.env.SUPABASE_SERVICE_KEY = 'service';
     expect(env.supabaseServiceKey()).toBe('service');
     expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_KEY');

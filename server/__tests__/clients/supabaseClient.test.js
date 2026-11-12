@@ -33,7 +33,7 @@ test('unconfigured: logs both FATAL lines and uses placeholders', () => {
     expect(errSpy.mock.calls).toEqual([
         ['[supabase] FATAL: SUPABASE_URL is not set. DB operations will fail.'],
         [
-            '[supabase] FATAL: Neither SUPABASE_SERVICE_KEY nor SUPABASE_SERVICE_ROLE_KEY is set. All DB writes will fail (RLS will block them).',
+            '[supabase] FATAL: SUPABASE_SECRET_KEY is not set (nor the legacy SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY). All DB writes will fail (RLS will block them).',
         ],
     ]);
     expect(logSpy).not.toHaveBeenCalled();

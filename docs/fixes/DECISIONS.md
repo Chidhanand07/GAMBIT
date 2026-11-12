@@ -35,6 +35,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-018](#f-018) | Invite tokens move to `game_invites` (service-role only), expand → deploy → contract | 3 | INV-TOKEN |
 | [F-019](#f-019) | Drop `matchmaking_queue`; a migration-time guard that every public table has RLS | 3 | MATCHMAKING-QUEUE |
 | [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
+| [F-021](#f-021) | New Supabase key names with legacy fallbacks; JS client pinned to the last Node 20 line; `supabase-py` 2.34.1 | 3 | SUPABASE-KEYS |
 
 ---
 
@@ -767,3 +768,69 @@ instead of one file per ADR under `docs/refactor/adr/`.
   The first real pgTAP run is this PR's "Database (Supabase)" check. If it fails on something
   the stand-in could not model (the real `auth.users` columns, the exact text pgTAP expects),
   that is the place to look.
+
+## F-021
+
+**Publishable / secret keys under their documented names, with the legacy names as fallbacks (SUPABASE-KEYS).**
+
+- **Context.** Supabase is deprecating the `anon` and `service_role` JWT keys by the end of 2026
+  in favour of `sb_publishable_…` and `sb_secret_…` keys
+  ([API keys guide](https://supabase.com/docs/guides/api/api-keys)). The app read only the legacy
+  variable names, under three different spellings.
+- **Decision: variable names.** New name first, legacy names as fallbacks; when both are set the
+  new one wins.
+
+  | Service | New (canonical) | Fallbacks |
+  |---|---|---|
+  | Frontend, browser + server | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+  | Frontend, server only | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SERVICE_KEY` |
+  | Game server | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+  | Engine | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY` |
+
+  The names are the ones Supabase's guide recommends. Each service keeps its *own* historical
+  fallback order, so a deployment that has two legacy names set resolves exactly as before.
+- **Decision: keeping the secret key out of the browser.**
+  - The secret key is read in one `server-only` module (`frontend/lib/server/env.ts`); the public
+    key in `frontend/lib/supabase/publicEnv.ts`, which **throws** if the value starts with
+    `sb_secret_` (a secret pasted into a public variable is refused, not shipped).
+  - `createAdminClient()` throws when no secret key is configured, instead of building a client
+    that fails later.
+  - A test scans the source: no file outside `lib/server`, `app/api` and `app/auth/callback`
+    mentions a secret variable, every `lib/server` module is marked `server-only`, and no
+    `NEXT_PUBLIC_*SECRET*` / `*SERVICE*` name exists. A production build with new-style keys was
+    checked by hand: the publishable key is inlined into client chunks, the secret key appears
+    nowhere under `.next/static`.
+- **Decision: client library versions.**
+  - **`@supabase/supabase-js` `~2.109.0` in the frontend and the game server**, and
+    **`@supabase/ssr` `0.12.0`** in the frontend. This *revises PR 2*, which had taken
+    `@supabase/ssr` 0.12.7 and with it `supabase-js` 2.119.
+  - **`supabase` (Python) 2.0.2 → 2.34.1** in the engine, with `httpx` 0.24.1 → 0.27.2 and an
+    explicit `websockets==15.0.1`.
+- **Why those versions.**
+  - *Why not the newest `supabase-js`*: every release from 2.110 on declares `engines.node >= 22`
+    (checked on the registry), and 2.119 prints a deprecation warning on Node 20 at every cold
+    start. CI runs Node 20, the server's Dockerfile says Node 18, and the brief says not to
+    upgrade Node. 2.109.0 is the last release that supports Node 20, and `@supabase/ssr` 0.12.0
+    is the newest `ssr` release whose peer range (`^2.108.0`) accepts it. The game server's
+    lockfile already resolved to 2.103.3, so this is a small step for it.
+  - *Do the new keys need a newer JS client at all?* Supabase's guide states no minimum version.
+    The pinned line was released in 2026, long after the new keys shipped, so I did not look
+    for the oldest version that would work.
+  - *Why the engine really had to move*: `supabase==2.0.2` validates the key against a JWT-shaped
+    regular expression and raises `Invalid API key` for `sb_secret_…` (reproduced locally).
+    2.34.1 has no such check and accepts both formats. It needs `httpx >= 0.26`; 0.27.2 is the
+    newest that FastAPI 0.104's test client still works with. `websockets` is pinned because
+    the realtime client imports `websockets.asyncio` (≥ 13) without requiring it: an upgrade in
+    place kept 12.0 and failed on import, while a fresh install passed. All 191 engine tests
+    pass on a fresh install and on an upgraded one.
+- **What I could not verify.** No real `sb_publishable_…` / `sb_secret_…` key was available, so
+  nothing here has talked to Supabase with one. What is verified is the plumbing (which variable
+  wins, that the clients are constructed with it, that the Python client accepts the format, and
+  that the secret stays out of the bundle).
+- **Known follow-ups.**
+  - Node: when the runtimes move to Node 22+, lift the `~2.109.0` pin (and `@supabase/ssr`).
+  - `auth.getUser(token)` on the game server and `getUser()` in the route handlers work the same
+    with either key type. Moving to `getClaims()` after enabling asymmetric JWT signing keys
+    would remove an Auth round trip per request (SEC-05); not done here.
+  - The Supabase *Realtime* presence channel in the browser uses the public key; with a
+    publishable key, unauthenticated connections are limited to 24 hours by Supabase.

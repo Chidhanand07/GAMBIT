@@ -13,7 +13,7 @@
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"src/**/*.js\""
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.38.4",
+    "@supabase/supabase-js": "~2.109.0",
     "axios": "^1.6.2",
     "chess.js": "^1.4.0",
     "cors": "^2.8.5",

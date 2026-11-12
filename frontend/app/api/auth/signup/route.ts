@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createUserWithProfile } from '@/lib/server/auth';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
+import { supabaseSecretKey } from '@/lib/server/env';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseJsonBody, schemas } from '@/lib/server/validation';
 
@@ -18,8 +19,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
     }
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        console.error('SUPABASE_SERVICE_ROLE_KEY is not set in frontend/.env.local');
+    if (!supabaseSecretKey()) {
+        console.error('SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) is not set');
         return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 

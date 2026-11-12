@@ -55,8 +55,9 @@ function engineUrl() {
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
  * @property {() => string} redisUrl `REDIS_URL`, default local Redis.
  * @property {() => string | undefined} supabaseUrl `SUPABASE_URL`.
- * @property {() => string | undefined} supabaseServiceKey
- *   `SUPABASE_SERVICE_KEY`, falling back to `SUPABASE_SERVICE_ROLE_KEY`.
+ * @property {() => string | undefined} supabaseServiceKey the secret (RLS-bypassing) key:
+ *   `SUPABASE_SECRET_KEY` (canonical; Supabase's new `sb_secret_…` key), falling back to the
+ *   legacy `SUPABASE_SERVICE_KEY`, then `SUPABASE_SERVICE_ROLE_KEY`.
  * @property {() => string} supabaseServiceKeySource name of the variable the key came from.
  */
 
@@ -75,6 +76,18 @@ function engineSharedSecret() {
     return secret;
 }
 
+/** Variables the secret Supabase key is read from, in order of preference (SEC-05). */
+const SECRET_KEY_NAMES = Object.freeze(['SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY']);
+
+/**
+ * Name of the variable the secret key comes from. When none is set this is the
+ * last (oldest) name, as before; `supabaseServiceKey()` is then undefined.
+ * @returns {string}
+ */
+function supabaseSecretKeySource() {
+    return SECRET_KEY_NAMES.find((name) => Boolean(process.env[name])) ?? SECRET_KEY_NAMES[SECRET_KEY_NAMES.length - 1];
+}
+
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
     engineUrl,
@@ -83,9 +96,8 @@ const env = Object.freeze({
     port: () => process.env.PORT || DEFAULT_PORT,
     redisUrl: () => process.env.REDIS_URL || DEFAULT_REDIS_URL,
     supabaseUrl: () => process.env.SUPABASE_URL,
-    supabaseServiceKey: () => process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
-    supabaseServiceKeySource: () =>
-        process.env.SUPABASE_SERVICE_KEY ? 'SUPABASE_SERVICE_KEY' : 'SUPABASE_SERVICE_ROLE_KEY',
+    supabaseServiceKey: () => process.env[supabaseSecretKeySource()],
+    supabaseServiceKeySource: supabaseSecretKeySource,
 });
 
 module.exports = env;

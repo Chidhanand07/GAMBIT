@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { supabaseSecretKey } from '@/lib/server/env';
 import { requireUser } from '@/lib/server/identity';
 import { getProfileById } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /** The caller's own profile row via the service-role client (only when that key is set). */
 async function readProfile(userId: string) {
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return { profileResult: null, profileError: null };
+    if (!supabaseSecretKey()) return { profileResult: null, profileError: null };
     const { data, error } = await getProfileById(createAdminClient(), userId);
     return { profileResult: data as unknown, profileError: error?.message ?? null };
 }
@@ -28,7 +29,7 @@ export async function GET() {
             .map((c) => c.name),
         authError: null,
         userId: auth.userId,
-        serviceKeySet: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        serviceKeySet: !!supabaseSecretKey(),
         profileRowExists: profileResult !== null,
         profileData: profileResult,
         profileError,
