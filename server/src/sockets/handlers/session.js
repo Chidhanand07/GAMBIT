@@ -11,7 +11,7 @@ const { guard } = require('../wrap');
  * @typedef {object} SessionHandlerDeps
  * @property {import('../sessionRegistry').SessionRegistry} sessions
  * @property {{ reconnect: (userId: string, client: ClientPort) => Promise<void>,
- *   handleDisconnect: (userId: string | undefined) => Promise<void> }} gameService
+ *   handleDisconnect: (userId: string | undefined, gameId: string | undefined) => Promise<void> }} gameService
  * @property {{ leaveQueueBySocket: (socketId: string) => void }} matchmaking
  */
 
@@ -33,9 +33,9 @@ function registerSessionHandlers(socket, client, { sessions, gameService, matchm
         'disconnect',
         guard('disconnect', async () => {
             matchmaking.leaveQueueBySocket(socket.id);
-            sessions.unregister(socket.id);
-            // If this user is in an active game, set disconnectInfo in Redis (global clock handles timeout)
-            await gameService.handleDisconnect(userId);
+            // Only games this player has no socket left in: closing one of two tabs is not leaving.
+            const { orphanedGames } = sessions.unregister(socket.id);
+            for (const gameId of orphanedGames) await gameService.handleDisconnect(userId, gameId);
         }),
     );
 }

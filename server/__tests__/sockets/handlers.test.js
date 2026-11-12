@@ -179,11 +179,29 @@ test('a failing service is logged and acked, not thrown [S15]', async () => {
     expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
 });
 
-test('disconnect leaves the queue, forgets the session, then handles the game', async () => {
+test('disconnect leaves the queue, forgets the session, then handles the game the player has no socket left in', async () => {
     const d = deps();
     const { handlers } = connect(d, 'u1');
+    d.sessions.linkSocket('sock-1', 'g');
     await handlers.disconnect();
     expect(d.matchmaking.leaveQueueBySocket).toHaveBeenCalledWith('sock-1');
     expect(d.sessions.userIdOf('sock-1')).toBeUndefined();
-    expect(d.gameService.handleDisconnect).toHaveBeenCalledWith('u1');
+    expect(d.gameService.handleDisconnect.mock.calls).toEqual([['u1', 'g']]);
+});
+
+test('a socket that was not at any board disconnects without touching a game [MULTI-SOCKET]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    await handlers.disconnect();
+    expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+});
+
+test('closing one of two tabs on the same game does not start the countdown [MULTI-SOCKET]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    d.sessions.register('u1', 'other-tab');
+    d.sessions.linkSocket('sock-1', 'g');
+    d.sessions.linkSocket('other-tab', 'g');
+    await handlers.disconnect();
+    expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
 });

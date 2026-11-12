@@ -59,6 +59,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
 | [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
 | [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
+| [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
 
 ---
 
@@ -1432,3 +1433,28 @@ instead of one file per ADR under `docs/refactor/adr/`.
      older version, and "valid" is the reading that does not break a link someone was given.
 - **Behaviour change.** An old invite link to a game that has started or ended now shows the
   "invite not found or expired" screen instead of an invite card whose button fails.
+
+## F-039
+
+**The abandonment countdown starts only when all of a player's sockets for that game are gone (MULTI-SOCKET).**
+
+- **Context.** The registry kept one socket per user and "the user's active game". Any socket
+  of a player disconnecting (a second tab closed, an old socket timing out after the new one
+  had connected) froze the clocks and started the 20 s countdown, while the player was still
+  sitting at the board in another tab. Listed as deferred in F-010.
+- **Decision.**
+  - The session registry records sockets per user and, per socket, the games that socket is
+    *at the board of*. A socket is linked to a game when it joins it as a player
+    (`join_game`), or when it resumes the game on connect (it cleared its own disconnect).
+  - `unregister(socketId)` returns `orphanedGames`: the games that socket was linked to in
+    which its user now has no linked socket left. The disconnect handler calls
+    `gameService.handleDisconnect(userId, gameId)` for exactly those.
+  - `handleDisconnect` takes the game id; it no longer looks up "the user's active game".
+- **What counts as "a socket for that game".** A socket that joined the game, not any socket
+  of the user. A lobby tab does not keep a game alive: if the only tab showing the board is
+  closed, the opponent should not wait for a flag fall because another tab happens to be open.
+- **Edge: paired but never arrived.** A player who is matched and closes the tab before the
+  game page has joined has no linked socket, so no countdown starts. The first-move timeout
+  (F-031) aborts that game after 30 s.
+- **Per process.** The registry is in memory; with two server instances a player's tabs can
+  be on different instances. That is addressed in the scaling phase (M4, MULTI-INSTANCE).

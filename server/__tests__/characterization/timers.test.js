@@ -130,6 +130,36 @@ describe('disconnect during an active game', () => {
     });
 });
 
+describe('a player with two tabs on the game [MULTI-SOCKET]', () => {
+    test('closing one tab changes nothing; closing the last one starts the countdown', async () => {
+        const { game, white, black } = await ctx.seatedGame();
+        const secondTab = await ctx.connect('white-user');
+        const synced = once(secondTab, 'game_state_sync');
+        secondTab.emit('join_game', game.id);
+        await synced;
+
+        const notices = record(black, 'opponent_disconnected');
+        white.disconnect();
+        await sleep(120);
+        expect(notices).toEqual([]);
+        expect((await getGame(game.id)).disconnectInfo).toBeNull();
+
+        const notice = once(black, 'opponent_disconnected');
+        secondTab.disconnect();
+        expect(await notice).toEqual({ userId: 'white-user', timeoutSeconds: 20 });
+        expect((await getGame(game.id)).disconnectInfo).toMatchObject({ userId: 'white-user', side: 'white' });
+    });
+
+    test('a tab of the player that never opened the game does not hold it open', async () => {
+        const { game, white, black } = await ctx.seatedGame();
+        await ctx.connect('white-user'); // e.g. the lobby in another tab
+        const notice = once(black, 'opponent_disconnected');
+        white.disconnect();
+        expect(await notice).toEqual({ userId: 'white-user', timeoutSeconds: 20 });
+        expect((await getGame(game.id)).disconnectInfo).toMatchObject({ userId: 'white-user' });
+    });
+});
+
 describe('global clock ticker', () => {
     test('emits clock_sync { whiteMs, blackMs, serverTs } to the game room for running clocks', async () => {
         const { game, white } = await ctx.seatedGame({ activeSide: 'b', blackClockMs: 90000, whiteClockMs: 80000 });

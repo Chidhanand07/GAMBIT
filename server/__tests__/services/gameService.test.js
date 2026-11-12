@@ -38,9 +38,11 @@ describe('joinGame', () => {
     test('joins the room, links the user and syncs the running clock', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 1000 }) });
         const client = fakeClient('s1');
+        ctx.sessions.register('white-user', 's1'); // as the connection handler does
         await ctx.svc.joinGame('g', client, 'white-user');
         expect(client.joined).toEqual(['game_g']);
         expect(ctx.sessions.activeGameOf('white-user')).toBe('g');
+        expect(ctx.sessions.socketsInGame('white-user', 'g')).toBe(1);
         expect(client.emitted[0]).toEqual({
             event: 'game_state_sync',
             args: [expect.objectContaining({ whiteMs: 599000, blackMs: 600000, clockActive: true })],
@@ -55,7 +57,7 @@ describe('joinGame', () => {
         expect(client.emitted[0].event).toBe('game_state_sync');
         expect(ctx.sessions.hasActiveGame('stranger')).toBe(false);
 
-        await ctx.svc.handleDisconnect('stranger');
+        await ctx.svc.handleDisconnect('stranger', 'g');
         expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
         expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
     });
@@ -69,7 +71,7 @@ describe('joinGame', () => {
     test('a stale link to a game the user does not play in cannot trigger abandonment [S9]', async () => {
         const ctx = setup({ g: makeGame({ id: 'g' }) });
         ctx.sessions.setActiveGame('stranger', 'g');
-        await ctx.svc.handleDisconnect('stranger');
+        await ctx.svc.handleDisconnect('stranger', 'g');
         expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
         expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
         expect(ctx.gamesRepo.updateIfActive).not.toHaveBeenCalled();
@@ -339,7 +341,7 @@ describe('disconnect and reconnect', () => {
     test('disconnect freezes the clock and starts the grace period; reconnect clears it', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 2000 }) });
         ctx.sessions.setActiveGame('black-user', 'g');
-        await ctx.svc.handleDisconnect('black-user');
+        await ctx.svc.handleDisconnect('black-user', 'g');
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
             whiteClockMs: 598000,
@@ -409,7 +411,7 @@ describe('disconnect / reconnect cannot clobber a concurrent write (review findi
         const ctx = setup({ g: makeGame({ id: 'g' }) });
         ctx.sessions.setActiveGame('white-user', 'g');
         interleave(ctx, 'g', afterE4);
-        await ctx.svc.handleDisconnect('white-user');
+        await ctx.svc.handleDisconnect('white-user', 'g');
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
             fen: NEXT_FEN,
@@ -423,7 +425,7 @@ describe('disconnect / reconnect cannot clobber a concurrent write (review findi
         const ctx = setup({ g: makeGame({ id: 'g' }) });
         ctx.sessions.setActiveGame('white-user', 'g');
         interleave(ctx, 'g', (game) => ({ ...game, status: 'completed', result: 'black', reason: 'Resignation' }));
-        await ctx.svc.handleDisconnect('white-user');
+        await ctx.svc.handleDisconnect('white-user', 'g');
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
             status: 'completed',
@@ -487,7 +489,7 @@ describe('clock around a disconnect [G8, G9]', () => {
     test('a client joining during the disconnect sees the frozen clocks, not a second deduction [G9]', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: T - 2000 }) });
         ctx.sessions.setActiveGame('black-user', 'g');
-        await ctx.svc.handleDisconnect('black-user');
+        await ctx.svc.handleDisconnect('black-user', 'g');
         ctx.advance(9000);
 
         const client = fakeClient();
@@ -498,7 +500,7 @@ describe('clock around a disconnect [G8, G9]', () => {
     test('reconnecting after 9 s away: the clock runs again from now, the absence is not charged [G9]', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: T - 2000 }) });
         ctx.sessions.setActiveGame('black-user', 'g');
-        await ctx.svc.handleDisconnect('black-user');
+        await ctx.svc.handleDisconnect('black-user', 'g');
         ctx.advance(9000);
         await ctx.svc.reconnect('black-user', fakeClient());
         expect(ctx.gameStore.state.get('g')).toMatchObject({ whiteClockMs: 598000, lastMoveAt: T + 9000, disconnectInfo: null });
@@ -507,7 +509,7 @@ describe('clock around a disconnect [G8, G9]', () => {
     test('a disconnect and reconnect before the first move never starts a clock [G8]', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: null }) });
         ctx.sessions.setActiveGame('white-user', 'g');
-        await ctx.svc.handleDisconnect('white-user');
+        await ctx.svc.handleDisconnect('white-user', 'g');
         expect(ctx.gameStore.state.get('g')).toMatchObject({ lastMoveAt: null, whiteClockMs: 600000 });
 
         ctx.advance(5000);
@@ -575,5 +577,50 @@ describe('a move after the flag has fallen [G7]', () => {
             error: 'not_your_turn',
         });
         expect(ctx.gameStore.state.get('g').status).toBe('active');
+    });
+});
+
+describe('disconnect with more than one socket [MULTI-SOCKET]', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const TWO_PLIES = [
+        { move: 'g1f3', fen: 'x', san: 'Nf3' },
+        { move: 'g8f6', fen: 'y', san: 'Nf6' },
+    ];
+    const underway = () => ({ g: makeGame({ id: 'g', fen: START, lastMoveAt: T - 1000, moveLog: TWO_PLIES }) });
+
+    test('joining a game as a participant links that socket to the game', async () => {
+        const ctx = setup(underway());
+        ctx.sessions.register('white-user', 'tab-a');
+        await ctx.svc.joinGame('g', fakeClient('tab-a'), 'white-user');
+        expect(ctx.sessions.socketsInGame('white-user', 'g')).toBe(1);
+    });
+
+    test('a spectator socket is never linked', async () => {
+        const ctx = setup(underway());
+        ctx.sessions.register('watcher', 'w1');
+        await ctx.svc.joinGame('g', fakeClient('w1'), 'watcher');
+        expect(ctx.sessions.socketsInGame('watcher', 'g')).toBe(0);
+        expect(ctx.sessions.unregister('w1').orphanedGames).toEqual([]);
+    });
+
+    test('the countdown starts for the game named, not for whatever the user was last linked to', async () => {
+        const ctx = setup(underway());
+        await ctx.svc.handleDisconnect('white-user', 'g');
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toMatchObject({ userId: 'white-user', side: 'white' });
+        expect(ctx.emitter.named('opponent_disconnected')).toHaveLength(1);
+    });
+
+    test('a socket that resumes the game on connect counts as being at the board', async () => {
+        const ctx = setup(underway());
+        ctx.sessions.register('white-user', 'old');
+        await ctx.svc.joinGame('g', fakeClient('old'), 'white-user');
+        const { orphanedGames } = ctx.sessions.unregister('old');
+        await ctx.svc.handleDisconnect('white-user', orphanedGames[0]);
+
+        ctx.sessions.register('white-user', 'new');
+        await ctx.svc.reconnect('white-user', fakeClient('new'));
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
+        // If the new socket drops again before it re-joins, the game is orphaned again.
+        expect(ctx.sessions.unregister('new').orphanedGames).toEqual(['g']);
     });
 });

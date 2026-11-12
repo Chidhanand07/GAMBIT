@@ -37,7 +37,7 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  * @property {{ insert: Function }} movesRepo
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
- * @property {Pick<SessionRegistry, 'userIdOf' | 'activeGameOf' | 'hasActiveGame' | 'setActiveGame' | 'clearGame'>} sessions
+ * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame'>} sessions
  * @property {Emitter} emitter
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {() => number} [now]
@@ -81,10 +81,10 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
 
 /**
  * `join_game`: enter the room and send the current state (or the result of a
- * finished game). Only the white and black players are linked to the game;
- * the link is what lets a disconnect start the abandonment countdown, so
- * anyone else is a spectator: they see the game but can never affect it
- * (NODE-11).
+ * finished game). Only a socket of the white or black player is linked to
+ * the game; losing the last linked socket is what starts the abandonment
+ * countdown, so anyone else is a spectator: they see the game but can never
+ * affect it (NODE-11).
  * @param {GameCtx} ctx
  * @param {string} gameId
  * @param {ClientPort} client
@@ -95,7 +95,7 @@ async function joinGame(ctx, gameId, client, userId) {
 
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
-    if (isParticipant(game, userId)) ctx.sessions.setActiveGame(userId, gameId);
+    if (isParticipant(game, userId)) ctx.sessions.linkSocket(client.id, gameId);
     sendState(ctx, game, client);
 }
 
@@ -151,6 +151,8 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
             : null,
     );
     if (!resumed) return;
+    // The socket that resumed the game is at the board, even before it re-joins.
+    sessions.linkSocket(client.id, gameId);
     client.join(gameRoom(gameId));
     emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
     client.emit('clock_sync', { whiteMs: resumed.whiteClockMs, blackMs: resumed.blackClockMs });
@@ -210,18 +212,21 @@ async function resign(ctx, { game_id: gameId }, userId) {
 }
 
 /**
- * After a socket of `userId` disconnected: freeze the clocks and start the
- * 20 s grace period (the global ticker adjudicates abandonment).
+ * After the last socket `userId` had at the board of `gameId` disconnected:
+ * freeze the clocks and start the 20 s grace period (the global ticker
+ * adjudicates abandonment). The caller decides that the player is really gone
+ * (sockets/handlers/session with the session registry); closing one of
+ * several tabs never gets here (MULTI-SOCKET).
  *
  * The state is re-read inside the per-game lock and only an active game the
  * user plays in is touched, so a disconnect that overlaps a move keeps the
  * move, and one that overlaps the end of the game cannot make it active again.
  * @param {GameCtx} ctx
  * @param {string | undefined} userId
+ * @param {string | undefined} gameId
  */
-async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }, userId) {
-    if (!userId || !sessions.hasActiveGame(userId)) return;
-    const gameId = /** @type {string} */ (sessions.activeGameOf(userId));
+async function handleDisconnect({ gameStore, gamesRepo, emitter, now }, userId, gameId) {
+    if (!userId || !gameId) return;
     const at = now();
 
     const frozen = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
@@ -273,8 +278,8 @@ function createGameService(deps) {
         makeMove: (data, userId, client) => makeMove(ctx, data, userId, client),
         /** @type {(data: { game_id: string }, userId: string) => Promise<{ ok: boolean, error?: string }>} */
         resign: (data, userId) => resign(ctx, data, userId),
-        /** @type {(userId: string | undefined) => Promise<void>} */
-        handleDisconnect: (userId) => handleDisconnect(ctx, userId),
+        /** @type {(userId: string | undefined, gameId: string | undefined) => Promise<void>} */
+        handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
     };
 }
 
