@@ -7,7 +7,7 @@ import { GET as getMe, PATCH as patchMe } from '@/app/api/profile/me/route'
 import { GET as getProfile } from '@/app/api/profile/[username]/route'
 import { GET as getStats } from '@/app/api/profile/[username]/stats/route'
 import { GET as getGames } from '@/app/api/profile/[username]/games/route'
-import { db, req, json, resetHarness, signInWithCookie } from '../helpers/routeHarness'
+import { db, req, json, resetHarness, signInWithCookie, uid } from '../helpers/routeHarness'
 
 beforeEach(() => {
     resetHarness()
@@ -17,11 +17,11 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks())
 
 describe('GET /api/profile/me', () => {
-    beforeEach(() => signInWithCookie('me'))
+    beforeEach(() => signInWithCookie(uid('me')))
 
     test('returns my profile', async () => {
-        db.queue('profiles', { data: { id: 'me', username: 'me1' }, error: null })
-        expect(await json(await getMe())).toEqual({ status: 200, body: { id: 'me', username: 'me1' } })
+        db.queue('profiles', { data: { id: uid('me'), username: 'me1' }, error: null })
+        expect(await json(await getMe())).toEqual({ status: 200, body: { id: uid('me'), username: 'me1' } })
     })
 
     test('database error → 500', async () => {
@@ -33,13 +33,13 @@ describe('GET /api/profile/me', () => {
         db.auth.admin.getUserById.mockResolvedValue({ data: { user: { email: 'Jane.Doe+chess@mail.com' } }, error: null } as any)
         db.queue('profiles',
             { data: null, error: null },                 // no profile yet
-            { data: { id: 'taken' }, error: null },      // "Jane_Doe_chess" taken
+            { data: { id: uid('taken') }, error: null },      // "Jane_Doe_chess" taken
             { data: null, error: null },                 // "Jane_Doe_chess1" free
             (call) => ({ data: db.op(call, 'insert')![0], error: null }),
         )
         const res = await json(await getMe())
         expect(res.status).toBe(200)
-        expect(res.body).toMatchObject({ id: 'me', username: 'Jane_Doe_chess1', rating_rapid: 1200, games_played: 0 })
+        expect(res.body).toMatchObject({ id: uid('me'), username: 'Jane_Doe_chess1', rating_rapid: 1200, games_played: 0 })
     })
 
     test('auto-create failure → 404', async () => {
@@ -52,22 +52,22 @@ describe('PATCH /api/profile/me', () => {
     const patch = (body: unknown) => patchMe(req('/api/profile/me', { method: 'PATCH', body }))
 
     test('updates only my display fields, never ratings or ownership', async () => {
-        signInWithCookie('me')
-        db.queue('profiles', { data: { id: 'me' }, error: null })
-        await patch({ displayName: 'Me', bio: 'hi', country: 'IN', avatarUrl: 'a.png', rating_rapid: 3000, id: 'other' })
+        signInWithCookie(uid('me'))
+        db.queue('profiles', { data: { id: uid('me') }, error: null })
+        await patch({ displayName: 'Me', bio: 'hi', country: 'IN', avatarUrl: 'a.png', rating_rapid: 3000, id: uid('other') })
         const call = db.callsFor('profiles')[0]
         expect(db.op(call, 'update')![0]).toEqual({ display_name: 'Me', bio: 'hi', country: 'IN', avatar_url: 'a.png' })
-        expect(call.ops).toContainEqual(['eq', 'id', 'me'])
+        expect(call.ops).toContainEqual(['eq', 'id', uid('me')])
     })
 
     test('omitted avatarUrl is left unchanged; other omitted fields are cleared', async () => {
-        signInWithCookie('me')
+        signInWithCookie(uid('me'))
         await patch({ bio: 'only bio' })
         expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, bio: 'only bio', country: null })
     })
 
     test('database error → 500', async () => {
-        signInWithCookie('me')
+        signInWithCookie(uid('me'))
         db.queue('profiles', { data: null, error: { message: 'x' } })
         expect((await patch({ bio: 'x' })).status).toBe(500)
     })
@@ -75,7 +75,7 @@ describe('PATCH /api/profile/me', () => {
 
 describe('GET /api/profile/[username]', () => {
     // Profile pages are behind the login wall; so are the routes that feed them [S5].
-    beforeEach(() => signInWithCookie('viewer'))
+    beforeEach(() => signInWithCookie(uid('viewer')))
 
     test('returns the profile', async () => {
         db.queue('profiles', { data: { username: 'bob' }, error: null })
@@ -92,18 +92,18 @@ describe('GET /api/profile/[username]', () => {
 
 describe('GET /api/profile/[username]/stats', () => {
     // Profile pages are behind the login wall; so are the routes that feed them [S5].
-    beforeEach(() => signInWithCookie('viewer'))
+    beforeEach(() => signInWithCookie(uid('viewer')))
 
     test('totals, ratings with 1200 defaults, and per-category W/L/D', async () => {
-        db.queue('profiles', { data: { id: 'p', games_played: 5, wins: 2, losses: 2, draws: 1, rating_blitz: 1500 }, error: null })
+        db.queue('profiles', { data: { id: uid('p'), games_played: 5, wins: 2, losses: 2, draws: 1, rating_blitz: 1500 }, error: null })
         db.queue('games', {
             data: [
-                { time_control: '1', winner_id: 'p' },
-                { time_control: '3+2', winner_id: 'x' },
+                { time_control: '1', winner_id: uid('p') },
+                { time_control: '3+2', winner_id: uid('x') },
                 { time_control: '10', result: 'draw' },
-                { time_control: '15+10', winner_id: 'p' },
-                { time_control: null, winner_id: 'x' },
-                { time_control: '90', winner_id: 'p' },
+                { time_control: '15+10', winner_id: uid('p') },
+                { time_control: null, winner_id: uid('x') },
+                { time_control: '90', winner_id: uid('p') },
             ],
             error: null,
         })
@@ -129,20 +129,20 @@ describe('GET /api/profile/[username]/stats', () => {
 
 describe('GET /api/profile/[username]/games', () => {
     // Profile pages are behind the login wall; so are the routes that feed them [S5].
-    beforeEach(() => signInWithCookie('viewer'))
+    beforeEach(() => signInWithCookie(uid('viewer')))
 
     test('pages through completed games, newest first', async () => {
-        db.queue('profiles', { data: { id: 'p' }, error: null })
-        db.queue('games', { data: [{ id: 'g' }], error: null })
+        db.queue('profiles', { data: { id: uid('p') }, error: null })
+        db.queue('games', { data: [{ id: uid('g') }], error: null })
         const res = await json(await getGames(req('/x?limit=10&offset=20'), { params: { username: 'bob' } }))
-        expect(res.body).toEqual({ games: [{ id: 'g' }], profileId: 'p' })
+        expect(res.body).toEqual({ games: [{ id: uid('g') }], profileId: uid('p') })
         expect(db.callsFor('games')[0].ops).toEqual(expect.arrayContaining([
-            ['or', 'white_id.eq.p,black_id.eq.p'], ['range', 20, 29], ['order', 'created_at', { ascending: false }],
+            ['or', `white_id.eq.${uid('p')},black_id.eq.${uid('p')}`], ['range', 20, 29], ['order', 'created_at', { ascending: false }],
         ]))
     })
 
     test('limit is capped at 50 and defaults to 15', async () => {
-        db.queue('profiles', { data: { id: 'p' }, error: null }, { data: { id: 'p' }, error: null })
+        db.queue('profiles', { data: { id: uid('p') }, error: null }, { data: { id: uid('p') }, error: null })
         await getGames(req('/x?limit=500'), { params: { username: 'bob' } })
         await getGames(req('/x'), { params: { username: 'bob' } })
         const [big, dflt] = db.callsFor('games')
@@ -152,10 +152,21 @@ describe('GET /api/profile/[username]/games', () => {
 
     test('404 for an unknown user, 500 on database error', async () => {
         expect((await getGames(req('/x'), { params: { username: 'ghost' } })).status).toBe(404)
-        db.queue('profiles', { data: { id: 'p' }, error: null })
+        db.queue('profiles', { data: { id: uid('p') }, error: null })
         db.queue('games', { data: null, error: { message: 'x' } })
         expect((await getGames(req('/x'), { params: { username: 'bob' } })).status).toBe(500)
     })
 
-    test.todo('non-numeric ?limit / ?offset produce NaN ranges — validate and fall back to defaults')
+    test.each([
+        ['limit=abc', '?limit=abc'],
+        ['offset=NaN', '?offset=NaN'],
+        ['a negative offset', '?offset=-1'],
+        ['limit=0', '?limit=0'],
+        ['a fractional limit', '?limit=1.5'],
+        ['an exponent', '?offset=1e9'],
+    ])('%s → 400 and no query (was: NaN reached the range) [S7]', async (_label, query) => {
+        const res = await getGames(req(`/x${query}`), { params: { username: 'bob' } })
+        expect(res.status).toBe(400)
+        expect(db.calls).toEqual([])
+    })
 })

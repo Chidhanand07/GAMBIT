@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/server/identity';
 import { createDefaultProfile, getProfileById, updateProfile } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +36,9 @@ export async function PATCH(request: Request) {
     if (!auth.ok) return auth.response;
     const { userId } = auth;
 
-    const body = await request.json();
-    const { displayName, bio, country, avatarUrl } = body;
+    const body = await parseJsonBody(request, schemas.profilePatch, 'Invalid profile fields');
+    if (!body.ok) return body.response;
+    const { displayName, bio, country, avatarUrl } = body.data;
 
     const updatePayload: Record<string, unknown> = {
         display_name: displayName ?? null,

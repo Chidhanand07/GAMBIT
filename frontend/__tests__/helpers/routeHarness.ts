@@ -11,6 +11,16 @@
 import { NextRequest } from 'next/server'
 import { createSupabaseMock } from './supabaseMock'
 
+/**
+ * A stable UUID for a readable label, so tests can keep saying `uid('me')` while every id
+ * that reaches a route handler is a real UUID (route params, query ids and filter values are
+ * validated as UUIDs).
+ */
+export function uid(label: string): string {
+    const hex = Buffer.from(label).toString('hex').slice(0, 12).padEnd(12, '0')
+    return `00000000-0000-4000-8000-${hex}`
+}
+
 /** Project ref derived from NEXT_PUBLIC_SUPABASE_URL in jest.setup.ts. */
 export const AUTH_COOKIE = 'sb-testref-auth-token'
 

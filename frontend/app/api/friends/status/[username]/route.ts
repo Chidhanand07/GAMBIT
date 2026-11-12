@@ -3,6 +3,7 @@ import { findFriendshipStatus, relationFromFriendship } from '@/lib/server/frien
 import { requireUser } from '@/lib/server/identity';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseInput, schemas } from '@/lib/server/validation';
 
 // Per-user data: never prerendered or cached (NX-11).
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,10 @@ export async function GET(_req: NextRequest, { params }: { params: { username: s
 
     const admin = createAdminClient();
 
-    const { data: them } = await findProfileIdByUsername(admin, params.username);
+    const username = parseInput(schemas.usernameParam, params.username);
+    if (!username.ok) return NextResponse.json({ status: 'none' });
+
+    const { data: them } = await findProfileIdByUsername(admin, username.data);
     if (!them) return NextResponse.json({ status: 'none' });
     if (them.id === meId) return NextResponse.json({ status: 'self' });
 

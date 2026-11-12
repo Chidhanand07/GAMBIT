@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Game } from '@/types/game';
+import { participantFilter } from './filters';
 
 const ACTIVE_GAME_COLUMNS =
     'id, white_id, black_id, time_control, status, started_at, clock_deadline, white_time_ms, black_time_ms';
@@ -30,8 +31,6 @@ const CLIENT_WRITABLE_FIELDS = ['draw_offer', 'rematch_requested'];
 type ActiveGameRow = Pick<Game, 'id' | 'started_at' | 'white_time_ms' | 'black_time_ms'> & {
     clock_deadline?: string | null;
 };
-
-const participantFilter = (userId: string) => `white_id.eq.${userId},black_id.eq.${userId}`;
 
 /** The user's most recently started active game, if any. */
 export function findActiveGame(admin: SupabaseClient, userId: string) {

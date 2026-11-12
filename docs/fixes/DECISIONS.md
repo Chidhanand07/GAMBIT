@@ -27,6 +27,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-010](#f-010) | Pre-PR review of PR 1: what was fixed, what was deferred | 1 | S1, S2, S3 |
 | [F-011](#f-011) | Next.js pinned to 14.2.35; `/login` gets the Suspense boundary the patch line requires | 2 | NEXT-CVE |
 | [F-012](#f-012) | Route-handler identity: `requireUser()` on `auth.getUser()`; which routes stay public | 2 | S5 |
+| [F-013](#f-013) | Route input validation with zod; `.or()` filters only from UUIDs; two username rules | 2 | S7 |
 
 ---
 
@@ -456,3 +457,44 @@ instead of one file per ADR under `docs/refactor/adr/`.
   every route handler verifies. `/api/debug/session` still exists in production (S12, not a
   listed item); it now answers only its own signed-in caller. `lib/supabase/middleware.ts`
   (unused `updateSession`) still uses the deprecated cookie API.
+
+## F-013
+
+**Every route param, query value and body is parsed with zod; filter strings take UUIDs only (S7).**
+
+- **Context.** `GET /api/friends?userId=…` put the raw query value into a PostgREST `.or()`
+  filter string (`requester_id.eq.<value>,addressee_id.eq.<value>`). A value containing `,`
+  or `(` rewrote the filter, and the query ran with the service-role key. Elsewhere `limit` /
+  `offset` went through `Number()` unchecked (NaN reached `.range()`), a `null` JSON body threw,
+  and the signup route applied no username rule at all.
+- **Options.**
+  1. Where filter strings are built: (a) keep them next to each query and validate the inputs
+     at each route; (b) one module of builders that itself refuses non-UUIDs.
+  2. Usernames: (a) one strict regex everywhere; (b) a strict rule for *new* names and a wider,
+     still safe one for *lookups*.
+  3. Invalid route params: (a) always 400; (b) 400 for ids on mutating friend routes, 404 for
+     "which resource" params (`games/[id]`, `profile/[username]`).
+- **Decision.** 1b, 2b, 3b.
+  - `lib/server/filters.ts`: `participantFilter`, `eitherSideFilter`, `betweenUsersFilter`. Each
+    validates its arguments with `z.string().uuid()` and throws otherwise. No other code
+    interpolates into a filter string.
+  - `lib/server/validation.ts`: the schemas plus `parseInput` / `parseJsonBody`, which return
+    the data or a ready 400. The rejected input is never echoed back.
+  - Applied in every route: UUID params, enum `action` / `field`, integer `limit` (1–50, capped)
+    and `offset` (0–100 000), bounded strings for bodies, a time-control pattern with a
+    1–180 minute range for private games.
+- **Why.**
+  - *Builders that refuse*: validation at the route protects today's callers; a builder that
+    cannot produce an unsafe string protects the next caller too (and the verified user id is
+    checked as well, at no cost).
+  - *Two username rules*: new names follow the rule the signup form already shows
+    (`[A-Za-z0-9_]{3,20}`), now enforced on the server. Lookups go through parameterised
+    `.eq('username', …)`, so they cannot inject; a single strict rule there would make any
+    older account whose name contains `.` or `-` unreachable. The lookup rule
+    (`[A-Za-z0-9_.-]{1,40}`) only keeps out separators and oversized values.
+  - *404 for resource params*: a malformed game id or username names nothing, so "not found" is
+    the accurate answer and matches what the pages already handle.
+- **Behaviour changes.** A private game with a time control outside 1–180 minutes (or not of
+  the form `10`, `5+3` or a preset id) is refused with 400. Signup with a username outside the
+  form's rule is refused by the server too. `?limit=abc` is a 400 instead of an empty page.
+- **Not changed.** `PATCH /api/profile/me` still nulls fields that are omitted (F18).

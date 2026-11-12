@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/server/identity';
 import { getProfileByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseInput, schemas } from '@/lib/server/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,10 @@ export async function GET(_request: NextRequest, { params }: { params: { usernam
         return NextResponse.json({ error: 'Username required' }, { status: 400 });
     }
 
-    const { data, error } = await getProfileByUsername(createAdminClient(), params.username);
+    const username = parseInput(schemas.usernameParam, params.username);
+    if (!username.ok) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+
+    const { data, error } = await getProfileByUsername(createAdminClient(), username.data);
 
     if (error) {
         console.error('[api/profile/username] query error:', error.message);

@@ -2,24 +2,16 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FriendRelation, FriendshipStatus } from '@/types/friendship';
 import type { ProfileSummary } from '@/types/profile';
+import { betweenUsersFilter, eitherSideFilter } from './filters';
 
 const ACCEPTED_COLUMNS =
     'id, requester_id, addressee_id, requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, rating_rapid), addressee:profiles!friendships_addressee_id_fkey(id, username, display_name, avatar_url, rating_rapid)';
 const PENDING_COLUMNS =
     'id, created_at, requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, rating_rapid)';
 
-/** PostgREST `or` filter matching a friendship between two users in either direction. */
-function betweenFilter(meId: string, otherId: string): string {
-    return `and(requester_id.eq.${meId},addressee_id.eq.${otherId}),and(requester_id.eq.${otherId},addressee_id.eq.${meId})`;
-}
-
 /** Accepted friendships of `userId` with both sides' profiles embedded. */
 export function listAcceptedFriendships(admin: SupabaseClient, userId: string) {
-    return admin
-        .from('friendships')
-        .select(ACCEPTED_COLUMNS)
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
-        .eq('status', 'accepted');
+    return admin.from('friendships').select(ACCEPTED_COLUMNS).or(eitherSideFilter(userId)).eq('status', 'accepted');
 }
 
 interface AcceptedFriendshipRow {
@@ -56,12 +48,12 @@ export function listIncomingRequests(admin: SupabaseClient, meId: string) {
 
 /** `id, status` of the friendship between two users in either direction (POST /api/friends/request). */
 export function findExistingFriendship(admin: SupabaseClient, meId: string, otherId: string) {
-    return admin.from('friendships').select('id, status').or(betweenFilter(meId, otherId)).maybeSingle();
+    return admin.from('friendships').select('id, status').or(betweenUsersFilter(meId, otherId)).maybeSingle();
 }
 
 /** `status, requester_id` of the friendship between two users in either direction. */
 export function findFriendshipStatus(admin: SupabaseClient, meId: string, otherId: string) {
-    return admin.from('friendships').select('status, requester_id').or(betweenFilter(meId, otherId)).maybeSingle();
+    return admin.from('friendships').select('status, requester_id').or(betweenUsersFilter(meId, otherId)).maybeSingle();
 }
 
 /** New pending request from `meId` to `addresseeId`. */
@@ -76,7 +68,7 @@ export function setRequestStatus(admin: SupabaseClient, id: string, meId: string
 
 /** Delete a friendship `meId` is part of. */
 export function deleteFriendship(admin: SupabaseClient, id: string, meId: string) {
-    return admin.from('friendships').delete().eq('id', id).or(`requester_id.eq.${meId},addressee_id.eq.${meId}`);
+    return admin.from('friendships').delete().eq('id', id).or(eitherSideFilter(meId));
 }
 
 /** Relation shown on a profile for an existing friendship row (or none). */

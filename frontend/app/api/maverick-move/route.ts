@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requestComputerMove } from '@/lib/server/engine';
+import { schemas } from '@/lib/server/validation';
 
 // PUBLIC on purpose: the offline "play the computer" page works signed out and no user data
 // is read or written (docs/fixes/DECISIONS.md F-012).
@@ -20,21 +21,22 @@ const pickDifficulty = (requested: string | undefined) =>
 const errorDetail = (e: unknown) => (e as { message?: string } | null | undefined)?.message ?? String(e);
 
 export async function POST(req: Request) {
-    let body: { fen?: string; difficulty?: string };
+    let body: unknown;
     try {
         body = await req.json();
     } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTP_BAD_REQUEST });
     }
 
-    if (!body?.fen) {
+    const parsed = schemas.computerMove.safeParse(body);
+    if (!parsed.success) {
         return NextResponse.json({ error: 'Missing fen' }, { status: HTTP_BAD_REQUEST });
     }
 
-    const difficulty = pickDifficulty(body.difficulty);
+    const difficulty = pickDifficulty(parsed.data.difficulty);
 
     try {
-        const res = await requestComputerMove(body.fen, difficulty);
+        const res = await requestComputerMove(parsed.data.fen, difficulty);
         if (!res.ok) {
             const detail = await res.text().catch(() => '');
             return NextResponse.json(

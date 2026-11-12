@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getGameParticipants, getGameWithPlayers, pickClientWritableFields, updateGame } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseInput, parseJsonBody, schemas } from '@/lib/server/validation';
 import type { SeatColor } from '@/types/game';
 
 // Per-user data: never prerendered or cached (NX-11).
@@ -13,8 +14,10 @@ type Params = { params: { id: string } };
 export async function GET(_req: Request, { params }: Params) {
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
+    const id = parseInput(schemas.uuid, params.id, 'Game not found');
+    if (!id.ok) return NextResponse.json({ error: 'Game not found' }, { status: 404 });
 
-    const { data: game, error } = await getGameWithPlayers(createAdminClient(), params.id);
+    const { data: game, error } = await getGameWithPlayers(createAdminClient(), id.data);
 
     if (error || !game) {
         return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -33,22 +36,27 @@ export async function PATCH(req: Request, { params }: Params) {
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
 
+    const id = parseInput(schemas.uuid, params.id, 'Game not found');
+    if (!id.ok) return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+
     const admin = createAdminClient();
 
     // Verify caller is a participant in this game before allowing any update
-    const { data: game } = await getGameParticipants(admin, params.id);
+    const { data: game } = await getGameParticipants(admin, id.data);
 
     if (!game) return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     if (game.white_id !== auth.userId && game.black_id !== auth.userId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const filtered = pickClientWritableFields(await req.json());
+    const body = await parseJsonBody(req, schemas.gamePatch, 'No writable fields');
+    if (!body.ok) return body.response;
+    const filtered = pickClientWritableFields(body.data);
     if (Object.keys(filtered).length === 0) {
         return NextResponse.json({ error: 'No writable fields' }, { status: 400 });
     }
 
-    const { data, error } = await updateGame(admin, params.id, filtered);
+    const { data, error } = await updateGame(admin, id.data, filtered);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json(data);

@@ -3,6 +3,7 @@ import { insertGame } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
 import { buildPrivateGameRow } from '@/lib/server/privateGames';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
 
 // Per-user data: never prerendered or cached (NX-11).
 export const dynamic = 'force-dynamic';
@@ -13,8 +14,9 @@ export async function POST(req: NextRequest) {
     if (!auth.ok) return auth.response;
     const { userId } = auth;
 
-    const { timeControl, color, isRated } = await req.json();
-    if (!timeControl) return NextResponse.json({ error: 'timeControl required' }, { status: 400 });
+    const body = await parseJsonBody(req, schemas.privateGame, 'timeControl required');
+    if (!body.ok) return body.response;
+    const { timeControl, color, isRated } = body.data;
 
     const row = buildPrivateGameRow(userId, { timeControl, color, isRated });
 
