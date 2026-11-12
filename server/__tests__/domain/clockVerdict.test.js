@@ -86,6 +86,36 @@ describe('abandonment', () => {
     });
 });
 
+describe('a disconnect before both sides have moved [G10]', () => {
+    const away = (side, at = T) => ({ userId: `${side}-user`, side, at });
+
+    test('nothing during the grace period', () => {
+        expect(clockVerdict(fresh({ disconnectInfo: away('white') }), T + 19999)).toBeNull();
+    });
+
+    test('no move at all: the game is adjudicated when the grace period ends, as an abort', () => {
+        // Was never adjudicated: the ticker skipped games whose clock had not started.
+        expect(clockVerdict(fresh({ disconnectInfo: away('white') }), T + 20000)).toEqual({
+            winner: null,
+            reason: 'Aborted',
+            aborted: true,
+        });
+        expect(clockVerdict(fresh({ disconnectInfo: away('black') }), T + 20000)).toMatchObject({ aborted: true });
+    });
+
+    test('one move played, either player leaves: still no game, so an abort, not a rated win', () => {
+        expect(clockVerdict(afterWhiteMoved(T, { disconnectInfo: away('black') }), T + 20000)).toMatchObject({ aborted: true });
+        expect(clockVerdict(afterWhiteMoved(T, { disconnectInfo: away('white') }), T + 20000)).toMatchObject({ aborted: true });
+    });
+
+    test('from the second move on, leaving loses the game', () => {
+        expect(clockVerdict(underway(T, { disconnectInfo: away('white') }), T + 20000)).toEqual({
+            winner: 'black',
+            reason: 'Abandonment',
+        });
+    });
+});
+
 test('a game that is not active is never judged', () => {
     expect(clockVerdict(fresh({ status: 'completed' }), T + 999999)).toBeNull();
     expect(clockVerdict(null, T)).toBeNull();

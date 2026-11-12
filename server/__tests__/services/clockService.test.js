@@ -40,6 +40,7 @@ test('broadcasts the running clock with the injected server time', async () => {
 });
 
 const MOVE_LOG = [{ move: 'e2e4', fen: 'after-e4', san: 'e4' }];
+const TWO_PLIES = [...MOVE_LOG, { move: 'e7e5', fen: 'after-e5', san: 'e5' }];
 const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/);
 
 test('flag fall goes through the one finalizer: same payload, DB row, rating and review as any ending [G3]', async () => {
@@ -78,7 +79,8 @@ test('flag fall goes through the one finalizer: same payload, DB row, rating and
 test('abandonment after the grace period goes through the finalizer too; paused before it [G3]', async () => {
     const info = { userId: 'white-user', side: 'white', at: T };
     const { svc, emitter, advance, gameStore, gamesRepo, reviewService, rating } = setup(
-        makeGame({ lastMoveAt: T - 999999, whiteClockMs: 1, disconnectInfo: info, moveLog: MOVE_LOG }),
+        // Both sides have moved: leaving a game that is underway loses it.
+        makeGame({ lastMoveAt: T - 999999, whiteClockMs: 1, disconnectInfo: info, moveLog: TWO_PLIES }),
     );
     await svc.tick();
     expect(emitter.named('game_end')).toHaveLength(0);
@@ -216,4 +218,21 @@ describe('first-move timeout [FIRST-MOVE]', () => {
         expect(emitter.named('game_end')).toEqual([]);
         expect(gameStore.state.get(game.id).status).toBe('active');
     });
+});
+
+test('a player who disconnects before any move: the game is aborted after the grace period, unrated [G10]', async () => {
+    const info = { userId: 'white-user', side: 'white', at: T };
+    const { svc, emitter, gameStore, rating, gamesRepo, advance } = setup(
+        makeGame({ startedAt: T, lastMoveAt: null, disconnectInfo: info }),
+    );
+    advance(19000);
+    await svc.tick();
+    expect(emitter.named('game_end')).toEqual([]);
+
+    advance(1000);
+    await svc.tick();
+    expect(emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'Aborted', reason: 'Aborted' });
+    expect(gameStore.state.get('game-1')).toMatchObject({ status: 'completed', result: 'aborted' });
+    expect(gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ status: 'aborted', winner_id: null });
+    expect(rating.processGameEnd).not.toHaveBeenCalled();
 });

@@ -17,6 +17,9 @@ const { useServer, once, record, recordAll, sleep, waitFor, opsFor, ISO_DATE, AF
 const ctx = useServer();
 
 const MOVE_LOG = [{ move: 'e2e4', fen: AFTER_E4, san: 'e4' }];
+/** One move each: a game that is underway, so leaving it loses it (before that it is aborted, G10). */
+const AFTER_E5 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2';
+const TWO_PLIES = [...MOVE_LOG, { move: 'e7e5', fen: AFTER_E5, san: 'e5' }];
 const CHANGES = { white: { oldRating: 1500, newRating: 1490, change: -10 }, black: { oldRating: 1500, newRating: 1510, change: 10 } };
 const GRACE_EXPIRED_MS = 21000;
 /** Long enough for at least one full tick of the 1000 ms global clock. */
@@ -147,7 +150,7 @@ describe('global clock ticker', () => {
         ['white', 'Black wins', 'black', 'black-user'],
         ['black', 'White wins', 'white', 'white-user'],
     ])('%s abandoned (disconnectInfo ≥ 20 s old) → %s', async (side, text, outcome, winnerId) => {
-        const { game, white, black } = await ctx.seatedGame({ moveLog: MOVE_LOG, fen: AFTER_E4 });
+        const { game, white, black } = await ctx.seatedGame({ moveLog: TWO_PLIES, fen: AFTER_E5 });
         const before = await patchGame(game.id, {
             lastMoveAt: Date.now() - 1000,
             disconnectInfo: { userId: `${side}-user`, side, at: Date.now() - GRACE_EXPIRED_MS },
@@ -195,8 +198,11 @@ describe('global clock ticker', () => {
         await patchGame(game.id, { disconnectInfo: { userId: 'white-user', side: 'white', at: Date.now() - 60000 } });
         supabase.queue('games', { data: { id: game.id }, error: null });
         const ended = await once(black, 'game_end', TICK_TIMEOUT_MS);
-        expect(ended).toMatchObject({ game_id: game.id, white_id: 'white-user', black_id: 'black-user' });
-        expect((await getGame(game.id)).status).toBe('completed');
+        // No move was made, so no game was played: aborted, nobody wins, nothing is rated [G10].
+        expect(ended).toEqual({ game_id: game.id, result: 'Aborted', reason: 'Aborted', white_id: 'white-user', black_id: 'black-user' });
+        expect(await getGame(game.id)).toMatchObject({ status: 'completed', result: 'aborted' });
+        await sleep(50);
+        expect(rating.processGameEnd).not.toHaveBeenCalled();
     });
 
     test.each([

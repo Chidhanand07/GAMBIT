@@ -52,6 +52,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
 | [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
 | [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
+| [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
 
 ---
 
@@ -1254,3 +1255,26 @@ instead of one file per ADR under `docs/refactor/adr/`.
   win or a draw rendered as "You Lost". There is no on-board countdown for the 30 s; that is a
   UI addition for a later phase.
 - **Not verified.** No browser run of the modal.
+
+## F-032
+
+**A disconnect before both sides have moved is adjudicated when the grace period ends, as an abort (G10).**
+
+- **Context.** The ticker only looked at games whose clock had started (`lastMoveAt` set). A
+  player who disconnected before the first move was therefore never adjudicated: the opponent
+  saw "disconnected, 20 s" and then nothing, forever.
+- **What FIRST-MOVE already changed.** The ticker now walks every active game, so the
+  abandonment rule was reached for these games too, and it awarded the opponent a (possibly
+  rated) win for a game in which no move, or one move, had been played.
+- **Decision.** In `domain/clockVerdict`, when the 20 s grace period of a disconnected player
+  runs out: if each side has made at least one move, the opponent wins by Abandonment (as
+  before); otherwise the game is **aborted**: no winner, not rated, not reviewed. The
+  threshold ("one move each") is the same one that ends the first-move rule (F-031).
+- **Why not a win.** For the same reason as F-031: nothing was played, and a rated result for
+  an unplayed game is exploitable in both directions. It also makes the two rules agree: it
+  does not matter whether the absent player's tab was closed (disconnect, 20 s) or merely idle
+  (first-move timeout, 30 s); the game is aborted either way.
+- **Tests.** Pure cases in `domain/clockVerdict.test.js`; a ticker case; the characterization
+  case that pinned "never adjudicated (BUG pinned)" asserts the abort. The existing
+  abandonment tests now use a position with one move each, because that is when the rule
+  awards a win.

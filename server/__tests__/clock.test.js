@@ -147,6 +147,8 @@ describe('global ticker', () => {
     test('ends the game by abandonment after 20 s disconnected', async () => {
         await startWith(makeGame({
             lastMoveAt: NOW,
+            // A game that is underway (one move each); before that a disconnect aborts it [G10].
+            moveLog: [{ move: 'e2e4', fen: 'x', san: 'e4' }, { move: 'e7e5', fen: 'y', san: 'e5' }],
             disconnectInfo: { userId: 'white-user', side: 'white', at: NOW },
         }));
         supabase.queue('games', { data: { id: 'game-1' }, error: null });

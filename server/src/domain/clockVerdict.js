@@ -20,6 +20,17 @@ const FIRST_MOVE_TIMEOUT_MS = 30000;
 /** @type {Verdict} */
 const ABORTED = Object.freeze({ winner: null, reason: REASON.ABORTED, aborted: true });
 
+/** Each side has made at least one move, so a real game is in progress. */
+const PLIES_FOR_A_STARTED_GAME = 2;
+
+/**
+ * @param {GameState} game
+ * @returns {boolean}
+ */
+function bothSidesMoved(game) {
+    return (game.moveLog?.length ?? 0) >= PLIES_FOR_A_STARTED_GAME;
+}
+
 /**
  * When the side to move must have made its first move, or null when both
  * sides have moved (or the state carries no start time). White's window opens
@@ -29,7 +40,7 @@ const ABORTED = Object.freeze({ winner: null, reason: REASON.ABORTED, aborted: t
  */
 function firstMoveDeadline(game) {
     const plies = game.moveLog?.length ?? 0;
-    if (plies >= 2 || !game.startedAt) return null;
+    if (bothSidesMoved(game) || !game.startedAt) return null;
     const windowOpened = plies === 0 ? game.startedAt : game.lastMoveAt;
     return windowOpened ? windowOpened + FIRST_MOVE_TIMEOUT_MS : null;
 }
@@ -41,11 +52,14 @@ function firstMoveDeadline(game) {
  * @type {ReadonlyArray<(game: GameState, at: number) => Verdict | null | undefined>}
  */
 const RULES = [
-    // A player is away: the clocks are paused for the grace period, then the opponent wins.
+    // A player is away: the clocks are paused for the grace period. Then the
+    // opponent wins, unless the game never got going (fewer than one move each):
+    // that is an abort, like a first move that never came (G10).
     function abandonment(game, at) {
         const away = /** @type {{ side: string, at: number } | null} */ (game.disconnectInfo);
         if (!away) return undefined;
         if (!isGraceExpired(away, at)) return null;
+        if (!bothSidesMoved(game)) return ABORTED;
         return { winner: opponentColor(away.side), reason: REASON.ABANDONMENT };
     },
     // A side never made its first move: no game was played, so nobody wins or loses.
