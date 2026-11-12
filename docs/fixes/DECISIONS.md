@@ -61,6 +61,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
 | [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
 | [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
+| [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
 
 ---
 
@@ -1480,3 +1481,35 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Why keep the link across a disconnect of a live game.** It is what lets a player who
   reconnects on any page resume the game and cancel the countdown. It is removed when the
   game ends, which the countdown guarantees happens within 20 seconds.
+
+## F-041
+
+**A socket lives no longer than the token it was opened with; the client comes back with a fresh one (TOKEN-LIFETIME).**
+
+- **Context.** The handshake verified the access token once (F-004). A socket then stayed
+  authenticated for as long as the TCP connection lived: hours after the token had expired,
+  and after a sign-out elsewhere or a ban.
+- **Decision.**
+  - *Deadline.* `domain/accessToken.socketDeadline(token, now)`: the token's `exp` claim, but
+    never later than one default access-token lifetime (1 h) from now. The token has already
+    been verified by Supabase Auth at that point; reading `exp` from it decides only how long
+    the connection may live, never whether the token is genuine. A token whose `exp` cannot be
+    read gets the 1 h cap, not "forever".
+  - *Server.* The handshake stores the deadline in `socket.data.tokenExpiresAt`. The session
+    handler starts one timer per socket; at the deadline it emits
+    `token_expired { reason: 'token_expired' }` and calls `socket.disconnect(true)`.
+  - *Client.* `lib/socket/connection.ts`: on a disconnect with socket.io's reason
+    `io server disconnect` it calls `socket.connect()`. The handshake `auth` callback runs
+    again and asks Supabase for the session, which by then holds a refreshed token.
+  - *Not an abandonment.* A disconnect the server caused this way must not freeze the clocks
+    and show the opponent a countdown. The session handler therefore waits
+    `TOKEN_RECONNECT_GRACE_MS` (5 s) and starts the countdown only for games the player still
+    has no socket in. The game page re-joins on every connect, so normally nothing is seen
+    except a state re-sync.
+- **Why disconnect instead of re-verifying in place.** A long-lived socket that accepts new
+  tokens needs its own protocol (a refresh event, replay protection, a rule for late
+  refreshes). Closing and re-opening reuses the one verified path that already exists.
+- **Cost.** One reconnect per player per token lifetime (an hour by default).
+- **Not verified.** The server side is tested end to end against the real server with a
+  token that expires after 400 ms. The client half is tested against a fake socket; a real
+  browser session crossing a real token expiry mid-game has not been observed.

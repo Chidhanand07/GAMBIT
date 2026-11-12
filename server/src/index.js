@@ -114,6 +114,7 @@ registerSocketHandlers(io, {
     chatService,
     socialService,
     verifyToken: tokenVerifier.verify,
+    tokenDeadline: tokenVerifier.deadline,
 });
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */

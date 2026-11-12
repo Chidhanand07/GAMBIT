@@ -13,10 +13,11 @@ function connect(deps, userId = 'u1') {
     const socket = {
         id: 'sock-1',
         // What the handshake middleware stores after verifying the token.
-        data: { userId },
+        data: { userId, tokenExpiresAt: Date.now() + 3_600_000 },
         on: (event, cb) => (handlers[event] = cb),
         join: jest.fn(),
         emit: jest.fn(),
+        disconnect: jest.fn(),
     };
     onConnection(socket);
     return { socket, handlers, middlewares };
@@ -204,4 +205,49 @@ test('closing one of two tabs on the same game does not start the countdown [MUL
     d.sessions.linkSocket('other-tab', 'g');
     await handlers.disconnect();
     expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+});
+
+describe('a socket closed because its token expired [TOKEN-LIFETIME]', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    function expiredAtTheBoard() {
+        const d = deps();
+        const { socket, handlers } = connect(d, 'u1');
+        d.sessions.linkSocket('sock-1', 'g');
+        socket.data.tokenExpired = true; // set by watchTokenExpiry just before it disconnects
+        return { d, handlers };
+    }
+
+    test('the abandonment countdown does not start at once: the client is on its way back', async () => {
+        const { d, handlers } = expiredAtTheBoard();
+        await handlers.disconnect();
+        expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+    });
+
+    test('back within the grace period with a fresh token and re-joined: nothing happens', async () => {
+        const { d, handlers } = expiredAtTheBoard();
+        await handlers.disconnect();
+        d.sessions.register('u1', 'sock-2');
+        d.sessions.linkSocket('sock-2', 'g');
+        await jest.advanceTimersByTimeAsync(5000);
+        expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+    });
+
+    test('not back after the grace period: the player has left, the countdown starts', async () => {
+        const { d, handlers } = expiredAtTheBoard();
+        await handlers.disconnect();
+        await jest.advanceTimersByTimeAsync(4999);
+        expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+        await jest.advanceTimersByTimeAsync(1);
+        expect(d.gameService.handleDisconnect.mock.calls).toEqual([['u1', 'g']]);
+    });
+
+    test('the expiry timer of a socket is cancelled when it disconnects', async () => {
+        const d = deps();
+        const { socket, handlers } = connect(d, 'u1');
+        await handlers.disconnect();
+        await jest.advanceTimersByTimeAsync(4_000_000);
+        expect(socket.disconnect).not.toHaveBeenCalled();
+    });
 });

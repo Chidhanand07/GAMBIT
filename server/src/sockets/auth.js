@@ -23,10 +23,12 @@ function tokenFrom(auth) {
 /**
  * @param {object} deps
  * @param {(token: string) => Promise<string | null>} deps.verifyToken user id, or null when invalid
+ * @param {(token: string) => number} [deps.tokenDeadline] when a socket opened with this (verified)
+ *   token must be closed, in ms since the epoch
  * @returns {(socket: { handshake: { auth: unknown }, data: Record<string, unknown> },
  *   next: (err?: Error) => void) => Promise<void>}
  */
-function createHandshakeAuth({ verifyToken }) {
+function createHandshakeAuth({ verifyToken, tokenDeadline }) {
     return async function authenticateHandshake(socket, next) {
         const token = tokenFrom(socket.handshake.auth);
         if (!token) return next(new Error(UNAUTHORIZED));
@@ -34,6 +36,7 @@ function createHandshakeAuth({ verifyToken }) {
             const userId = await verifyToken(token);
             if (!userId) return next(new Error(UNAUTHORIZED));
             socket.data.userId = userId;
+            if (tokenDeadline) socket.data.tokenExpiresAt = tokenDeadline(token);
             next();
         } catch (error) {
             console.error('[socket] token verification failed:', /** @type {Error} */ (error).message);

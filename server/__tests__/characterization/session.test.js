@@ -171,3 +171,28 @@ describe('reconnect during an active game', () => {
         expect(reconnects).toEqual([]);
     });
 });
+
+describe('a socket does not outlive its token [TOKEN-LIFETIME]', () => {
+    const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    /** A JWT-shaped token that the (mocked) Supabase Auth resolves to `userId` and that expires soon. */
+    function shortLivedToken(userId, lifetimeMs) {
+        const token = `${b64url({ alg: 'ES256' })}.${b64url({ sub: userId, exp: (Date.now() + lifetimeMs) / 1000 })}.sig`;
+        supabase.setUsers({ [token]: userId });
+        return token;
+    }
+
+    test('at the expiry the server says why and closes the connection; a fresh token connects again', async () => {
+        const socket = ctx.open({ token: shortLivedToken('alice', 400) });
+        await once(socket, 'connect');
+        const told = once(socket, 'token_expired', 2000);
+        const closed = once(socket, 'disconnect', 2000);
+
+        expect(await told).toEqual({ reason: 'token_expired' });
+        // 'io server disconnect': the server ended it, so the client must reconnect itself.
+        expect([await closed].flat()[0]).toBe('io server disconnect');
+
+        const again = ctx.open({ token: shortLivedToken('alice', 60_000) });
+        await once(again, 'connect');
+        expect(again.connected).toBe(true);
+    });
+});
