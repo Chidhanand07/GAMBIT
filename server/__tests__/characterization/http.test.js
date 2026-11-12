@@ -229,7 +229,6 @@ describe('GET /api/games/join/:token', () => {
     test.each([
         ['not found', () => ({ data: null, error: null })],
         ['expired > 5 min', () => ({ data: { game_id: 'pg-1', expires_at: inMinutes(-6) }, error: null })],
-        ['null expiry (epoch)', () => ({ data: { game_id: 'pg-1', expires_at: null }, error: null })],
         ['DB error', () => ({ data: null, error: { message: 'boom' } })],
     ])('%s → 404 { error: "Not found or expired" }, and the game is never read', async (_label, invite) => {
         supabase.queue('game_invites', invite());
@@ -238,6 +237,21 @@ describe('GET /api/games/join/:token', () => {
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'Not found or expired' });
         expect(opsFor('games')).toEqual([]);
+    });
+
+    test('an invite without an expiry is served: null means "does not expire" [G15]', async () => {
+        // Was listed above as "null expiry (epoch)" → 404.
+        supabase.queue('game_invites', { data: { game_id: 'pg-1', expires_at: null }, error: null });
+        supabase.queue('games', { data: waitingGame(), error: null });
+        expect((await request(ctx.app).get('/api/games/join/t')).status).toBe(200);
+    });
+
+    test.each(['active', 'completed', 'aborted'])('the invite page of a game that is %s → 404: only waiting games are invites [G15]', async (status) => {
+        queueInvite();
+        supabase.queue('games', { data: waitingGame({ status, black_id: 'bob' }), error: null });
+        const res = await request(ctx.app).get('/api/games/join/t');
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: 'Not found or expired' });
     });
 
     test('the invite exists but its game does not (or cannot be read) → 404', async () => {
@@ -256,12 +270,6 @@ describe('GET /api/games/join/:token', () => {
         const res = await request(ctx.app).get('/api/games/join/t');
         expect(res.status).toBe(400);
         expect(res.body).toEqual({ error: 'kaput' });
-    });
-
-    test('a non-waiting game is still returned (status not checked on GET)', async () => {
-        queueInvite();
-        supabase.queue('games', { data: waitingGame({ status: 'completed' }), error: null });
-        expect((await request(ctx.app).get('/api/games/join/t')).body).toMatchObject({ status: 'completed' });
     });
 });
 
@@ -340,17 +348,19 @@ describe('POST /api/games/join/:token', () => {
         expect(supabase.op(supabase.callsFor('games')[1], 'update')[0]).toMatchObject({ white_id: 'bob', black_id: 'alice' });
     });
 
-    test('the creator re-joining gets the waiting row back, with NO update — game_start still emitted (pinned)', async () => {
+    test('the creator re-joining gets the waiting row back, with NO update and NO game_start [G15]', async () => {
+        // Was: "game_start still emitted (pinned)" — the creator was sent into a game with no opponent.
         const host = await roomListener('pg-1');
         supabase.setUsers({ 'fake-test-token': 'alice' });
         const row = waitingGame();
         queueInvite();
         supabase.queue('games', { data: row, error: null });
-        const started = once(host, 'game_start');
+        const starts = record(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(publicView(row));
-        expect(await started).toEqual(publicView(row));
+        await sleep(60);
+        expect(starts).toEqual([]);
         expect(opsFor('games')).toHaveLength(1);
     });
 

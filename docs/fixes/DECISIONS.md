@@ -58,6 +58,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
 | [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
 | [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
+| [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
 
 ---
 
@@ -1408,3 +1409,26 @@ instead of one file per ADR under `docs/refactor/adr/`.
   and the web client always sends 18.
 - **Not done here.** Routes still catch and call `sendError` themselves; a single Express
   error middleware replaces that with the Express 5 upgrade (M4, EXPRESS-5).
+
+## F-038
+
+**Private games: status checks around the invite link (G15).**
+
+- **Three defects.**
+  1. The creator opening their own invite link and pressing "join" got the waiting row back
+     (correct) and the route then announced `game_start` to the game room (wrong): the
+     creator's browser navigated into a game with no opponent.
+  2. `GET /api/games/join/:token` served the invite page for a game in any status, including
+     finished ones.
+  3. An invite with `expires_at = null` was read as `new Date(null)`, i.e. 1970: "expired".
+- **Decision.**
+  1. `socialService.announceGameStart` announces only a game whose status is `active`. The
+     check is in the one function that emits `game_start`, so every caller gets it.
+  2. `getGameByToken` (what the GET route uses) returns the game only while it is `waiting`.
+     Joining uses `findInvitedGame`, the lookup in any status, so a second player who is too
+     late still gets the specific "Game already started" answer instead of "invalid token".
+  3. `isExpired(null)` is false: an invite without an expiry does not expire. Every invite
+     the code creates has one (48 h); null can only come from a row written by hand or by an
+     older version, and "valid" is the reading that does not break a link someone was given.
+- **Behaviour change.** An old invite link to a game that has started or ended now shows the
+  "invite not found or expired" screen instead of an invite card whose button fails.

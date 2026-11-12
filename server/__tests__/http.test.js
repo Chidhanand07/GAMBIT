@@ -79,7 +79,7 @@ describe('public endpoints', () => {
     });
 
     test('GET /api/games/join/:token returns the game or 404', async () => {
-        const game = { id: 'g' };
+        const game = { id: 'g', status: 'waiting' }; // only a waiting game is an open invite [G15]
         // INV-TOKEN: the token resolves through game_invites; an unknown token finds no invite.
         supabase.queue('game_invites', { data: { game_id: 'g', expires_at: new Date(Date.now() + 1e6).toISOString() }, error: null });
         supabase.queue('games', { data: game, error: null });

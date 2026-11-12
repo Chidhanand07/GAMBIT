@@ -100,12 +100,23 @@ describe('getGameByToken', () => {
         ['an unknown token', result(null)],
         ['a database error', result(null, { message: 'db' })],
         ['an invite that expired long ago', result({ game_id: 'g1', expires_at: '2000-01-01T00:00:00Z' })],
-        ['an invite with no expiry (treated as expired, as before)', result({ game_id: 'g1', expires_at: null })],
     ])('%s → null, and the game is never read', async (_label, inviteResult) => {
         const { svc, gamesRepo, invitesRepo } = setup({ row });
         invitesRepo.findByToken.mockReturnValue(inviteResult);
         expect(await svc.getGameByToken('t')).toBeNull();
         expect(gamesRepo.findByIdWithPlayers).not.toHaveBeenCalled();
+    });
+
+    test('an invite with no expiry does not expire [G15]', async () => {
+        // Was: null was read as the epoch, so the invite was "expired in 1970" → not found.
+        const { svc } = setup({ row, invite: { game_id: 'g1', expires_at: null } });
+        expect(await svc.getGameByToken('tok')).toMatchObject({ id: 'g1', invite_expires_at: null });
+    });
+
+    test.each(['active', 'completed', 'aborted'])('a game that is %s is no longer an open invite → null [G15]', async (status) => {
+        // Was: the invite page was served for a game in any status.
+        const { svc } = setup({ row: { ...row, status, black_id: 'guest' } });
+        expect(await svc.getGameByToken('tok')).toBeNull();
     });
 
     test('an invite that expired less than 5 minutes ago is still honoured (clock skew)', async () => {
@@ -143,11 +154,14 @@ describe('join', () => {
         });
     });
 
-    test('creator re-join returns the row untouched; errors are thrown', async () => {
+    test('creator re-join returns the row untouched (still waiting: nothing started); errors are thrown', async () => {
         const row = { id: 'g1', white_id: 'host', black_id: null, status: 'waiting' };
-        const { svc, gamesRepo, invitesRepo } = setup({ row });
-        expect(await svc.joinPrivateGame('tok', 'host')).toMatchObject(row);
+        const { svc, gamesRepo, invitesRepo, gameStore } = setup({ row });
+        const rejoined = await svc.joinPrivateGame('tok', 'host');
+        expect(rejoined).toMatchObject(row);
+        expect(rejoined.status).toBe('waiting');
         expect(gamesRepo.startIfWaiting).not.toHaveBeenCalled();
+        expect(gameStore.state.size).toBe(0);
 
         gamesRepo.findByIdWithPlayers.mockReturnValue(result({ ...row, status: 'active' }));
         await expect(svc.joinPrivateGame('tok', 'x')).rejects.toThrow('Game already started');
