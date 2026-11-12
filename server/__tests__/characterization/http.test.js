@@ -24,6 +24,11 @@ const MINUTE_MS = 60 * 1000;
 
 const inMinutes = (m) => new Date(Date.now() + m * MINUTE_MS).toISOString();
 
+/** What a browser may see of a games row: no invite token, no expiry [S8]. */
+function publicView({ invite_token: _token, invite_expires_at: _expires, ...rest }) {
+    return rest;
+}
+
 function waitingGame(overrides = {}) {
     return {
         id: 'pg-1',
@@ -165,12 +170,15 @@ describe('POST /api/analysis/engine', () => {
 });
 
 describe('GET /api/games/join/:token', () => {
-    test('returns the joined row verbatim; looks it up by invite_token', async () => {
+    test('returns the public view of the game (no invite_token / invite_expires_at); looks it up by invite_token [S8]', async () => {
         const row = waitingGame();
         supabase.queue('games', { data: row, error: null });
         const res = await request(ctx.app).get('/api/games/join/tok1234567');
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(row);
+        // Was: the whole row, token and expiry included.
+        expect(res.body).toEqual(publicView(row));
+        expect(res.text).not.toContain('invite_token');
+        expect(res.text).not.toContain('invite_expires_at');
         expect(opsFor('games').map(normalisedOps)).toEqual([
             [['select', BY_TOKEN_SELECT], ['eq', 'invite_token', 'tok1234567'], ['maybeSingle']],
         ]);
@@ -231,8 +239,10 @@ describe('POST /api/games/join/:token', () => {
         const started = once(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/tok1234567').set(AUTH);
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(joined);
-        expect(await started).toEqual(joined);
+        // Response and game_start broadcast both carry the public view only [S8].
+        expect(res.body).toEqual(publicView(joined));
+        expect(res.text).not.toContain('tok1234567');
+        expect(await started).toEqual(publicView(joined));
         await sleep(30);
         expect(outsiderGot).toEqual([]);
 
@@ -285,8 +295,8 @@ describe('POST /api/games/join/:token', () => {
         const started = once(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(row);
-        expect(await started).toEqual(row);
+        expect(res.body).toEqual(publicView(row));
+        expect(await started).toEqual(publicView(row));
         expect(opsFor('games')).toHaveLength(1);
     });
 

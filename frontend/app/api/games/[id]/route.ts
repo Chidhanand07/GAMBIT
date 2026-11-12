@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { toGameDto } from '@/lib/server/dto';
 import { getGameParticipants, getGameWithPlayers, pickClientWritableFields, updateGame } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
 import { createAdminClient } from '@/lib/server/supabase';
@@ -28,7 +29,8 @@ export async function GET(_req: Request, { params }: Params) {
     if (game.white_id === auth.userId) myColor = 'white';
     else if (game.black_id === auth.userId) myColor = 'black';
 
-    return NextResponse.json({ ...game, myColor });
+    // Minimal DTO: never the invite token or other internal columns (S8).
+    return NextResponse.json({ ...toGameDto(game), myColor });
 }
 
 // PATCH /api/games/[id] — participants may set draw_offer / rematch_requested only
@@ -59,5 +61,5 @@ export async function PATCH(req: Request, { params }: Params) {
     const { data, error } = await updateGame(admin, id.data, filtered);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json(data);
+    return NextResponse.json(data ? toGameDto(data) : data);
 }

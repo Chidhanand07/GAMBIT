@@ -4,6 +4,7 @@
  * `server/services/friends.js`, which is now the singleton facade.
  */
 const { nanoid } = require('nanoid');
+const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
 
 const INVITE_TOKEN_LENGTH = 10;
@@ -182,6 +183,12 @@ function createPrivateGameService({
          * @param {string} userId
          */
         joinPrivateGame: (token, userId) => joinPrivateGame(deps, (t) => service.getGameByToken(t), { token, userId }),
+        /**
+         * The view of a game row that may be sent to a browser: no invite token,
+         * no expiry, no internal columns (NX-04). The other methods return the
+         * full row for server-side use only.
+         */
+        toPublicGame,
     };
     return service;
 }

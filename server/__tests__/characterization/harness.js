@@ -167,7 +167,8 @@ function useServer() {
     ctx.connect = async (userId = uniqueId('stranger'), prepare = () => {}) => {
         const socket = ctx.open({ token: tokenFor(userId) });
         prepare(socket);
-        await once(socket, 'connect');
+        // Generous: the handshake now includes an (async) token check, and suites run in parallel.
+        await once(socket, 'connect', TICK_TIMEOUT_MS);
         return socket;
     };
 

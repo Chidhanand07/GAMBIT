@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toPublicProfileDto } from '@/lib/server/dto';
 import { requireUser } from '@/lib/server/identity';
 import { getProfileByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
@@ -29,5 +30,5 @@ export async function GET(_request: NextRequest, { params }: { params: { usernam
         return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(toPublicProfileDto(data));
 }

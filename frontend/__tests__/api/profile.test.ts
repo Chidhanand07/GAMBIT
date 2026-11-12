@@ -82,6 +82,15 @@ describe('GET /api/profile/[username]', () => {
         expect((await json(await getProfile(req('/x'), { params: { username: 'bob' } }))).body).toEqual({ username: 'bob' })
     })
 
+    test('returns only public columns of another user (no sex, is_public, Glicko internals) [S8]', async () => {
+        db.queue('profiles', {
+            data: { username: 'bob', rating_rapid: 1500, wins: 3, sex: 'm', is_public: true, rating_rd: 80, rating_vol: 0.06 },
+            error: null,
+        })
+        const { body } = await json(await getProfile(req('/x'), { params: { username: 'bob' } }))
+        expect(body).toEqual({ username: 'bob', rating_rapid: 1500, wins: 3 })
+    })
+
     test('404 when unknown, 500 on database error, 400 without a username', async () => {
         expect((await getProfile(req('/x'), { params: { username: 'ghost' } })).status).toBe(404)
         db.queue('profiles', { data: null, error: { message: 'x' } })

@@ -49,6 +49,46 @@ describe('GET /api/games/[id]', () => {
     })
 })
 
+describe('game responses never carry the invite token [S8]', () => {
+    const row = {
+        id: uid('g1'),
+        white_id: uid('w'),
+        black_id: uid('b'),
+        status: 'active',
+        fen: 'fen',
+        invite_token: 'SECRETTOKN',
+        invite_expires_at: '2026-01-01T00:00:00Z',
+        white: { id: uid('w'), username: 'alice', sex: 'f' },
+        black: null,
+    }
+
+    test.each([
+        ['a player', 'w'],
+        ['a spectator', 'someone-else'],
+    ])('GET as %s: minimal DTO, no invite_token / invite_expires_at', async (_label, who) => {
+        db.signIn(uid(who))
+        db.queue('games', { data: row, error: null })
+        const res = await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } })
+        const text = await res.text()
+        expect(text).not.toContain('SECRETTOKN')
+        const body = JSON.parse(text)
+        expect(body).not.toHaveProperty('invite_token')
+        expect(body).not.toHaveProperty('invite_expires_at')
+        expect(body).toMatchObject({ id: uid('g1'), fen: 'fen', white: { id: uid('w'), username: 'alice' }, black: null })
+        expect(body.white).not.toHaveProperty('sex')
+    })
+
+    test('PATCH: the updated row is returned as the same DTO', async () => {
+        db.signIn(uid('w'))
+        db.queue('games', { data: { white_id: uid('w'), black_id: uid('b') }, error: null }, { data: { ...row, draw_offer: true }, error: null })
+        const res = await patchGame(req(`/api/games/${uid('g1')}`, { method: 'PATCH', body: { draw_offer: true } }), {
+            params: { id: uid('g1') },
+        })
+        expect(res.status).toBe(200)
+        expect(await res.text()).not.toContain('SECRETTOKN')
+    })
+})
+
 describe('PATCH /api/games/[id]', () => {
     const patch = (body: unknown, id = uid('g1')) => patchGame(req(`/api/games/${id}`, { method: 'PATCH', body }), { params: { id } })
 

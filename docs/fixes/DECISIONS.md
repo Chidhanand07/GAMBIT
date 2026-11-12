@@ -28,6 +28,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-011](#f-011) | Next.js pinned to 14.2.35; `/login` gets the Suspense boundary the patch line requires | 2 | NEXT-CVE |
 | [F-012](#f-012) | Route-handler identity: `requireUser()` on `auth.getUser()`; which routes stay public | 2 | S5 |
 | [F-013](#f-013) | Route input validation with zod; `.or()` filters only from UUIDs; two username rules | 2 | S7 |
+| [F-014](#f-014) | Response DTOs are allow-lists; invite token never leaves the server in a game response | 2 | S8 |
 
 ---
 
@@ -498,3 +499,39 @@ instead of one file per ADR under `docs/refactor/adr/`.
   the form `10`, `5+3` or a preset id) is refused with 400. Signup with a username outside the
   form's rule is refused by the server too. `?limit=abc` is a 400 instead of an empty page.
 - **Not changed.** `PATCH /api/profile/me` still nulls fields that are omitted (F18).
+
+## F-014
+
+**Game and profile responses are allow-listed DTOs (S8).**
+
+- **Context.** `GET /api/games/[id]` returned the whole `games` row (`select *`) to anyone,
+  signed in or not, including `invite_token` and `invite_expires_at`. The Express
+  `GET /api/games/join/:token`, `POST /api/games/join/:token` and the `game_start` socket
+  broadcast also sent the whole row. `GET /api/profile/[username]` returned every profile
+  column of another user (`sex`, `is_public`, Glicko deviation/volatility).
+- **Options.** (a) delete the secret keys from the row before responding (deny-list);
+  (b) select only the needed columns; (c) build the response from an allow-list of keys.
+- **Decision.** (c).
+  - Frontend `lib/server/dto.ts`: `toGameDto` (game columns + a public summary of the embedded
+    players) and `toPublicProfileDto`. Used by `GET` and `PATCH /api/games/[id]` and
+    `GET /api/profile/[username]`. `GET /api/games/[id]` requires a signed-in caller (S5).
+  - Server `src/domain/gameDto.js`: `toPublicGame`, exposed through the private-game service
+    and used by both invite endpoints and by `socialService.announceGameStart`.
+- **Why.**
+  - *Allow-list over deny-list*: a deny-list protects only against the columns someone
+    remembered. PR 3 moves the token to its own table; until then, and for any column added
+    later, an allow-list fails safe.
+  - *Not "select fewer columns"*: the live database has drifted from the migrations before
+    (`clock_deadline`, `peak_*` are read by the code but created by no migration here).
+    Selecting a column that does not exist is a 400 from PostgREST for every request, whereas
+    picking keys from whatever `*` returns cannot break a page.
+- **Audit of the other routes** (what each returns):
+  - `games/active`: a fixed column list, no token. `games/private/create`: `{ token, game_id }`
+    to the creator, which is the point of the route.
+  - `profile/me`, `notifications`: the caller's own rows. `profile/[username]/games`, `/stats`,
+    `leaderboard`, `friends*`: fixed column lists or computed values, no secret columns.
+  - Socket `match_found` still spreads the inserted `games` row (its invite columns are null
+    for matchmaking games) and the opponent's queue entry including `socketId` (G12, not a
+    listed item; logged for the next phase).
+- **Behaviour change.** None for the UI: the keys kept are the ones the game, result, review,
+  join and profile pages read (checked with `grep` over `features/` and `app/`).
