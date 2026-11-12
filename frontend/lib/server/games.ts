@@ -3,8 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Game } from '@/types/game';
 import { participantFilter } from './filters';
 
-const ACTIVE_GAME_COLUMNS =
-    'id, white_id, black_id, time_control, status, started_at, clock_deadline, white_time_ms, black_time_ms';
+const ACTIVE_GAME_COLUMNS = 'id, white_id, black_id, time_control, status, started_at, clock_deadline';
 // Whitespace kept byte-for-byte from the original handlers' select strings.
 const GAME_WITH_PLAYERS_COLUMNS = `
             *,
@@ -22,13 +21,13 @@ const FINISHED_STATUSES = ['completed', 'finished', 'ended'];
 
 /** A deadline that passed more than this long ago means the game timed out while the server was down. */
 const DEADLINE_GRACE_MS = 10_000;
-/** Active games this old with no recorded clock times are treated as stale. */
+/** An active game with no activity (a move, or its start when it has no moves) for this long is stale. */
 const STALE_NO_MOVES_MS = 2 * 60 * 60 * 1000;
 
 /** Fields a player may PATCH on a game (prevents status/winner tampering). */
 const CLIENT_WRITABLE_FIELDS = ['draw_offer', 'rematch_requested'];
 
-type ActiveGameRow = Pick<Game, 'id' | 'started_at' | 'white_time_ms' | 'black_time_ms'> & {
+type ActiveGameRow = Pick<Game, 'id' | 'started_at'> & {
     clock_deadline?: string | null;
 };
 
@@ -44,18 +43,46 @@ export function findActiveGame(admin: SupabaseClient, userId: string) {
         .maybeSingle();
 }
 
+/** `created_at` of a game's newest move (the server inserts one `moves` row per move); null data when it has none. */
+export function findLastMove(admin: SupabaseClient, gameId: string) {
+    return admin
+        .from('moves')
+        .select('created_at')
+        .eq('game_id', gameId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+}
+
+/** True when the clock deadline passed more than the grace period ago (the game timed out while the server was down). */
+function isPastClockDeadline(game: ActiveGameRow, now: number): boolean {
+    if (!game.clock_deadline) return false;
+    return now > new Date(game.clock_deadline).getTime() + DEADLINE_GRACE_MS;
+}
+
+/** Milliseconds since `iso`; null when there is no timestamp to measure from. */
+function idleMs(iso: string | null | undefined, now: number): number | null {
+    return iso ? now - new Date(iso).getTime() : null;
+}
+
 /**
  * True when an active game survived a server restart: its clock deadline passed more than 10 s
- * ago, or it started over two hours ago with no clock times recorded.
+ * ago, or its last activity is more than two hours old. Last activity is the newest move, or the
+ * start of a game that has no moves. The moves are read (one query) only for a game that started
+ * more than two hours ago; if that read fails the game is kept, because abandoning it cannot be undone.
  */
-export function isStaleActiveGame(game: ActiveGameRow): boolean {
-    if (game.clock_deadline) {
-        const deadlineMs = new Date(game.clock_deadline).getTime();
-        if (Date.now() > deadlineMs + DEADLINE_GRACE_MS) return true;
-    }
-    const startedAt = new Date(game.started_at!).getTime();
-    const hasMoves = game.white_time_ms !== null || game.black_time_ms !== null;
-    return !hasMoves && Date.now() - startedAt > STALE_NO_MOVES_MS;
+export async function isStaleActiveGame(admin: SupabaseClient, game: ActiveGameRow): Promise<boolean> {
+    const now = Date.now();
+    if (isPastClockDeadline(game, now)) return true;
+
+    const sinceStart = idleMs(game.started_at, now);
+    if (sinceStart !== null && sinceStart <= STALE_NO_MOVES_MS) return false;
+
+    const { data: lastMove, error } = await findLastMove(admin, game.id);
+    if (error) return false;
+
+    const sinceActivity = idleMs(lastMove?.created_at, now) ?? sinceStart;
+    return sinceActivity !== null && sinceActivity > STALE_NO_MOVES_MS;
 }
 
 /** Marks a still-active game as completed/abandoned (no winner). */

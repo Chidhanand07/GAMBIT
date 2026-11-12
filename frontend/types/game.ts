@@ -37,9 +37,6 @@ export interface Game {
     final_fen?: string | null;
     white_clock_ms?: number | null;
     black_clock_ms?: number | null;
-    /** Written on disconnect only (known column mismatch with *_clock_ms). */
-    white_time_ms?: number | null;
-    black_time_ms?: number | null;
     white_accuracy?: number | null;
     black_accuracy?: number | null;
     white_move_classifications?: MoveClassification[] | null;

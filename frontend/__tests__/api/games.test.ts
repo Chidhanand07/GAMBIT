@@ -125,14 +125,25 @@ describe('PATCH /api/games/[id]', () => {
 })
 
 describe('GET /api/games/active', () => {
+    const HOUR_MS = 3600_000
+    const ago = (ms: number) => new Date(NOW - ms).toISOString()
+    const lastMove = (ms: number) => ({ data: { created_at: ago(ms) }, error: null })
+
     test('returns my most recent active game', async () => {
         signInWithCookie(uid('me'))
-        const row = { id: uid('g1'), started_at: new Date(NOW - 60000).toISOString(), clock_deadline: null, white_time_ms: null, black_time_ms: null }
+        const row = { id: uid('g1'), started_at: ago(60000), clock_deadline: null }
         db.queue('games', { data: row, error: null })
         expect((await json(await activeGame())).body).toEqual(row)
         expect(db.callsFor('games')[0].ops).toEqual(expect.arrayContaining([
             ['or', `white_id.eq.${uid('me')},black_id.eq.${uid('me')}`], ['eq', 'status', 'active'], ['limit', 1],
         ]))
+    })
+
+    test('the legacy *_time_ms columns are not selected [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(60000), clock_deadline: null }, error: null })
+        await activeGame()
+        expect(db.op(db.callsFor('games')[0], 'select')![0]).not.toMatch(/_time_ms/)
     })
 
     test('no active game → null', async () => {
@@ -157,15 +168,81 @@ describe('GET /api/games/active', () => {
 
     test('a game started >2 h ago with no moves is closed as abandoned', async () => {
         signInWithCookie(uid('me'))
-        db.queue('games', { data: { id: uid('g1'), started_at: new Date(NOW - 3 * 3600_000).toISOString(), white_time_ms: null, black_time_ms: null }, error: null })
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', { data: null, error: null })
         expect((await json(await activeGame())).body).toBeNull()
         expect(db.op(db.callsFor('games')[1], 'update')![0]).toMatchObject({ result: 'abandoned' })
     })
 
     test('an old game that has moves is kept', async () => {
         signInWithCookie(uid('me'))
-        db.queue('games', { data: { id: uid('g1'), started_at: new Date(NOW - 3 * 3600_000).toISOString(), white_time_ms: 1000, black_time_ms: null }, error: null })
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(60_000))
         expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games')).toHaveLength(1)
+    })
+
+    // G22: "has moves" used to be read from white_time_ms / black_time_ms, which nothing writes
+    // any more (F-028), so every game older than two hours was abandoned, moves or not.
+    test('a >2 h game whose last move was a minute ago is kept although *_time_ms are null [G22]', async () => {
+        signInWithCookie(uid('me'))
+        const row = { id: uid('g1'), started_at: ago(3 * HOUR_MS), clock_deadline: null, white_time_ms: null, black_time_ms: null }
+        db.queue('games', { data: row, error: null })
+        db.queue('moves', lastMove(60_000))
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games').some((call) => db.op(call, 'update'))).toBe(false)
+    })
+
+    test('the last move is the newest moves.created_at of that game, read in one query [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(60_000))
+        await activeGame()
+        expect(db.callsFor('moves')).toHaveLength(1)
+        expect(db.callsFor('moves')[0].ops).toEqual([
+            ['select', 'created_at'],
+            ['eq', 'game_id', uid('g1')],
+            ['order', 'created_at', { ascending: false }],
+            ['limit', 1],
+            ['maybeSingle'],
+        ])
+    })
+
+    test('a game whose last move is itself >2 h old is closed as abandoned [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(5 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(2 * HOUR_MS + 1000))
+        expect((await json(await activeGame())).body).toBeNull()
+        expect(db.op(db.callsFor('games')[1], 'update')![0]).toMatchObject({ status: 'completed', result: 'abandoned' })
+    })
+
+    test('a last move exactly 2 h old is not yet stale [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(5 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(2 * HOUR_MS))
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+    })
+
+    test('a game younger than 2 h is kept without reading its moves [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(HOUR_MS) }, error: null })
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('moves')).toEqual([])
+    })
+
+    test('when the moves cannot be read the game is kept, never abandoned on a guess [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', { data: null, error: { message: 'db down' } })
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games')).toHaveLength(1)
+    })
+
+    test('an expired clock deadline closes the game without reading its moves', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS), clock_deadline: ago(11_000) }, error: null })
+        expect((await json(await activeGame())).body).toBeNull()
+        expect(db.callsFor('moves')).toEqual([])
     })
 })
 
