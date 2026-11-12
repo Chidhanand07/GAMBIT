@@ -8,6 +8,10 @@
  * board" of, so a disconnect can tell whether the player has really left a
  * game or has only closed one of several tabs (MULTI-SOCKET).
  *
+ * Nothing here outlives its reason (G17): socket entries go when the socket
+ * disconnects, game links when the game ends (`clearGame`, called by the
+ * finalizer for every kind of ending) or turns out to be gone (`forgetGame`).
+ *
  * Per process: with more than one server instance each instance only knows
  * its own sockets (addressed in the scaling phase).
  */
@@ -26,6 +30,7 @@
  * @property {(userId: string) => boolean} hasActiveGame
  * @property {(userId: string, gameId: string) => void} setActiveGame
  * @property {(gameId: string) => void} clearGame forget every link to `gameId` (the game is over)
+ * @property {(userId: string, gameId: string) => void} forgetGame forget one user's resume link to `gameId`
  * @property {() => { sockets: number, users: number, gameLinks: number, activeGames: number }} stats sizes, for tests and monitoring
  */
 
@@ -116,6 +121,9 @@ function createSessionRegistry() {
                 if (gid === gameId) userActiveGame.delete(uid);
             }
             for (const socketId of [...socketGames.keys()]) removeFrom(socketGames, socketId, gameId);
+        },
+        forgetGame(userId, gameId) {
+            if (userActiveGame.get(userId) === gameId) userActiveGame.delete(userId);
         },
         stats: () => ({
             sockets: socketUsers.size,

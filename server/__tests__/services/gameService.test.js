@@ -624,3 +624,54 @@ describe('disconnect with more than one socket [MULTI-SOCKET]', () => {
         expect(ctx.sessions.unregister('new').orphanedGames).toEqual(['g']);
     });
 });
+
+describe('session links do not outlive the game [G17]', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const EMPTY = { sockets: 0, users: 0, gameLinks: 0, activeGames: 0 };
+
+    test('joining a game that is already over links nothing', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', status: 'completed', result: 'white' }) });
+        ctx.sessions.register('white-user', 's1');
+        await ctx.svc.joinGame('g', fakeClient('s1'), 'white-user');
+        expect(ctx.sessions.hasActiveGame('white-user')).toBe(false);
+        expect(ctx.sessions.stats()).toMatchObject({ gameLinks: 0, activeGames: 0 });
+    });
+
+    test('a disconnect from a game that no longer exists (or is over) drops the link instead of keeping it forever', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START }) });
+        ctx.sessions.register('white-user', 's1');
+        await ctx.svc.joinGame('g', fakeClient('s1'), 'white-user');
+        // The game ended somewhere this process did not see (Redis TTL, another writer).
+        ctx.gameStore.state.delete('g');
+        const { orphanedGames } = ctx.sessions.unregister('s1');
+        await ctx.svc.handleDisconnect('white-user', orphanedGames[0]);
+        expect(ctx.sessions.stats()).toEqual(EMPTY);
+    });
+
+    test('a full game leaves nothing behind once both players are gone', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START }) });
+        for (const [user, socket] of [['white-user', 'sw'], ['black-user', 'sb']]) {
+            ctx.sessions.register(user, socket);
+            await ctx.svc.joinGame('g', fakeClient(socket), user);
+        }
+        expect(await ctx.svc.resign({ game_id: 'g' }, 'white-user')).toEqual({ ok: true });
+        expect(ctx.sessions.stats()).toMatchObject({ gameLinks: 0, activeGames: 0 });
+        ctx.sessions.unregister('sw');
+        ctx.sessions.unregister('sb');
+        expect(ctx.sessions.stats()).toEqual(EMPTY);
+    });
+
+    test('1000 abandoned games do not grow the registry', async () => {
+        const ctx = setup({});
+        for (let i = 0; i < 1000; i++) {
+            const id = `g${i}`;
+            ctx.gameStore.state.set(id, makeGame({ id, fen: START }));
+            ctx.sessions.register('white-user', `s${i}`);
+            await ctx.svc.joinGame(id, fakeClient(`s${i}`), 'white-user');
+            ctx.gameStore.state.delete(id);
+            const { orphanedGames } = ctx.sessions.unregister(`s${i}`);
+            for (const gameId of orphanedGames) await ctx.svc.handleDisconnect('white-user', gameId);
+        }
+        expect(ctx.sessions.stats()).toEqual(EMPTY);
+    });
+});

@@ -37,7 +37,7 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  * @property {{ insert: Function }} movesRepo
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
- * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame'>} sessions
+ * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame' | 'forgetGame'>} sessions
  * @property {Emitter} emitter
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {() => number} [now]
@@ -95,7 +95,8 @@ async function joinGame(ctx, gameId, client, userId) {
 
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
-    if (isParticipant(game, userId)) ctx.sessions.linkSocket(client.id, gameId);
+    // Only a live game is linked: a link to a finished game would never be cleaned up (G17).
+    if (game.status === 'active' && isParticipant(game, userId)) ctx.sessions.linkSocket(client.id, gameId);
     sendState(ctx, game, client);
 }
 
@@ -225,7 +226,7 @@ async function resign(ctx, { game_id: gameId }, userId) {
  * @param {string | undefined} userId
  * @param {string | undefined} gameId
  */
-async function handleDisconnect({ gameStore, gamesRepo, emitter, now }, userId, gameId) {
+async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }, userId, gameId) {
     if (!userId || !gameId) return;
     const at = now();
 
@@ -236,7 +237,12 @@ async function handleDisconnect({ gameStore, gamesRepo, emitter, now }, userId, 
         const side = colorOfPlayer(userId, game.whiteId);
         return { ...game, ...freezeClocks(game, at), disconnectInfo: { userId, side, at } };
     });
-    if (!frozen) return;
+    if (!frozen) {
+        // Nothing to pause: the game is gone or over. Drop the user's link to it so
+        // links to games that ended elsewhere do not pile up (G17).
+        sessions.forgetGame(userId, gameId);
+        return;
+    }
 
     // Persist clock snapshot to Supabase (fire-and-forget)
     gamesRepo

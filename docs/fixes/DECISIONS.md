@@ -60,6 +60,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
 | [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
 | [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
+| [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
 
 ---
 
@@ -1458,3 +1459,24 @@ instead of one file per ADR under `docs/refactor/adr/`.
   (F-031) aborts that game after 30 s.
 - **Per process.** The registry is in memory; with two server instances a player's tabs can
   be on different instances. That is addressed in the scaling phase (M4, MULTI-INSTANCE).
+
+## F-040
+
+**Nothing in the session registry outlives its reason (G17).**
+
+- **Context.** `userActiveGame` (user → game) was only cleared by the move/resign finalizer.
+  Games that ended on time or by abandonment, and games joined after they were over, left an
+  entry per player for the life of the process.
+- **What earlier items already fixed.** G3 routes every ending through the finalizer, which
+  calls `sessions.clearGame`. MULTI-SOCKET removes a socket's entries when it disconnects.
+- **What this commit adds.**
+  - `join_game` links a socket only to a game that is `active`; joining a finished game
+    (to see its result) creates no link.
+  - When a player's last socket leaves a game and the game is not there or not active any
+    more (it expired from Redis, or was closed by another writer such as the web app's
+    stale-game cleanup), `handleDisconnect` calls `sessions.forgetGame(userId, gameId)`.
+  - `sessions.stats()` reports the four map sizes; a test plays 1000 join/vanish/disconnect
+    cycles and asserts all four are 0 afterwards.
+- **Why keep the link across a disconnect of a live game.** It is what lets a player who
+  reconnects on any page resume the game and cancel the countdown. It is removed when the
+  game ends, which the countdown guarantees happens within 20 seconds.
