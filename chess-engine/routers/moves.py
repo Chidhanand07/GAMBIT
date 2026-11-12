@@ -1,8 +1,10 @@
 """Move legality endpoints: POST /validate-move, POST /valid-moves."""
 
 import chess
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
+
+from routers.fen import parse_fen
 
 router = APIRouter()
 
@@ -14,8 +16,8 @@ class MoveReq(BaseModel):
 
 @router.post("/validate-move")
 def validate_move(req: MoveReq):
+    b = parse_fen(req.fen)
     try:
-        b = chess.Board(req.fen)
         move = chess.Move.from_uci(req.move)
         if move in b.legal_moves:
             b.push(move)
@@ -36,8 +38,5 @@ def validate_move(req: MoveReq):
 
 @router.post("/valid-moves")
 def valid_moves(req: MoveReq):
-    try:
-        b = chess.Board(req.fen)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid FEN: {e}") from e
+    b = parse_fen(req.fen)
     return {"valid_moves": [m.uci() for m in b.legal_moves]}
