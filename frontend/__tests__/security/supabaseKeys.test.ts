@@ -144,12 +144,11 @@ describe('secret keys cannot reach the browser bundle', () => {
 describe('client library versions', () => {
     const parse = (v: string) => v.replace(/^[^\d]*/, '').split('.').map(Number)
 
-    test('@supabase/supabase-js is on a line that supports the new keys AND Node 20 (2.108–2.109)', () => {
+    test('@supabase/supabase-js is on the current 2.x line (the Node 20 pin is gone) [NODE-RUNTIME]', () => {
         const [major, minor] = parse(pkg.dependencies['@supabase/supabase-js'])
         expect(major).toBe(2)
-        expect(minor).toBeGreaterThanOrEqual(108)
-        // 2.110+ declare `engines.node >= 22`; this project stays on Node 20 for now.
-        expect(minor).toBeLessThan(110)
+        // 2.110+ need Node 22; the runtimes are on Node 26 now, so the newest line is used.
+        expect(minor).toBeGreaterThanOrEqual(119)
     })
 
     test('@supabase/ssr has the getAll/setAll cookie API', () => {

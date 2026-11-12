@@ -37,6 +37,14 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
 | [F-021](#f-021) | New Supabase key names with legacy fallbacks; JS client pinned to the last Node 20 line; `supabase-py` 2.34.1 | 3 | SUPABASE-KEYS |
 
+**Medium-risk phase** (four local stacked branches `fix/medium-1-platform-upgrade` …
+`fix/medium-4-scaling-ops`; PR column = M1..M4). Same priority order.
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-022](#f-022) | Medium phase is based on local `fix/high-3-supabase-lockdown` @ `70a94f9`; local-only work | M1 | — |
+| [F-023](#f-023) | Node 26 everywhere; Railway builds the Dockerfile; Supabase client pins lifted | M1 | NODE-RUNTIME |
+
 ---
 
 ## F-001
@@ -840,3 +848,66 @@ instead of one file per ADR under `docs/refactor/adr/`.
     would remove an Auth round trip per request (SEC-05); not done here.
   - The Supabase *Realtime* presence channel in the browser uses the public key; with a
     publishable key, unauthenticated connections are limited to 24 hours by Supabase.
+
+---
+
+# Medium-risk phase
+
+## F-022
+
+**The medium phase is based on local `fix/high-3-supabase-lockdown` at `70a94f9`, and stays local.**
+
+- **Context.** The brief for this phase forbids every network git operation (`fetch`, `pull`,
+  `push`, `gh`): the owner is signed in to another GitHub account. So whether PR #22 has been
+  merged into `preprod` cannot be checked.
+- **Decision.** Base = the local branch `fix/high-3-supabase-lockdown`, SHA
+  `70a94f97232db7a712e223ab9ef091675d81647b`. The local ref
+  `origin/fix/high-3-supabase-lockdown` points at the same commit; there is no local `preprod`
+  branch, and the local `origin/preprod` is older (it does not contain the high-risk work).
+  The base contains `docs/fixes/HIGH_RISK_REPORT.md`, so it is not stale relative to the
+  high-risk phase. Whether it is stale relative to the remote is unknown.
+- **How the work is laid out.** One git worktree per branch under `../GAMBIT-wt/medium-<n>`,
+  each branch created from the previous one. Nothing is pushed; no PR is opened. The PR title
+  and description for each branch are in `docs/fixes/pr/M<n>.md`.
+- **Consequence for the owner.** If `preprod` moved on the remote in the meantime, rebase
+  `fix/medium-1-platform-upgrade` (and then the three branches above it) before opening PRs.
+- **"CI" in this phase** means the gates run locally in the worktree. Docker and the Supabase
+  CLI are not installed on this machine, so `supabase start` / `supabase test db` and
+  `docker build` were **not** run; each PR description says so where it matters.
+
+## F-023
+
+**Node 26 for the frontend and the game server; Railway builds `server/Dockerfile`; the Supabase client pins are lifted (NODE-RUNTIME).**
+
+- **Context.** NODE-01 asks for an Active or Maintenance LTS line, pinned identically for the
+  frontend and the game server. The repo had no `engines`, no `.nvmrc`, CI on Node 20, a
+  `server/Dockerfile` on Node 18 that Railway did not even use (`railway.toml` selected
+  Nixpacks, which picks its own Node), and `@supabase/supabase-js` held at `~2.109.0` because
+  later releases need Node 22 (F-021).
+- **Which version.** Node 26 ("Lithium") is the newest LTS line (26.13.1 on the day of this
+  change). Vercel's documentation lists 26.x as available and as the default for new projects,
+  and reads the major from `engines.node`. Railway runs whatever image it is given.
+- **Decision.**
+  - `engines.node = "26.x"` in `frontend/package.json` and `server/package.json`; a root
+    `.nvmrc` containing `26`; every CI `setup-node` step uses `node-version-file: .nvmrc`, so
+    there is one place to change next time.
+  - `server/Dockerfile`: `node:26-alpine`, `npm ci --omit=dev` (was `npm install --production`,
+    which ignores the lockfile), runs as the unprivileged `node` user, and starts `node
+    server.js` directly so SIGTERM reaches the process. `server/railway.toml` switches the
+    builder from Nixpacks to this Dockerfile.
+  - `@supabase/supabase-js` `^2.119.0` (server and frontend) and `@supabase/ssr` `^0.12.7`.
+  - The engine stays on Python 3.11.
+- **Why the Dockerfile and not a Nixpacks/Railpack setting.** A buildpack maps a version
+  request to whatever it currently ships; whether Railway's builder has Node 26 today could not
+  be confirmed from here. The official `node:26-alpine` image exists and is exactly what the
+  tests ran on. It also makes the image reproducible and removes the duplicated, contradictory
+  runtime definition.
+- **Why a test for configuration.** `server/__tests__/config/nodeRuntime.test.js` reads the
+  five places and fails when they disagree; it failed on all seven assertions before this
+  change. Drift between them is the bug being fixed.
+- **Not verified.** There is no Docker on this machine, so the image was **not built**. Both
+  test suites, lint and `next build` were run on Node 26.13.1 with nvm. Railway's behaviour
+  with the new builder setting is untested: the first deploy of this branch should be watched,
+  and if the service was configured in the Railway dashboard to use Nixpacks, the dashboard
+  setting may need to be changed to "Dockerfile" by hand.
+- **Rollback.** Revert the commit; nothing persistent changes.

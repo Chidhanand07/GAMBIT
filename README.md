@@ -11,7 +11,7 @@ A production-ready, full-stack chess platform with an accuracy-based rating syst
 Code layout, layer dependency rules and how to add a feature: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Engineering rules (mandatory): [`docs/ENGINEERING_RULES.md`](docs/ENGINEERING_RULES.md).
 
 ## Local Development Requirements
-- Node.js >= 18
+- Node.js 26 (see `.nvmrc`; `nvm use`)
 - Python >= 3.10
 - Supabase CLI (optional, but recommended if running DB locally instead of cloud)
 

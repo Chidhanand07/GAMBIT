@@ -94,7 +94,7 @@ After deploy, copy the URL e.g. `https://gambit-engine.onrender.com` — needed 
 ### 4a. Create Project
 1. [railway.app](https://railway.app) → New Project → Deploy from GitHub repo
 2. **Root Directory**: `server`
-3. Railway auto-detects Node and runs `npm install && npm start`
+3. Railway builds `server/Dockerfile` (set in `server/railway.toml`): Node 26, `npm ci --omit=dev`, `node server.js`. The Node version comes from that file, not from a Railway setting.
 
 ### 4b. Environment Variables
 Go to your service → **Variables** tab and add:
