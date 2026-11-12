@@ -2,6 +2,8 @@
 /**
  * Engine proxy for the analysis page.
  */
+const { parseOrReject, sendError } = require('../respond');
+const { schemas } = require('../schemas');
 
 /**
  * @param {import('express').Express} app
@@ -9,11 +11,12 @@
  */
 function registerAnalysisRoutes(app, { analysisService }) {
     app.post('/api/analysis/engine', async (req, res) => {
+        const input = parseOrReject(res, schemas.analysis, req.body);
+        if (!input) return;
         try {
-            const { fen, depth } = req.body;
-            res.json(await analysisService.analysePosition({ fen, depth }));
+            res.json(await analysisService.analysePosition(input));
         } catch (e) {
-            res.status(500).json({ error: /** @type {Error} */ (e).message });
+            sendError(res, 'analysis/engine', e);
         }
     });
 }

@@ -57,6 +57,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
 | [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
 | [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
+| [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
 
 ---
 
@@ -1372,3 +1373,38 @@ instead of one file per ADR under `docs/refactor/adr/`.
   lobby stops the search and shows a toast ("could not start the game, please search again").
 - **Web client.** `useMatchmaking` listens for `match_failed`; `MatchFoundPayload.opponent` is
   typed as the four public fields. Nothing in the client read the removed fields.
+
+## F-037
+
+**Upstream failures are reported as errors with a status and a code; the username check fails closed (G14).**
+
+- **Context.**
+  - `POST /api/analysis/engine` returned whatever JSON the engine sent with status 200, also
+    when the engine answered 4xx/5xx. Unreachable engine → 500 with the raw socket error text.
+  - `GET /api/users/check-username` used `.single()`, for which "no row" is itself an error,
+    and read only `data`: any database failure answered `{ available: true }`.
+- **Decision.**
+  - `services/errors.js`: `AppError(code, httpStatus)`, the operational error NODE-07 asks for.
+    Services throw it; `http/respond.js` `sendError` answers `{ error: code }` with that
+    status. Anything else that is thrown is logged and answered with a generic
+    `500 { error: 'internal_error' }`: internal messages (socket errors, parser text, SQL)
+    no longer reach the client.
+  - Analysis: engine 400/404/422 → `400 engine_rejected`; 429/503 → `503 engine_busy`;
+    anything else not OK, unreachable, or an unreadable body → `502 engine_unavailable`.
+    A 401/403 from the engine means *our* shared key was refused, so it is a 502, not passed
+    on as if the caller were unauthorized.
+  - Username: the repository uses `.maybeSingle()`, so an `error` is always a real failure;
+    the service turns an error result or a throw into `503 username_check_unavailable`.
+  - Both routes validate their input with zod first (`http/schemas.js`): a FEN is a string of
+    at most 100 characters, depth an integer 1–30, a username 1–64 characters. Invalid →
+    `400 { error: 'invalid_request' }` before any dependency is called.
+- **Why 503 and not `available: false`.** "Taken" would also be a lie, and it would tell a
+  user to give up a name that may be free. The signup form already treats a non-OK answer as
+  "not checked" (no tick, no cross), and signup itself enforces uniqueness in the database.
+- **Compatibility.** Response *bodies* for failures changed shape (`{ error: <code> }`; they
+  used to be `{ error: <message> }` or the engine's body). The analysis page does not check
+  the status and renders missing fields as 0.0, exactly as it did for an error body before
+  (F14, a low-risk item, untouched). A depth of 0 used to mean "default"; it is now invalid,
+  and the web client always sends 18.
+- **Not done here.** Routes still catch and call `sendError` themselves; a single Express
+  error middleware replaces that with the Express 5 upgrade (M4, EXPRESS-5).

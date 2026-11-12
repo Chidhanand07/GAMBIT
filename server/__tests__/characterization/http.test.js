@@ -76,11 +76,12 @@ describe('GET /api/matchmaking/status', () => {
 });
 
 describe('GET /api/users/check-username', () => {
-    test('queries profiles.username with .single(); no row → available', async () => {
+    test('queries profiles.username with .maybeSingle(); no row → available', async () => {
         const res = await request(ctx.app).get('/api/users/check-username?u=newbie');
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ available: true });
-        expect(opsFor('profiles')).toEqual([[['select', 'username'], ['eq', 'username', 'newbie'], ['single']]]);
+        // maybeSingle: "no row" is a normal answer, so every error result is a real failure.
+        expect(opsFor('profiles')).toEqual([[['select', 'username'], ['eq', 'username', 'newbie'], ['maybeSingle']]]);
     });
 
     test('row found → { available: false }', async () => {
@@ -88,33 +89,39 @@ describe('GET /api/users/check-username', () => {
         expect((await request(ctx.app).get('/api/users/check-username?u=bob')).body).toEqual({ available: false });
     });
 
-    test('a DB error result is reported as available (pinned)', async () => {
+    test('a DB error is never reported as available: 503 with an error code [G14]', async () => {
+        // Was: "a DB error result is reported as available (pinned)" — 200 { available: true }.
         supabase.queue('profiles', { data: null, error: { message: 'db down' } });
         const res = await request(ctx.app).get('/api/users/check-username?u=bob');
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ available: true });
+        expect(res.status).toBe(503);
+        expect(res.body).toEqual({ error: 'username_check_unavailable' });
+        expect(res.body).not.toHaveProperty('available');
     });
 
-    test('a thrown error → 500 { error: message }', async () => {
+    test('a thrown error → 503, and the internal message is not sent to the caller', async () => {
         supabase.queue('profiles', () => {
             throw new Error('client exploded');
         });
         const res = await request(ctx.app).get('/api/users/check-username?u=bob');
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'client exploded' });
+        expect(res.status).toBe(503);
+        expect(res.body).toEqual({ error: 'username_check_unavailable' });
+        expect(JSON.stringify(res.body)).not.toContain('exploded');
     });
 
-    test.each(['/api/users/check-username', '/api/users/check-username?u='])('%s → 400 without touching the DB', async (path) => {
-        const res = await request(ctx.app).get(path);
-        expect(res.status).toBe(400);
-        expect(res.body).toEqual({ error: 'Missing username parameter' });
-        expect(supabase.calls).toEqual([]);
-    });
+    test.each(['/api/users/check-username', '/api/users/check-username?u=', `/api/users/check-username?u=${'x'.repeat(65)}`])(
+        '%s → 400 without touching the DB',
+        async (path) => {
+            const res = await request(ctx.app).get(path);
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual({ error: 'invalid_request' });
+            expect(supabase.calls).toEqual([]);
+        },
+    );
 });
 
 describe('POST /api/analysis/engine', () => {
     test('proxies { fen, depth } to ENGINE /analyze and returns the engine JSON', async () => {
-        ctx.fetch.mockResolvedValue({ ok: true, json: async () => ({ best_move: 'e2e4', eval: 0.3 }) });
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ best_move: 'e2e4', eval: 0.3 }) });
         const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN, depth: 12, ignored: true });
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ best_move: 'e2e4', eval: 0.3 });
@@ -130,41 +137,61 @@ describe('POST /api/analysis/engine', () => {
         ]);
     });
 
-    test('depth 0 / missing → 18; ENGINE_URL is honoured', async () => {
+    test('missing depth → 18; ENGINE_URL is honoured', async () => {
         process.env.ENGINE_URL = 'http://engine.test:9000';
-        ctx.fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-        await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F', depth: 0 });
-        await request(ctx.app).post('/api/analysis/engine').send({});
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
         expect(ctx.fetch.mock.calls.map(([url, opts]) => [url, opts.body])).toEqual([
-            ['http://engine.test:9000/analyze', JSON.stringify({ fen: 'F', depth: 18 })],
-            ['http://engine.test:9000/analyze', JSON.stringify({ depth: 18 })],
+            ['http://engine.test:9000/analyze', JSON.stringify({ fen: START_FEN, depth: 18 })],
         ]);
     });
 
-    test('engine error status is NOT propagated: 200 with the engine body (pinned)', async () => {
-        ctx.fetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: 'busy' }) });
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ detail: 'busy' });
+    test.each([
+        ['no fen', {}],
+        ['a non-string fen', { fen: { $ne: 1 } }],
+        ['an oversized fen', { fen: 'x'.repeat(200) }],
+        ['depth 0', { fen: START_FEN, depth: 0 }],
+        ['an absurd depth', { fen: START_FEN, depth: 99 }],
+        ['a fractional depth', { fen: START_FEN, depth: 12.5 }],
+    ])('%s → 400 before the engine is called [G14]', async (_label, body) => {
+        const res = await request(ctx.app).post('/api/analysis/engine').send(body);
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'invalid_request' });
+        expect(ctx.fetch).not.toHaveBeenCalled();
     });
 
-    test('unparseable engine body → 500 { error }', async () => {
+    test('an engine error status is propagated, not returned as 200 [G14]', async () => {
+        // Was: "engine error status is NOT propagated: 200 with the engine body (pinned)".
+        ctx.fetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: 'busy' }) });
+        const busy = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(busy.status).toBe(503);
+        expect(busy.body).toEqual({ error: 'engine_busy' });
+
+        ctx.fetch.mockResolvedValue({ ok: false, status: 400, json: async () => ({ detail: 'Invalid FEN' }) });
+        const rejected = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'not a fen' });
+        expect(rejected.status).toBe(400);
+        expect(rejected.body).toEqual({ error: 'engine_rejected' });
+    });
+
+    test('unparseable engine body → 502, without the parser message', async () => {
         ctx.fetch.mockResolvedValue({
             ok: true,
+            status: 200,
             json: async () => {
                 throw new SyntaxError('Unexpected token < in JSON');
             },
         });
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'Unexpected token < in JSON' });
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(502);
+        expect(res.body).toEqual({ error: 'engine_unavailable' });
     });
 
-    test('engine unreachable → 500 { error }', async () => {
-        ctx.fetch.mockRejectedValue(new Error('ECONNREFUSED'));
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'ECONNREFUSED' });
+    test('engine unreachable → 502, without the socket error', async () => {
+        ctx.fetch.mockRejectedValue(new Error('ECONNREFUSED 10.0.0.5:8001'));
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(502);
+        expect(res.body).toEqual({ error: 'engine_unavailable' });
+        expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
     });
 
     test('malformed JSON request body → 400 from express.json (HTML error page)', async () => {

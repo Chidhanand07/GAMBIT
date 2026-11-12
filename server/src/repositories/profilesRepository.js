@@ -16,11 +16,12 @@ const RATING_COLUMNS =
 function createProfilesRepository(supabase) {
     return {
         /**
-         * `{ username }` of the profile with this username (`.single()`).
+         * `{ username }` of the profile with this username, or null. `maybeSingle()`:
+         * "no such profile" is a normal answer, so an `error` here is a real failure.
          * @param {string} username
          */
         findUsernameByUsername: (username) =>
-            supabase.from('profiles').select('username').eq('username', username).single(),
+            supabase.from('profiles').select('username').eq('username', username).maybeSingle(),
 
         /**
          * Ratings and games played for the matchmaking queue, or null.
