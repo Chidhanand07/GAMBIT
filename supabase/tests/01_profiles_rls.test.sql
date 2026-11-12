@@ -158,22 +158,25 @@ select is(
 -- ============================ the policies themselves ==========================
 -- (INSERT is blocked by privileges above, so the policy text is asserted directly:
 --  it is what protects the table if a grant is ever added back.)
--- (Matched with a pattern, not the exact deparsed text, which differs between Postgres versions.)
-select results_eq(
-  $$ select cmd::text, roles::text[],
-            with_check ~* 'select\s+auth\.uid\(\)' and with_check ~ '=\s*id\)' as owner_check
-     from pg_catalog.pg_policies
-     where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_insert' $$,
-  $$ values ('INSERT'::text, array['authenticated']::text[], true) $$,
+-- (Counted, not compared as rows: catalog text columns carry their own collation, and the
+--  deparsed policy text differs between Postgres versions, so it is matched with a pattern.)
+select is(
+  (select count(*) from pg_catalog.pg_policies
+   where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_insert'
+     and cmd = 'INSERT'
+     and roles = array['authenticated']::name[]
+     and with_check ~* 'select\s+auth\.uid\(\)' and with_check ~ '=\s*id\)'),
+  1::bigint,
   'profiles_insert: TO authenticated WITH CHECK ((select auth.uid()) = id), not WITH CHECK (true)'
 );
-select results_eq(
-  $$ select cmd::text, roles::text[],
-            qual ~* 'select\s+auth\.uid\(\)' and qual ~ '=\s*id\)' as owner_using,
-            with_check ~* 'select\s+auth\.uid\(\)' and with_check ~ '=\s*id\)' as owner_check
-     from pg_catalog.pg_policies
-     where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_update' $$,
-  $$ values ('UPDATE'::text, array['authenticated']::text[], true, true) $$,
+select is(
+  (select count(*) from pg_catalog.pg_policies
+   where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_update'
+     and cmd = 'UPDATE'
+     and roles = array['authenticated']::name[]
+     and qual ~* 'select\s+auth\.uid\(\)' and qual ~ '=\s*id\)'
+     and with_check ~* 'select\s+auth\.uid\(\)' and with_check ~ '=\s*id\)'),
+  1::bigint,
   'profiles_update: TO authenticated, ownership on both USING and WITH CHECK'
 );
 select is_empty(
@@ -185,17 +188,17 @@ select is_empty(
 -- Column privileges, stated as data: exactly four columns are updatable by a user.
 -- (has_*_privilege asks the server directly; it does not depend on which grants the
 --  current role is allowed to see in information_schema.)
-select results_eq(
-  $$ select a.attname::text
-     from pg_catalog.pg_attribute a
-     where a.attrelid = 'public.profiles'::regclass and a.attnum > 0 and not a.attisdropped
-       and has_column_privilege('authenticated', 'public.profiles', a.attname, 'UPDATE')
-     order by 1 $$,
-  $$ values ('avatar_url'::text), ('bio'::text), ('country'::text), ('display_name'::text) $$,
+select is(
+  (select count(*) filter (where a.attname in ('avatar_url', 'bio', 'country', 'display_name')) = 4
+      and count(*) filter (where a.attname not in ('avatar_url', 'bio', 'country', 'display_name')) = 0
+   from pg_catalog.pg_attribute a
+   where a.attrelid = 'public.profiles'::regclass and a.attnum > 0 and not a.attisdropped
+     and has_column_privilege('authenticated', 'public.profiles', a.attname, 'UPDATE')),
+  true,
   'authenticated may UPDATE exactly: avatar_url, bio, country, display_name'
 );
 select is_empty(
-  $$ select r.rolname::text || ':' || p.priv
+  $$ select r.rolname, p.priv
      from (values ('anon'), ('authenticated')) as r(rolname)
      cross join (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) as p(priv)
      where has_table_privilege(r.rolname, 'public.profiles', p.priv) $$,
