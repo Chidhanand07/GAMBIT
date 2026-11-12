@@ -13,7 +13,6 @@ jest.mock('next/headers', () => require('../helpers/routeHarness').nextHeadersMo
 jest.mock('@supabase/supabase-js', () => require('../helpers/routeHarness').supabaseJsMock)
 jest.mock('@supabase/ssr', () => require('../helpers/routeHarness').supabaseSsrMock)
 
-import * as debugSession from '@/app/api/debug/session/route'
 import * as friendById from '@/app/api/friends/[id]/route'
 import * as friendsPending from '@/app/api/friends/pending/route'
 import * as friendRequest from '@/app/api/friends/request/route'
@@ -50,7 +49,6 @@ type Case = [string, () => Promise<Response>]
 
 /** Every route handler that touches user data: all must answer 401 without a verified user. */
 const PROTECTED: Case[] = [
-    ['GET /api/debug/session', () => debugSession.GET()],
     ['PUT /api/friends/[id]', () => friendById.PUT(req(`/api/friends/${FRIENDSHIP}?action=accept`, { method: 'PUT' }), { params: Promise.resolve({ id: FRIENDSHIP }) })],
     ['DELETE /api/friends/[id]', () => friendById.DELETE(req(`/api/friends/${FRIENDSHIP}`, { method: 'DELETE' }), { params: Promise.resolve({ id: FRIENDSHIP }) })],
     ['GET /api/friends/pending', () => friendsPending.GET()],
@@ -259,7 +257,6 @@ describe('the session client', () => {
 
 describe('route handlers that read identity are always dynamic (NX-11)', () => {
     const MODULES: Array<[string, { dynamic?: string }]> = [
-        ['debug/session', debugSession],
         ['friends/[id]', friendById],
         ['friends/pending', friendsPending],
         ['friends/request', friendRequest],
