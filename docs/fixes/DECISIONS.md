@@ -649,6 +649,12 @@ instead of one file per ADR under `docs/refactor/adr/`.
   not exist). It was found while listing every writer of `profiles` for this item; leaving a
   ready-made, unauthenticated service-role insert one import away from being live is the kind of
   thing this phase exists to remove.
+- **Deviation from SEC-04, on purpose.** SEC-04 has two halves: revoke table-level `UPDATE` on
+  `profiles` and re-grant cosmetic columns (done here), and write ratings and results only
+  through a `security definer` function. The second half is not done: the game server still
+  writes them directly with the secret key. Moving those writes into a database function
+  changes the rating path of every finished game and is not needed to close S11 (clients can
+  no longer write the columns either way), so it is left for the next phase.
 - **Tests.** `supabase/tests/01_profiles_rls.test.sql` (31 assertions, as `authenticated`, `anon`
   and `service_role`): rating/statistics updates raise `42501` and the row is checked unchanged;
   display fields update; another user's row is affected 0 times; inserts are refused; the policy

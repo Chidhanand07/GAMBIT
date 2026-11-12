@@ -67,7 +67,7 @@ was cut from `origin/preprod`.
 | `052c6d6` | ci(db): run migrations and pgTAP tests in a Database (Supabase) job | pgTAP + CI |
 | `54f5f69` | test(db): compare policy and privilege catalog rows by count, not results_eq | S11 (test fix) |
 | `62b6fca` | feat(config): accept Supabase publishable/secret keys, keep legacy names as fallbacks | SUPABASE-KEYS |
-| (this commit) | docs(fixes): final report | – |
+| `b9c3cda` + follow-up | docs(fixes): final report; SEC-04 deviation recorded in F-017 | – |
 
 ## 2. Item checklist
 
@@ -299,7 +299,7 @@ Node 18; check which runtime Railway actually uses).
 
 | PR | How to roll back | What to know |
 |---|---|---|
-| 1 | Redeploy the previous server and frontend builds together | Completed games written by the new server have `result` = `white`/`black`; the old code reads `winner_id` for wins, so they display correctly. Pending rematch/challenge keys in Redis expire on their own. |
+| 1 | Redeploy the previous server and frontend builds together | Completed games written by the new server have `result` = `white`/`black`; the old frontend reads `winner_id` and `result = 'draw'`, so they still display correctly. Pending rematch/challenge keys in Redis expire on their own. |
 | 2 | Redeploy the previous builds of all three services | Roll the engine back with the callers, or leave the new engine up: old callers without the key get 401 on reviews. `ENGINE_SHARED_SECRET` can stay set. |
 | 3, before the contract migration | Redeploy the previous server and frontend | Invites created by the new code exist only in `game_invites`; copy them back with one `UPDATE games … FROM game_invites` or accept that those links die. The `profiles` grants can stay; to undo them, re-grant `UPDATE` on `profiles` to `authenticated` (not recommended). `matchmaking_queue` was unused; nothing to restore. |
 | 3, after the contract migration | Re-add `invite_token` and `invite_expires_at` to `games`, copy the values back from `game_invites`, then redeploy old code | This is why the contract step waits until the new code is confirmed. |
@@ -384,7 +384,8 @@ Not fixed, by the brief's rule 5. Listed so they are not lost.
 - `supabase-js` is pinned to `~2.109.0` because later versions need Node 22 (F-021).
 - `profiles.sex` and `is_public` cannot be edited by anyone but the service role, because no
   code edits them today (F-017).
-- Ratings in `profiles` would be better in their own table (F-017).
+- Ratings and results are written directly by the game server, not through the `security definer`
+  function SEC-04 asks for; ratings would also be better in their own table (F-017).
 - The live database has diverged from the migration files before; the history should be
   reconciled once (F-020).
 
@@ -419,12 +420,15 @@ cycles), `tsc`, Prettier and Ruff are clean at the tip of every branch.
 
 ### PR 3
 
-- **Rules applied:** SEC-02, SEC-03, SEC-04, SEC-08, SEC-09, NX-05, NX-06, NODE-05, TEST-04,
-  SOLID-01, SOLID-06, SIZE-01..04.
+- **Rules applied:** SEC-03, SEC-04 (the column-privilege half), SEC-08, SEC-09, NX-05, NX-06,
+  NODE-05, TEST-04, SOLID-01, SOLID-06, SIZE-01..04.
 - **How:** invites have their own repository port, injected into `privateGameService`. Secret
   and public keys are read in one module each. Policies use `(select auth.uid())` and name
   their roles. Every new table has RLS; privileges are revoked from `PUBLIC`.
-- **Deviations:** one existing migration file renamed, content unchanged (F-020).
+- **Deviations:** one existing migration file renamed, content unchanged (F-020). SEC-04 also
+  asks for ratings and results to be written only through a `security definer` function; they
+  are still written by the game server with the secret key (F-017). The new migrations were
+  written by hand with timestamped names, not with `supabase migration new` (no CLI locally).
   `createGamesRepository` is 61 physical lines by the metrics script, which counts comments;
   ESLint's `max-lines-per-function` (which skips them) passes.
 
