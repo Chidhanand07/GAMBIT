@@ -125,6 +125,18 @@ function waitedSeconds(entry, now) {
 }
 
 /**
+ * Same game on offer: base time AND increment (G4). The service queues the
+ * canonical "M+S" text, which already carries both; the increment is compared
+ * as well so entries built any other way cannot be mixed.
+ * @param {{ time_control: unknown, increment: unknown }} a
+ * @param {{ time_control: unknown, increment: unknown }} b
+ * @returns {boolean}
+ */
+function sameTimeControl(a, b) {
+    return a.time_control === b.time_control && a.increment === b.increment;
+}
+
+/**
  * First candidate (in the given order) with the same time control and a
  * compatible rating, or null. `clock` is read once for `player` and once per
  * candidate with a matching time control, mirroring the original loop.
@@ -137,7 +149,7 @@ function waitedSeconds(entry, now) {
 function findOpponent(player, candidates, clock) {
     const radius = getSearchRadius(waitedSeconds(player, clock()));
     for (const other of candidates) {
-        if (player.time_control !== other.time_control) continue;
+        if (!sameTimeControl(player, other)) continue;
         const otherRadius = getSearchRadius(waitedSeconds(other, clock()));
         if (isRatingCompatible(player, other, radius, otherRadius)) return other;
     }
@@ -150,5 +162,6 @@ module.exports = {
     createQueueEntry,
     isRatingCompatible,
     sortByLongestWaiting,
+    sameTimeControl,
     findOpponent,
 };

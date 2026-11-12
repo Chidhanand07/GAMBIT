@@ -41,7 +41,7 @@ describe('useTimeControlSelection', () => {
         const first = result.current.getTcMinutes;
         expect(result.current.selectedTc).toBe('blitz');
         expect(first()).toEqual({ mins: 3, inc: 0 });
-        expect(result.current.playOnlineTimeControl).toBe('3');
+        expect(result.current.playOnlineTimeControl).toBe('3+0');
         rerender();
         expect(result.current.getTcMinutes).toBe(first);
         act(() => result.current.setCustomInc(4));
@@ -92,13 +92,13 @@ describe('useMatchmaking', () => {
         expect(result.current.searchTime).toBe(0);
     });
 
-    test('reconnect while searching re-queues with { id }, minutes only and is_rated: true', () => {
+    test('reconnect while searching re-queues with the same canonical time control, increment included [TIME-CONTROL]', () => {
         const { result } = setup();
         act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '12+5', increment: 5 }));
         fake.emit.mockClear();
         fake.serverSends('connect');
         expect(fake.emitted('join_queue')).toEqual([
-            { user: { id: 'me' }, time_control: '12', increment: 5, is_rated: true },
+            { user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true },
         ]);
     });
 

@@ -6,10 +6,11 @@
  */
 const pairing = require('../domain/matchmaking/pairing');
 const { createInitialGameState } = require('../domain/gameState');
-const { ratingField } = require('../domain/timeControl');
+const { DEFAULT_TIME_CONTROL, formatTimeControl, parseTimeControl, ratingField } = require('../domain/timeControl');
 
 const DEFAULT_RATING = 1200;
 const ESTIMATED_WAIT_SECONDS = 10;
+const INVALID_TIME_CONTROL = Object.freeze({ ok: false, error: 'invalid_time_control' });
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -39,7 +40,19 @@ const ESTIMATED_WAIT_SECONDS = 10;
 function joinQueue({ queue, emitter, now }, { user, socketId, timeControl, increment, isRated = true }) {
     if (queue.has(user.id)) return;
 
-    queue.set(user.id, pairing.createQueueEntry({ user, socketId, timeControl, increment, isRated, now: now() }));
+    // One canonical "M+S" per entry, so pairing compares base and increment (G4).
+    const model = parseTimeControl(timeControl ?? DEFAULT_TIME_CONTROL.minutes, increment) ?? DEFAULT_TIME_CONTROL;
+    queue.set(
+        user.id,
+        pairing.createQueueEntry({
+            user,
+            socketId,
+            timeControl: formatTimeControl(model),
+            increment: model.incrementSeconds,
+            isRated,
+            now: now(),
+        }),
+    );
 
     emitter.toRoom(socketId, 'queue_joined', {
         position: queue.size,
@@ -49,26 +62,31 @@ function joinQueue({ queue, emitter, now }, { user, socketId, timeControl, incre
 
 /**
  * `join_queue`: queue the player with their rating read from the DB (C3: never
- * trust a client-provided rating). Unknown users are ignored.
+ * trust a client-provided rating). Unknown users are ignored; an invalid
+ * time control is refused with a reason.
  * @param {Matchmaker} mm
  * @param {{ user?: { id?: string }, time_control?: unknown, increment?: unknown, is_rated?: boolean }} data
  * @param {string} socketId
+ * @returns {Promise<{ ok: false, error: string } | void>}
  */
 async function requestMatch(mm, data, socketId) {
     if (!data?.user?.id) return;
+    const model = parseTimeControl(data.time_control ?? DEFAULT_TIME_CONTROL.minutes, data.increment);
+    if (!model) return INVALID_TIME_CONTROL;
+    const timeControl = formatTimeControl(model);
     const { data: profile } = await mm.profilesRepo.findForMatchmaking(data.user.id);
     if (!profile) return;
     const verifiedUser = {
         id: profile.id,
         username: profile.username,
-        rating: profile[ratingField(data.time_control)] ?? DEFAULT_RATING,
+        rating: profile[ratingField(timeControl)] ?? DEFAULT_RATING,
         games_played: profile.games_played ?? 0,
     };
     joinQueue(mm, {
         user: verifiedUser,
         socketId,
-        timeControl: data.time_control,
-        increment: data.increment,
+        timeControl,
+        increment: model.incrementSeconds,
         isRated: data.is_rated ?? true,
     });
 }
@@ -164,7 +182,7 @@ function createMatchmakingService({ now = () => Date.now(), random = () => Math.
         queue,
         /** @param {Parameters<typeof joinQueue>[1]} p */
         joinQueue: (p) => joinQueue(mm, p),
-        /** @type {(data: Parameters<typeof requestMatch>[1], socketId: string) => Promise<void>} */
+        /** @type {(data: Parameters<typeof requestMatch>[1], socketId: string) => ReturnType<typeof requestMatch>} */
         requestMatch: (data, socketId) => requestMatch(mm, data, socketId),
         leaveQueue,
         /**

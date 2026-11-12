@@ -104,6 +104,14 @@ engine.py       Stockfish pool API
 seams.py        late-bound dependency lookup through `main` (ADR 0301)
 ```
 
+## Shared definitions (`shared/`)
+
+`shared/time-control.json` is the one definition of the time-control model (limits, category
+thresholds, lobby presets, contract cases). Each deployable carries a copy
+(`server/src/domain/timeControl.data.json`, `frontend/lib/chess/timeControl.data.json`) written
+by `node scripts/sync-shared.js`; a test on each side fails when a copy differs
+(docs/fixes/DECISIONS.md F-027). Edit the file in `shared/`, never a copy.
+
 ## How to add a feature
 
 1. **Pure rules first.** Put chess/clock/rating logic in `server/src/domain/` or

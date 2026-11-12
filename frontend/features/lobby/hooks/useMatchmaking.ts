@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
+import { formatTimeControl } from '@/lib/chess/timeControl';
 import type { JoinQueuePayload } from '@/types/socket';
 import type { LobbyProfile, TcMinutes } from '../types';
 
@@ -46,14 +47,13 @@ export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameSt
             router.push(`/game/${data.id}`);
         };
 
-        // Re-queue after a reconnect. NOTE: a different payload shape from Play Online
-        // ({ id } only, minutes without "+inc", is_rated: true) — preserved as-is.
+        // Re-queue after a reconnect, for the same time control (base and increment) as before.
         const onConnect = () => {
             if (!profile || !searching) return;
             const { mins, inc } = getTcMinutes();
             socket.emit('join_queue', {
                 user: { id: profile.id },
-                time_control: String(mins),
+                time_control: formatTimeControl({ minutes: mins, incrementSeconds: inc }),
                 increment: inc,
                 is_rated: true,
             });

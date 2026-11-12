@@ -4,10 +4,10 @@ import { outcomeFlags } from '@/features/game/components/GameOverModal'
 
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children }: any) => children }))
 
-describe('getFormatRating (game page buckets: <3 / <10 / >=30 / else rapid, ADR 0200)', () => {
+describe('getFormatRating (the shared categories: ≤2 bullet, ≤5 blitz, ≤29 rapid, ≥30 classical) [F7]', () => {
     const p = { username: 'u', rating_bullet: 1001.6, rating_blitz: 1100, rating_rapid: 1200.4, rating_classical: 1300 }
     test.each([
-        ['1', 1002], ['2+1', 1002], ['3', 1100], ['9', 1100], ['10', 1200], ['29', 1200], ['30', 1300], ['abc', 1200], [undefined, 1200], ['', 1200],
+        ['1', 1002], ['2+1', 1002], ['3', 1100], ['5', 1100], ['6', 1200], ['9', 1200], ['10', 1200], ['29', 1200], ['30', 1300], ['abc', 1200], [undefined, 1200], ['', 1200],
     ])('%s → %s', (tc, expected) => expect(getFormatRating(p, tc as string | undefined)).toBe(expected))
 
     test('no player → 1200; missing bucket → 1200', () => {

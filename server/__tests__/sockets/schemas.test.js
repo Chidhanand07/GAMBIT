@@ -87,6 +87,7 @@ describe('join_queue', () => {
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 10, increment: 0 })).toBe(true);
         expect(ok('join_queue', { time_control: '10' })).toBe(true);
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 'x'.repeat(17) })).toBe(false);
+        expect(ok('join_queue', {})).toBe(true); // no time control → the server's default
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: '10', is_rated: 'yes' })).toBe(false);
     });
 });
@@ -116,5 +117,32 @@ describe('challenge / rematch', () => {
         expect(ok('challenge_request', { ...base, color: 'purple' })).toBe(false);
         expect(ok('rematch_request', base)).toBe(true);
         expect(ok('rematch_request', { ...base, to_user_id: null })).toBe(false);
+    });
+});
+
+describe('time-control ranges (shared model) [TIME-CONTROL]', () => {
+    const { limits } = require('../../src/domain/timeControl.data.json');
+    const EVENTS = [
+        ['join_queue', {}],
+        ['rematch_request', { to_user_id: 'u2' }],
+        ['challenge_request', { to_user_id: 'u2' }],
+    ];
+    const BAD = ['0', '-5', 'rapid', '1.5', '10+', '+3', ' 10', `${limits.maxMinutes + 1}`, `10+${limits.maxIncrementSeconds + 1}`, 0, -1, 2.5];
+    const GOOD = ['1', '10', '5+3', '1440', `10+${limits.maxIncrementSeconds}`, 10];
+
+    describe.each(EVENTS)('%s', (event, base) => {
+        test.each(BAD)('rejects time_control %p', (value) => {
+            expect(ok(event, { ...base, time_control: value })).toBe(false);
+        });
+        test.each(GOOD)('accepts time_control %p', (value) => {
+            expect(ok(event, { ...base, time_control: value })).toBe(true);
+        });
+    });
+
+    test('join_queue: the separate increment is range-checked together with the time control', () => {
+        expect(ok('join_queue', { time_control: '10', increment: limits.maxIncrementSeconds })).toBe(true);
+        expect(ok('join_queue', { time_control: '10', increment: limits.maxIncrementSeconds + 1 })).toBe(false);
+        expect(ok('join_queue', { time_control: '10', increment: 1.5 })).toBe(false);
+        expect(ok('join_queue', { time_control: '10', increment: -1 })).toBe(false);
     });
 });

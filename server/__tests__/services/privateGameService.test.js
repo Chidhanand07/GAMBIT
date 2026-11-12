@@ -155,3 +155,19 @@ describe('join', () => {
         await expect(svc.joinPrivateGame('tok', 'x')).rejects.toThrow('Invalid or expired token');
     });
 });
+
+describe('time control of a private game is canonical "M+S" [TIME-CONTROL, F9]', () => {
+    test.each([
+        ['10', '10+0'],
+        ['5+3', '5+3'],
+        [3, '3+0'],
+        [undefined, '10+0'],
+        // A lobby preset name used to be stored as the time control and played as 10 minutes.
+        ['rapid', '10+0'],
+        ['-5', '10+0'],
+    ])('%p is stored as %p', async (given, stored) => {
+        const { svc, gamesRepo } = setup();
+        await svc.createPrivateGame('u', given, 'white', false);
+        expect(gamesRepo.insertReturning.mock.calls[0][0].time_control).toBe(stored);
+    });
+});

@@ -1,0 +1,45 @@
+{
+  "$comment": "The one definition of GAMBIT's time-control model. Edit this file only, then run `node scripts/sync-shared.js`. Copies live in server/src/domain/timeControl.data.json and frontend/lib/chess/timeControl.data.json; tests on both sides fail if a copy differs.",
+  "defaultMinutes": 10,
+  "limits": {
+    "minMinutes": 1,
+    "maxMinutes": 1440,
+    "maxIncrementSeconds": 180
+  },
+  "categories": [
+    { "id": "bullet", "maxMinutes": 2 },
+    { "id": "blitz", "maxMinutes": 5 },
+    { "id": "rapid", "maxMinutes": 29 },
+    { "id": "classical", "maxMinutes": null }
+  ],
+  "presets": {
+    "bullet": "1+0",
+    "blitz": "3+0",
+    "rapid": "10+0",
+    "classical": "30+0",
+    "daily": "1440+0"
+  },
+  "cases": {
+    "valid": [
+      { "input": "1", "canonical": "1+0", "minutes": 1, "incrementSeconds": 0, "category": "bullet" },
+      { "input": "2+1", "canonical": "2+1", "minutes": 2, "incrementSeconds": 1, "category": "bullet" },
+      { "input": "3", "canonical": "3+0", "minutes": 3, "incrementSeconds": 0, "category": "blitz" },
+      { "input": "3+2", "canonical": "3+2", "minutes": 3, "incrementSeconds": 2, "category": "blitz" },
+      { "input": "5+3", "canonical": "5+3", "minutes": 5, "incrementSeconds": 3, "category": "blitz" },
+      { "input": "6", "canonical": "6+0", "minutes": 6, "incrementSeconds": 0, "category": "rapid" },
+      { "input": "10", "canonical": "10+0", "minutes": 10, "incrementSeconds": 0, "category": "rapid" },
+      { "input": "10+0", "canonical": "10+0", "minutes": 10, "incrementSeconds": 0, "category": "rapid" },
+      { "input": "15+10", "canonical": "15+10", "minutes": 15, "incrementSeconds": 10, "category": "rapid" },
+      { "input": "29", "canonical": "29+0", "minutes": 29, "incrementSeconds": 0, "category": "rapid" },
+      { "input": "30", "canonical": "30+0", "minutes": 30, "incrementSeconds": 0, "category": "classical" },
+      { "input": "60", "canonical": "60+0", "minutes": 60, "incrementSeconds": 0, "category": "classical" },
+      { "input": "90+30", "canonical": "90+30", "minutes": 90, "incrementSeconds": 30, "category": "classical" },
+      { "input": "1440", "canonical": "1440+0", "minutes": 1440, "incrementSeconds": 0, "category": "classical" },
+      { "input": "10+180", "canonical": "10+180", "minutes": 10, "incrementSeconds": 180, "category": "rapid" },
+      { "input": 5, "canonical": "5+0", "minutes": 5, "incrementSeconds": 0, "category": "blitz" },
+      { "input": "10", "increment": 5, "canonical": "10+5", "minutes": 10, "incrementSeconds": 5, "category": "rapid" },
+      { "input": "3+2", "increment": 9, "canonical": "3+2", "minutes": 3, "incrementSeconds": 2, "category": "blitz" }
+    ],
+    "invalid": ["", "0", "-5", "abc", "rapid", "1.5", "10+", "+3", "10+x", "1+1+5", "1441", "10+181", "10+-1", " 10", "10 ", "1e2", null, 0, -1, 2.5, 1441, true, {}, []]
+  }
+}

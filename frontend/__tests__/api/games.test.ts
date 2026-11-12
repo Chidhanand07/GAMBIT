@@ -179,6 +179,21 @@ describe('POST /api/games/private/create', () => {
         expect((await post({})).status).toBe(400)
     })
 
+    // TIME-CONTROL / F9: the stored value is always the canonical "<min>+<inc>".
+    test.each([
+        ['10', '10+0'],
+        ['5+3', '5+3'],
+        ['1440', '1440+0'],
+        // Preset names from tabs opened before this release are mapped, not stored verbatim.
+        ['rapid', '10+0'],
+        ['classical', '30+0'],
+        ['daily', '1440+0'],
+    ])('time control %p is stored as %p', async (timeControl, stored) => {
+        db.queue('games', echo)
+        expect((await post({ timeControl })).status).toBe(200)
+        expect(db.op(db.callsFor('games')[0], 'insert')![0].time_control).toBe(stored)
+    })
+
     test.each([
         ['white', { white_id: uid('me'), black_id: null }],
         ['Black', { white_id: null, black_id: uid('me') }],

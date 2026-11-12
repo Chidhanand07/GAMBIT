@@ -47,6 +47,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
 | [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
 | [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
+| [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
 
 ---
 
@@ -1048,3 +1049,70 @@ instead of one file per ADR under `docs/refactor/adr/`.
   needed: server secrets are read at call time, not at build time. Without this step nothing
   in CI would notice a change that breaks the production build, which is the point of NX-14.
 - **Cost.** About half a minute of CI time (the build takes ~10 s locally with Turbopack).
+
+## F-027
+
+**One time-control model for the game server and the web app: `shared/time-control.json`, canonical `"M+S"`, one set of category thresholds (TIME-CONTROL: G4, F7, F9).**
+
+- **Context.** A time control was a free string parsed with `parseInt` in five places.
+  - *G4*: `join_queue` carries `time_control: "10"` plus a separate `increment`; the clock only
+    read an increment written inside the string, so the increment was silently dropped, and
+    the queue paired players on the string alone ("10" with any increment).
+  - *F7*: three different minute → category tables: game page `<3 / <10 / ≥30`, profile and
+    stats `≤2 / ≤5 / ≤15`, server rating pools `≤2 / ≤5 / ≤60`. The lobby's "Classical 30 min"
+    card started games the server rated as *rapid*.
+  - *F9*: the private-game dialog sent the option id (`"rapid"`, `"daily"`) as the time
+    control; `parseInt("rapid")` is `NaN`, so every such game was played as 10 minutes.
+  - `"-5"` produced a negative clock, `"0"` meant 10 minutes in some helpers and 0 in others.
+- **Decision: the model.** A time control is `{ minutes, incrementSeconds }`, written
+  `"M+S"` (always with the increment: `"10+0"`). Limits: 1–1440 minutes, 0–180 seconds.
+  Categories by base minutes: **bullet ≤ 2, blitz ≤ 5, rapid ≤ 29, classical ≥ 30.**
+  - Two entry points on each side. `parseTimeControl` is strict and is used for anything a
+    client sends: an invalid value is refused (`invalid_payload` / 400), never defaulted.
+    `timeControlOf` is for values the server stored itself: an old or unreadable row still
+    gets a playable clock (the default, 10+0).
+  - New games store the canonical text. Old rows (`"10"`) keep working: both forms parse.
+- **Why these thresholds.** They are the smallest change that makes every surface agree with
+  the lobby's own cards (1 → bullet, 3 → blitz, 10 → rapid, 30 → classical). Bullet and blitz
+  are exactly what the server already used for ratings, so those pools are untouched. What
+  changes: on the server, 30–60 minute games now count for the *classical* rating instead of
+  rapid (which is what the lobby has always called them); on the profile, 16–29 minutes is
+  rapid instead of classical; on the game page, 6–9 minutes shows the rapid rating instead of
+  blitz. Past games are not re-rated; only which column the next game updates changes.
+  Categories ignore the increment on purpose: weighting it (as Lichess does) would move
+  existing presets between pools, which is a product decision, not a bug fix.
+- **Decision: "defined once" across two deploy roots.** The game server is built from
+  `server/` (Railway) and the web app from `frontend/` (Vercel); neither can import a file
+  above its own directory, and there is no workspace package. So:
+  - `shared/time-control.json` is the only file to edit: limits, default, thresholds, lobby
+    presets, and a list of contract `cases` (valid and invalid inputs with expected results);
+  - `node scripts/sync-shared.js` copies it to `server/src/domain/timeControl.data.json` and
+    `frontend/lib/chess/timeControl.data.json` (`--check` fails when a copy is stale);
+  - each side has a small module that implements the rules over that data, and each side's
+    test suite (a) asserts its copy is byte-identical to the shared file and (b) runs the same
+    contract cases (TEST-08). A change on one side that the other does not follow fails CI.
+  - Options not taken: a workspace package (changes both hosts' build roots and install
+    steps); importing across directories (breaks the Docker build context and the Turbopack
+    root set in F-024).
+- **Where the canonical form is produced.**
+  - Server: `matchmakingService` (queue entries carry `"M+S"` and the increment; pairing
+    compares both), `privateGameService` (rematch, challenge and invite games), and the socket
+    schemas, which range-check `time_control` (and `join_queue`'s separate increment) through
+    `services/timeControlRules.js`. That file exists because entry adapters may not import
+    `domain/` directly (dependency-cruiser rule `entry-adapters-call-services-only`).
+  - Web: the lobby sends `"M+S"` for presets and custom; the private-game dialog sends the
+    option's real time control; `POST /api/games/private/create` canonicalises and
+    range-checks. It still accepts a preset *name* and maps it to the preset's time control,
+    so a tab opened before the deploy keeps working (backwards-compatible rollout).
+- **Display.** The UI printed the stored string followed by " min". `displayTimeControl`
+  prints `"10 min"` or `"5+3"` for both old and canonical values.
+- **F8, touched only where required (brief rule 6).** The lobby's reconnect re-queue sent only
+  the minutes (`"12"` for a custom 12+5), which now would pair the player in a different pool
+  than the one they asked for. It sends the canonical value. The other F8 quirks (`{ id }`-only
+  user, forced `is_rated: true`, no `leave_queue` on unmount) are left for the last phase.
+- **Behaviour changes users can see.** Increments chosen in the lobby actually apply. Players
+  are only paired with someone who chose the same increment. A "Classical" (30 min) game
+  updates the classical rating. Private "Rapid" / "Classical" / "Bullet" / "Daily" games are
+  played at that speed, not at 10 minutes. "Daily" is a 1440-minute clock, as its card always
+  implied; there is still no per-move correspondence mode.
+- **Not verified.** No browser run; the queue was exercised through the socket tests only.

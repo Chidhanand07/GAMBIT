@@ -9,6 +9,7 @@
 const { nanoid } = require('nanoid');
 const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
+const { formatTimeControl, timeControlOf } = require('../domain/timeControl');
 
 const INVITE_TOKEN_LENGTH = 10;
 const INVITE_TTL_HOURS = 48;
@@ -74,7 +75,8 @@ async function createPrivateGame(deps, { userId, timeControl, color, isRated }) 
     const { data, error } = await gamesRepo.insertReturning({
         white_id,
         black_id,
-        time_control: timeControl,
+        // Canonical "M+S"; a missing or unreadable value is the default, never a preset name.
+        time_control: formatTimeControl(timeControlOf(timeControl)),
         status: 'waiting',
         is_rated: isRated,
     });

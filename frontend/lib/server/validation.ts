@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { TIME_CONTROL_PRESETS, normalizeTimeControl } from '@/lib/chess/timeControl';
 
 // Input schemas for the route handlers (NX-07 step 2, NODE-08). Every route param, query
 // value and request body goes through `parseInput` / `parseJsonBody` before it is used.
@@ -21,8 +22,7 @@ const MAX_BIO_LENGTH = 500;
 const MAX_COUNTRY_LENGTH = 60;
 const MAX_URL_LENGTH = 2048;
 const MAX_FEN_LENGTH = 100;
-const MAX_TIME_CONTROL_MINUTES = 180;
-const MAX_INCREMENT_SECONDS = 180;
+const MAX_TIME_CONTROL_LENGTH = 16;
 
 /** Whole-number text only ("10", not "1e3", "1.5" or " 5"). */
 const integerText = z.string().regex(/^\d{1,7}$/);
@@ -33,18 +33,17 @@ const queryInt = (fallback: number) =>
         .union([integerText, z.null(), z.undefined()])
         .transform((value) => (value === null || value === undefined ? fallback : Number.parseInt(value, 10)));
 
-/** "10", "5+3", or one of the lobby's preset names (which the server maps to minutes). */
-const timeControl = z.union([
-    z
-        .string()
-        .regex(/^\d{1,3}(\+\d{1,3})?$/)
-        .refine((value) => {
-            const [minutes, increment = '0'] = value.split('+').map(Number);
-            return minutes >= 1 && minutes <= MAX_TIME_CONTROL_MINUTES && Number(increment) <= MAX_INCREMENT_SECONDS;
-        }),
-    // A lobby preset id ("rapid", "blitz", …): lower-case letters only.
-    z.string().regex(/^[a-z]{1,16}$/),
-]);
+/**
+ * A time control from a client, turned into the canonical "<min>+<inc>" of the shared model
+ * (lib/chess/timeControl): "10" → "10+0". Limits come from the shared definition. A lobby
+ * preset name ("rapid", "daily") is still accepted, for tabs opened before presets were sent
+ * as real time controls, and is mapped to the preset's time control; anything else is refused.
+ */
+const timeControl = z
+    .string()
+    .max(MAX_TIME_CONTROL_LENGTH)
+    .transform((value) => normalizeTimeControl(TIME_CONTROL_PRESETS[value] ?? value))
+    .refine((value): value is string => value !== null);
 
 /** Optional profile text: a bounded string, null, or absent. */
 const optionalText = (max: number) => z.string().max(max).nullish();

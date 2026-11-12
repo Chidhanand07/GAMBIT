@@ -92,3 +92,50 @@ test('a failed insert logs and drops both players (pinned)', async () => {
     expect(svc.queue.size).toBe(0);
     expect(emitter.named('match_found')).toHaveLength(0);
 });
+
+describe('time controls are canonical in the queue and in the game [TIME-CONTROL, G4]', () => {
+    const queued = { a: profile('a', 1500), b: profile('b', 1500) };
+
+    test('a bare "5" with a separate increment of 3 is queued as 5+3', async () => {
+        const { svc } = setup({ profiles: queued });
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '5', increment: 3 }, 'sa');
+        expect(svc.queue.get('a')).toMatchObject({ time_control: '5+3', increment: 3 });
+    });
+
+    test('the increment is not lost: the game row and the clock state both carry it', async () => {
+        const { svc, gameStore, gamesRepo } = setup({ profiles: queued });
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '5', increment: 3 }, 'sa');
+        await svc.requestMatch({ user: { id: 'b' }, time_control: '5+3' }, 'sb');
+        await svc.matchPlayers();
+        expect(gamesRepo.insertReturning.mock.calls[0][0]).toMatchObject({ time_control: '5+3', increment: 3 });
+        expect(gameStore.state.get('g1')).toMatchObject({ timeControl: '5+3', incrementMs: 3000, whiteClockMs: 300000 });
+    });
+
+    test('players who chose different increments are not paired', async () => {
+        const { svc, gamesRepo } = setup({ profiles: queued });
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '5', increment: 0 }, 'sa');
+        await svc.requestMatch({ user: { id: 'b' }, time_control: '5', increment: 3 }, 'sb');
+        await svc.matchPlayers();
+        expect(gamesRepo.insertReturning).not.toHaveBeenCalled();
+        expect(svc.queue.size).toBe(2);
+    });
+
+    test('no time control → the default 10+0; the rating pool follows the canonical value', async () => {
+        const { svc } = setup({ profiles: { a: { ...profile('a', 1500), rating_classical: 1900 } } });
+        await svc.requestMatch({ user: { id: 'a' } }, 'sa');
+        expect(svc.queue.get('a')).toMatchObject({ time_control: '10+0', increment: 0, rating: 1500 });
+        svc.leaveQueue('a');
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '30' }, 'sa');
+        expect(svc.queue.get('a')).toMatchObject({ time_control: '30+0', rating: 1900 });
+    });
+
+    test('an invalid time control is refused with a reason, and nothing is queued', async () => {
+        const { svc, profilesRepo } = setup({ profiles: queued });
+        expect(await svc.requestMatch({ user: { id: 'a' }, time_control: '-5' }, 'sa')).toEqual({
+            ok: false,
+            error: 'invalid_time_control',
+        });
+        expect(svc.queue.size).toBe(0);
+        expect(profilesRepo.findForMatchmaking).not.toHaveBeenCalled();
+    });
+});

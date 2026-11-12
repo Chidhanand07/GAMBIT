@@ -134,6 +134,21 @@ describe('findOpponent', () => {
         expect(clock).toHaveBeenCalledTimes(1);
     });
 
+    test('pairs on base AND increment: 3+0 never meets 3+2 [G4]', () => {
+        const p = entry('p', { time_control: '3+0', increment: 0 });
+        const other = entry('x', { time_control: '3+2', increment: 2 });
+        expect(findOpponent(p, [other], fixedClock)).toBeNull();
+        expect(findOpponent(other, [p], fixedClock)).toBeNull();
+    });
+
+    test('the increment is compared even when two entries carry the same time-control text [G4]', () => {
+        const p = entry('p', { time_control: '3', increment: 0 });
+        const other = entry('x', { time_control: '3', increment: 2 });
+        expect(findOpponent(p, [other], fixedClock)).toBeNull();
+        const same = entry('y', { time_control: '3', increment: 0 });
+        expect(findOpponent(p, [other, same], fixedClock)).toBe(same);
+    });
+
     test('reads the clock once for the player and once per same-time-control candidate', () => {
         const clock = jest.fn(fixedClock);
         findOpponent(entry('p'), [entry('a', { rating: 3000 }), entry('b', { rating: 100 })], clock);

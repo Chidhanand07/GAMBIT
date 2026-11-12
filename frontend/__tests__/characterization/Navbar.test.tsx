@@ -205,7 +205,7 @@ describe('challenge banner', () => {
         socket.serverSends('challenge_request', CHALLENGE)
         expect(screen.getByText('opp1')).toBeInTheDocument()
         expect(screen.getByText('challenges you')).toBeInTheDocument()
-        expect(screen.getByText('5+0 min · Rated')).toBeInTheDocument()
+        expect(screen.getByText('5 min · Rated')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Accept' }))
         // Was: sent the terms plus an INVERTED colour. The server now uses the stored challenge,
         // so the accept carries no terms, colour or own id.
@@ -216,7 +216,7 @@ describe('challenge banner', () => {
     test('casual label; the accept never carries a colour, whatever the challenge said [S4]', () => {
         render(<Navbar />)
         socket.serverSends('challenge_request', { ...CHALLENGE, color: 'random', is_rated: false })
-        expect(screen.getByText('5+0 min · Casual')).toBeInTheDocument()
+        expect(screen.getByText('5 min · Casual')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Accept' }))
         expect(socket.emitted('challenge_accept')).toEqual([{ from_user_id: 'u-opp' }])
     })

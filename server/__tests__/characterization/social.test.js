@@ -67,7 +67,8 @@ function expectPrivateGameOps({ gameId, host, hostColor, joiner, timeControl, is
             {
                 white_id: hostColor === 'white' ? host : null,
                 black_id: hostColor === 'black' ? host : null,
-                time_control: timeControl,
+                // The server stores the canonical "M+S" form [TIME-CONTROL].
+                time_control: timeControl.includes('+') ? timeControl : `${timeControl}+0`,
                 status: 'waiting',
                 is_rated: isRated,
             },
@@ -314,7 +315,7 @@ describe('challenges', () => {
         expect(await toBob).toEqual({ game_id: 'ch-1' });
         // The host is always created as white, then the other player joins as black.
         expectPrivateGameOps({ gameId: 'ch-1', host: whiteId, hostColor: 'white', joiner: blackId, timeControl: '10', isRated: true });
-        expect(await getGame('ch-1')).toMatchObject({ whiteId, blackId, isRated: true, timeControl: '10' });
+        expect(await getGame('ch-1')).toMatchObject({ whiteId, blackId, isRated: true, timeControl: '10+0' });
     });
 
     test('challenge_accept without a pending challenge creates no game [S4]', async () => {

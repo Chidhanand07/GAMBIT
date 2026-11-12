@@ -41,7 +41,9 @@ async function startWith(game) {
 
 describe('parseIncrement', () => {
     test.each([
-        ['10', 0], ['5+3', 3000], ['3+2', 2000], ['1+0', 0], ['0+30', 30000],
+        ['10', 0], ['5+3', 3000], ['3+2', 2000], ['1+0', 0],
+        // A 0-minute base is not a time control: the stored value falls back to 10+0.
+        ['0+30', 0],
         ['', 0], [undefined, 0], [null, 0], ['5+x', 0], [10, 0],
     ])('%p → %p ms', (tc, ms) => expect(clock.parseIncrement(tc)).toBe(ms));
 });
