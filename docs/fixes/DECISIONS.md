@@ -46,6 +46,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-023](#f-023) | Node 26 everywhere; Railway builds the Dockerfile; Supabase client pins lifted | M1 | NODE-RUNTIME |
 | [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
 | [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
+| [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
 
 ---
 
@@ -1027,3 +1028,23 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Not verified.** No real token was verified: the tests mock `@supabase/ssr`. The local
   verification path was read in the installed `@supabase/auth-js` source (JWKS cache, HS256
   fallback) but not exercised against a project with asymmetric keys.
+
+## F-026
+
+**The debug route is deleted, production builds type-check, and CI runs `next build` (S12, NX-14).**
+
+- **S12.** `app/api/debug/session` is deleted, not protected: since S5 it answered only the
+  signed-in caller, but it still returned cookie names and session details that no feature
+  uses. No other debug-only route exists in the three services (checked by search: the game
+  server exposes health, matchmaking status, username check, analysis and invite routes; the
+  engine exposes its documented endpoints). `security/noDebugRoutes.test.ts` fails if a route
+  or page appears under a `debug`, `diagnostics`, `internal`, `dev` or `test` segment.
+- **NX-14.** `typescript.ignoreBuildErrors` is removed (the `eslint` key went with NEXT-16
+  because Next 16 rejects it). `next build` now runs TypeScript and fails on errors; it passed
+  on the first run because `tsc --noEmit` was already a CI gate. ESLint stays a separate CI
+  step (`npm run lint`), as the brief asks.
+- **A build step in CI.** The frontend job now ends with `npm run build`, using placeholder
+  public values (`https://placeholder.supabase.co`, `sb_publishable_placeholder`). No secret is
+  needed: server secrets are read at call time, not at build time. Without this step nothing
+  in CI would notice a change that breaks the production build, which is the point of NX-14.
+- **Cost.** About half a minute of CI time (the build takes ~10 s locally with Turbopack).
