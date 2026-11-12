@@ -117,13 +117,14 @@ test('validated payloads go to the services; the actor is always the verified us
     await handlers.join_queue({ user: { id: 'victim' }, time_control: '10' });
     await handlers.join_game('g');
     await handlers.make_move({ ...move, fen: 'client-fen', san: 'e4' });
-    await handlers.send_message(data);
+    await handlers.send_message({ ...data, text: 'hello' });
     await handlers.resign({ ...data, result: 'White wins' });
     await handlers.leave_queue('victim');
     expect(d.matchmaking.requestMatch).toHaveBeenCalledWith({ time_control: '10', user: { id: 'u1' } }, 'sock-1');
     expect(d.gameService.joinGame).toHaveBeenCalledWith('g', expect.objectContaining({ id: 'sock-1' }), 'u1');
     expect(d.gameService.makeMove).toHaveBeenCalledWith(move, 'u1', expect.objectContaining({ id: 'sock-1' }));
-    expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
+    // The chat service gets the validated message and the verified user (not a socket id) [G6].
+    expect(d.chatService.sendMessage).toHaveBeenCalledWith({ game_id: 'g', text: 'hello' }, 'u1');
     expect(d.gameService.resign).toHaveBeenCalledWith(data, 'u1');
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
 });

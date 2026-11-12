@@ -69,12 +69,21 @@ const schemas = {
         promotion: promotion.optional(),
     }),
     resign: z.object({ game_id: id }),
-    send_message: z.object({
-        game_id: id,
-        from: name.optional(),
-        text: z.string().max(MAX_CHAT_LENGTH).optional(),
-        message: z.string().max(MAX_CHAT_LENGTH).optional(),
-    }),
+    // The web client sends `text`. An older `message` field is read as the text
+    // too. Either way the result is one trimmed, non-empty, bounded string (G6).
+    send_message: z
+        .object({
+            game_id: id,
+            from: name.optional(),
+            text: z.string().max(MAX_CHAT_LENGTH).optional(),
+            message: z.string().max(MAX_CHAT_LENGTH).optional(),
+        })
+        .transform(({ game_id, from, text, message }) => ({
+            game_id,
+            ...(from === undefined ? {} : { from }),
+            text: (text ?? message ?? '').trim(),
+        }))
+        .refine((data) => data.text.length > 0),
     rematch_request: z.object({
         to_user_id: id,
         from_username: name.optional(),

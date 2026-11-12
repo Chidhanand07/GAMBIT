@@ -1,6 +1,6 @@
 /**
  * Characterization: in-game chat (send_message → chat_message + messages insert).
- * The frontend sends `{ game_id, from, text }`; the server persists `data.message`.
+ * The frontend sends `{ game_id, from, text }`; the server stores and relays that text [G6].
  */
 jest.mock('../../supabase', () => ({
     supabase: require('../helpers/mockSupabase').createSupabaseMock(),
@@ -12,33 +12,34 @@ const { supabase } = require('../../supabase');
 const { getGame, setGame } = require('../../lib/gameStore');
 const { useServer, once, record, sleep, opsFor, ISO_DATE } = require('./harness');
 
+const emitAck = (socket, event, payload) => new Promise((resolve) => socket.emit(event, payload, resolve));
+
 const ctx = useServer();
 
 describe('send_message', () => {
-    test('frontend shape { text } → broadcast as-is with from_user_id, persisted with content undefined (BUG pinned)', async () => {
+    test('frontend shape { text } → broadcast with from_user_id and persisted as the message content [G6]', async () => {
+        // Was: "persisted with content undefined (BUG pinned)" — the server read `message`.
         const { game, white, black } = await ctx.seatedGame();
         const toBlack = once(black, 'chat_message');
         const toWhite = once(white, 'chat_message');
-        white.emit('send_message', { game_id: game.id, from: 'whitey', text: 'gl hf' });
+        const ack = await emitAck(white, 'send_message', { game_id: game.id, from: 'whitey', text: 'gl hf' });
 
         const expected = { game_id: game.id, from: 'whitey', text: 'gl hf', from_user_id: 'white-user' };
+        expect(ack).toEqual({ ok: true });
         expect(await toBlack).toEqual(expected);
         expect(await toWhite).toEqual(expected);
 
         await sleep(20);
         expect(opsFor('messages')).toEqual([
-            [['insert', { game_id: game.id, user_id: 'white-user', content: undefined, created_at: ISO_DATE }]],
+            [['insert', { game_id: game.id, user_id: 'white-user', content: 'gl hf', created_at: ISO_DATE }]],
         ]);
-        // Supabase serialises the undefined content as a missing column → NULL in the DB.
-        const insert = supabase.op(supabase.callsFor('messages')[0], 'insert')[0];
-        expect(insert.content).toBeUndefined();
     });
 
-    test('{ message } is what gets persisted; a spoofed from_user_id is overridden', async () => {
+    test('an older { message } payload is read as the text; a spoofed from_user_id is overridden', async () => {
         const { game, white, black } = await ctx.seatedGame();
         const p = once(white, 'chat_message');
         black.emit('send_message', { game_id: game.id, message: 'hi', from_user_id: 'spoofed' });
-        expect(await p).toEqual({ game_id: game.id, message: 'hi', from_user_id: 'black-user' });
+        expect(await p).toEqual({ game_id: game.id, text: 'hi', from_user_id: 'black-user' });
         await sleep(20);
         expect(supabase.op(supabase.callsFor('messages')[0], 'insert')[0]).toEqual({
             game_id: game.id,
@@ -52,16 +53,38 @@ describe('send_message', () => {
         const { game, white, black } = await ctx.seatedGame();
         supabase.queue('messages', { data: null, error: { message: 'rls' } });
         const p = once(black, 'chat_message');
-        white.emit('send_message', { game_id: game.id, message: 'x' });
-        expect(await p).toMatchObject({ message: 'x' });
+        white.emit('send_message', { game_id: game.id, text: 'x' });
+        expect(await p).toMatchObject({ text: 'x' });
     });
 
-    test('chat still works after the game is completed (status is not checked)', async () => {
+    test('chat is closed once the game is over: refused with a reason, nothing relayed or stored [G6]', async () => {
+        // Was: "chat still works after the game is completed (status is not checked)".
         const { game, white, black } = await ctx.seatedGame();
         await setGame(game.id, { ...(await getGame(game.id)), status: 'completed' });
-        const p = once(black, 'chat_message');
-        white.emit('send_message', { game_id: game.id, message: 'gg' });
-        expect(await p).toEqual({ game_id: game.id, message: 'gg', from_user_id: 'white-user' });
+        const got = record(black, 'chat_message');
+        expect(await emitAck(white, 'send_message', { game_id: game.id, text: 'gg' })).toEqual({
+            ok: false,
+            error: 'game_not_active',
+        });
+        await sleep(50);
+        expect(got).toEqual([]);
+        expect(supabase.calls).toEqual([]);
+    });
+
+    test.each([
+        ['an empty message', { text: '   ' }],
+        ['a message over 500 characters', { text: 'x'.repeat(501) }],
+        ['no text at all', {}],
+    ])('%s → invalid_payload; nothing relayed or stored [G6]', async (_label, fields) => {
+        const { game, white, black } = await ctx.seatedGame();
+        const got = record(black, 'chat_message');
+        expect(await emitAck(white, 'send_message', { game_id: game.id, ...fields })).toEqual({
+            ok: false,
+            error: 'invalid_payload',
+        });
+        await sleep(50);
+        expect(got).toEqual([]);
+        expect(supabase.calls).toEqual([]);
     });
 
     test('spectators in the room receive chat but cannot send it', async () => {
@@ -70,24 +93,30 @@ describe('send_message', () => {
         spectator.emit('spectate_game', game.id);
         await sleep(50);
         const heard = once(spectator, 'chat_message');
-        white.emit('send_message', { game_id: game.id, message: 'hello room' });
+        white.emit('send_message', { game_id: game.id, text: 'hello room' });
         expect(await heard).toMatchObject({ from_user_id: 'white-user' });
 
         const blackGot = record(black, 'chat_message');
-        spectator.emit('send_message', { game_id: game.id, message: 'from the crowd' });
-        await sleep(80);
+        expect(await emitAck(spectator, 'send_message', { game_id: game.id, text: 'from the crowd' })).toEqual({
+            ok: false,
+            error: 'not_a_player',
+        });
+        await sleep(50);
         expect(blackGot).toEqual([]);
         expect(opsFor('messages')).toHaveLength(1);
     });
 
-    test('a non-participant, a missing game_id, or a game not in Redis → ignored, nothing persisted', async () => {
+    test('a non-participant, a missing game_id, or a game not in Redis → refused, nothing persisted', async () => {
         const { game, black } = await ctx.seatedGame();
         const outsider = await ctx.connect();
         const got = record(black, 'chat_message');
-        outsider.emit('send_message', { game_id: game.id, message: 'outsider' });
-        black.emit('send_message', { message: 'no game id' });
-        black.emit('send_message', { game_id: 'not-in-redis', message: 'lost' });
-        await sleep(100);
+        expect(await emitAck(outsider, 'send_message', { game_id: game.id, text: 'outsider' })).toMatchObject({ ok: false });
+        expect(await emitAck(black, 'send_message', { text: 'no game id' })).toEqual({ ok: false, error: 'invalid_payload' });
+        expect(await emitAck(black, 'send_message', { game_id: 'not-in-redis', text: 'lost' })).toEqual({
+            ok: false,
+            error: 'game_not_found',
+        });
+        await sleep(50);
         expect(got).toEqual([]);
         expect(supabase.calls).toEqual([]);
     });

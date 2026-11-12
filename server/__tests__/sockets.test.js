@@ -387,8 +387,8 @@ describe('chat', () => {
     test('players can chat; the sender id is set by the server', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'chat_message');
-        white.emit('send_message', { game_id: 'game-1', message: 'gl hf', from_user_id: 'spoofed' });
-        expect(await p).toMatchObject({ message: 'gl hf', from_user_id: 'white-user' });
+        white.emit('send_message', { game_id: 'game-1', text: 'gl hf', from_user_id: 'spoofed' });
+        expect(await p).toMatchObject({ text: 'gl hf', from_user_id: 'white-user' });
         await sleep(20);
         expect(supabase.op(supabase.callsFor('messages')[0], 'insert')[0]).toMatchObject({ user_id: 'white-user', content: 'gl hf' });
     });

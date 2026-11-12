@@ -74,10 +74,34 @@ describe('resign (there is no game_end schema: clients cannot report results) [S
     });
 });
 
-describe('send_message', () => {
-    test('bounds the text', () => {
-        expect(ok('send_message', { game_id: 'g1', text: 'hi' })).toBe(true);
+describe('send_message [G6]', () => {
+    const parse = (payload) => schemas.send_message.safeParse(payload);
+
+    test('reads the `text` the web client sends, trimmed', () => {
+        expect(parse({ game_id: 'g1', from: 'me', text: '  hi  ' }).data).toEqual({ game_id: 'g1', from: 'me', text: 'hi' });
+    });
+
+    test('an older `message` field is accepted as the text; `text` wins when both are sent', () => {
+        expect(parse({ game_id: 'g1', message: 'old' }).data).toEqual({ game_id: 'g1', text: 'old' });
+        expect(parse({ game_id: 'g1', text: 'new', message: 'old' }).data).toEqual({ game_id: 'g1', text: 'new' });
+    });
+
+    test('bounds the length: 500 characters at most', () => {
+        expect(ok('send_message', { game_id: 'g1', text: 'x'.repeat(500) })).toBe(true);
         expect(ok('send_message', { game_id: 'g1', text: 'x'.repeat(501) })).toBe(false);
+        expect(ok('send_message', { game_id: 'g1', message: 'x'.repeat(501) })).toBe(false);
+    });
+
+    test.each([
+        ['no text', { game_id: 'g1' }],
+        ['an empty text', { game_id: 'g1', text: '' }],
+        ['only whitespace', { game_id: 'g1', text: '   ' }],
+        ['a non-string text', { game_id: 'g1', text: { $ne: 1 } }],
+        ['no game id', { text: 'hi' }],
+    ])('rejects %s', (_label, payload) => expect(ok('send_message', payload)).toBe(false));
+
+    test('a client-supplied sender id is stripped', () => {
+        expect(parse({ game_id: 'g1', text: 'hi', from_user_id: 'victim' }).data).toEqual({ game_id: 'g1', text: 'hi' });
     });
 });
 

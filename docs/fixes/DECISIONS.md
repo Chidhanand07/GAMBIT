@@ -55,6 +55,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
 | [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
 | [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
+| [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
 
 ---
 
@@ -1321,3 +1322,27 @@ instead of one file per ADR under `docs/refactor/adr/`.
   the loser of a flag fall has 0.
 - **Frozen and unstarted clocks** are stored as they are (`clocksAt` does not charge them).
 - **`now` is injected** into the finalizer (default `Date.now`), like in the other services.
+
+## F-035
+
+**Chat reads the field the web client sends, bounds it, and is closed once the game is over (G6).**
+
+- **Context.** The client sends `{ game_id, from, text }`. The server persisted
+  `data.message`, so every chat line was stored with a NULL content, and it relayed the whole
+  payload as received. Chat kept working after the game had ended.
+- **Decision.**
+  - Schema: `text` (or an older `message`, read as the text) is trimmed and must be 1–500
+    characters; otherwise `invalid_payload`.
+  - Service: the same `playerRejection` rule moves and resignations use: the caller must be
+    one of the two players of an **active** game. A refusal is an ack with the reason
+    (`not_a_player`, `game_not_active`, `game_not_found`); it used to be silence.
+  - The relayed `chat_message` is a fixed shape: `{ game_id, from?, text, from_user_id }`.
+    `from_user_id` is the verified user. Nothing else a client adds is relayed.
+  - The service takes the verified user id as an argument (the handler has it), so it no
+    longer needs the session registry.
+- **Closed after the game.** The brief asks for it. A finished or aborted game's room is a
+  result screen; a channel that stays open there has no moderation and no end.
+- **Left as is: `from`.** The display name next to a message is still the one the client
+  sends (bounded to 64 characters). Identity is `from_user_id`; deriving the shown name from
+  it is a web-client change (the game page would map the id to the player's username) and is
+  listed for the last phase.

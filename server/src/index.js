@@ -92,7 +92,6 @@ startGlobalClock(createClockService({ gameStore, finalizer, emitter }));
 const chatService = createChatService({
     gameStore,
     messagesRepo: createMessagesRepository(supabase),
-    sessions,
     emitter,
 });
 
