@@ -32,6 +32,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-015](#f-015) | Engine endpoints require `X-Engine-Key`; reviews only for existing, completed games | 2 | ENG-AUTH |
 | [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
 | [F-017](#f-017) | Profiles: column privileges + owner policies; no client INSERT; dead server action removed | 3 | S11 |
+| [F-018](#f-018) | Invite tokens move to `game_invites` (service-role only), expand → deploy → contract | 3 | INV-TOKEN |
 
 ---
 
@@ -650,3 +651,59 @@ instead of one file per ADR under `docs/refactor/adr/`.
   display fields update; another user's row is affected 0 times; inserts are refused; the policy
   definitions and the exact set of updatable columns are asserted. Run against the old schema,
   22 of the 31 fail.
+
+## F-018
+
+**Invite tokens live in `public.game_invites`, not on `public.games` (INV-TOKEN).**
+
+- **Context.** `games` has the policy "Games are viewable by everyone" (`USING (true)`), and it
+  carried `invite_token` and `invite_expires_at`. With nothing but the public API key anyone
+  could `select invite_token from games where status = 'waiting'` and join other people's
+  private games. S8 stopped the *application* from returning the token; the *database* still
+  handed it out.
+- **Options.**
+  1. (a) column privileges on `games` (revoke `SELECT (invite_token)`); (b) a narrower `SELECT`
+     policy on `games`; (c) move the token to its own table.
+  2. Rollout: (a) one migration that adds the table and drops the columns; (b) expand →
+     deploy → contract in two files.
+  3. Invites created by the *old* code between "expand" and the new deploy: (a) accept that
+     they are lost; (b) mirror them with a trigger until "contract".
+- **Decision.** 1c, 2b, 3b.
+  - **(a) `20261112100100_game_invites_expand.sql`**: `game_invites(game_id pk → games on delete
+    cascade, token unique not null, expires_at, created_at)`, RLS enabled with **no policies**,
+    `REVOKE ALL` from `PUBLIC, anon, authenticated`, backfill from `games`, and a trigger that
+    mirrors `games.invite_token` writes into the new table.
+  - **Code**: the game server (`gameInvitesRepository`, `privateGameService`) and the Next.js
+    `POST /api/games/private/create` insert the game without any token column and store the
+    invite separately; a lookup goes token → `game_invites` → `games` by id. If the invite
+    cannot be stored the game row is deleted again.
+  - **(b) `20261112100300_game_invites_contract.sql`**: one more backfill, drop the trigger, the
+    function, the index and both columns.
+- **Why.**
+  - *Own table*: column-level `SELECT` revokes break `select *` for the API roles (PostgREST
+    answers 401/403 for the whole request), and every existing reader of `games` uses `*`. A
+    row policy cannot hide a column. A separate table with RLS and no policies is invisible to
+    the API roles by construction, which is also what the brief specifies.
+  - *Two steps*: dropping the columns in the same migration would break the running server (it
+    filters `games` by `invite_token`) for as long as the deploy takes, and makes the migration
+    impossible to roll back without data loss.
+  - *Mirror trigger*: invites are valid for 48 hours. Without it, an invite created in the
+    minutes between applying (a) and the new server going live would be a dead link.
+- **Deploy order (also in the report).**
+  1. Apply `20261112100000`, `…100100` (expand) and `…100200`.
+  2. Deploy the game server and the frontend from this PR.
+  3. Apply `…100300` (contract).
+  `supabase db push` applies every pending file at once, so do not use it for this release
+  unless step 2 is already done; apply the files individually (SQL editor or `psql -f`) and then
+  record them with `supabase migration repair --status applied <version>`.
+- **Rollback.** Before (b): redeploy the old code; the columns are still there and the trigger
+  kept them authoritative for anything the old code wrote, but invites created by the *new*
+  code exist only in `game_invites`, so those links stop working (they can be copied back with
+  one `UPDATE … FROM game_invites`). After (b): re-add the two columns and copy the tokens back
+  from `game_invites` before redeploying old code.
+- **Behaviour.** None visible. The creator still gets the token once, from the create route;
+  the join page still resolves it through the game server. The server no longer logs the token
+  when an invite has expired.
+- **Tests.** `supabase/tests/02_game_invites.test.sql` (13 assertions): `anon` and `authenticated`
+  get `42501` on any access to `game_invites`; a `games` row has no token columns;
+  `service_role` reads the invite; one invite per game; cascade on delete.

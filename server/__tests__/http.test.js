@@ -79,8 +79,10 @@ describe('public endpoints', () => {
     });
 
     test('GET /api/games/join/:token returns the game or 404', async () => {
-        const game = { id: 'g', invite_expires_at: new Date(Date.now() + 1e6).toISOString() };
-        supabase.queue('games', { data: game, error: null }, { data: null, error: null });
+        const game = { id: 'g' };
+        // INV-TOKEN: the token resolves through game_invites; an unknown token finds no invite.
+        supabase.queue('game_invites', { data: { game_id: 'g', expires_at: new Date(Date.now() + 1e6).toISOString() }, error: null });
+        supabase.queue('games', { data: game, error: null });
         expect((await request(app).get('/api/games/join/tok')).body).toMatchObject({ id: 'g' });
         expect((await request(app).get('/api/games/join/bad')).status).toBe(404);
     });

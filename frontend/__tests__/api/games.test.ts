@@ -190,17 +190,34 @@ describe('POST /api/games/private/create', () => {
 
     test('creates a waiting, unrated-by-default game with a 10-char token valid for 48 h', async () => {
         db.queue('games', echo)
-        const res = await json(await post({ timeControl: '5+3' }))
+        const res = await json(await post({ timeControl: '5+3', color: 'white' }))
         expect(res.body.game_id).toBe(uid('g-new'))
         expect(res.body.token).toMatch(/^[A-Za-z0-9]{10}$/)
 
+        // INV-TOKEN: the games row (readable through the public API key) carries no token...
         const row = db.op(db.callsFor('games')[0], 'insert')![0]
-        expect(row).toMatchObject({ time_control: '5+3', status: 'waiting', is_rated: false, invite_token: res.body.token })
-        expect(new Date(row.invite_expires_at).getTime() - NOW).toBe(48 * 3600_000)
+        expect(row).toEqual({ white_id: expect.anything(), black_id: null, time_control: '5+3', status: 'waiting', is_rated: false })
+        expect(row).not.toHaveProperty('invite_token')
+        expect(row).not.toHaveProperty('invite_expires_at')
+
+        // ...it is stored in game_invites, which only the service role can read.
+        const invite = db.op(db.callsFor('game_invites')[0], 'insert')![0]
+        expect(invite).toEqual({ game_id: uid('g-new'), token: res.body.token, expires_at: expect.any(String) })
+        expect(new Date(invite.expires_at).getTime() - NOW).toBe(48 * 3600_000)
     })
 
     test('database error → 400', async () => {
         db.queue('games', { data: null, error: { message: 'insert failed' } })
         expect(await json(await post({ timeControl: '10' }))).toEqual({ status: 400, body: { error: 'insert failed' } })
+        expect(db.callsFor('game_invites')).toEqual([])
+    })
+
+    test('if the invite cannot be stored the game is deleted again and no token is returned [INV-TOKEN]', async () => {
+        db.queue('games', echo)
+        db.queue('game_invites', { data: null, error: { message: 'invite insert failed' } })
+        const res = await json(await post({ timeControl: '10' }))
+        expect(res).toEqual({ status: 400, body: { error: 'invite insert failed' } })
+        const cleanup = db.callsFor('games')[1]
+        expect(cleanup.ops).toEqual([['delete'], ['eq', 'id', uid('g-new')]])
     })
 })

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { insertGame } from '@/lib/server/games';
+import { deleteGame, insertGame, insertGameInvite } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
-import { buildPrivateGameRow } from '@/lib/server/privateGames';
+import { buildPrivateGameRow, newInvite } from '@/lib/server/privateGames';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseJsonBody, schemas } from '@/lib/server/validation';
 
@@ -18,10 +18,18 @@ export async function POST(req: NextRequest) {
     if (!body.ok) return body.response;
     const { timeControl, color, isRated } = body.data;
 
-    const row = buildPrivateGameRow(userId, { timeControl, color, isRated });
-
-    const { data, error } = await insertGame(createAdminClient(), row);
-
+    const admin = createAdminClient();
+    const { data, error } = await insertGame(admin, buildPrivateGameRow(userId, { timeControl, color, isRated }));
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ token: data.invite_token, game_id: data.id });
+
+    // The token goes to game_invites, never onto the (publicly readable) games row.
+    const invite = newInvite(data.id);
+    const { error: inviteError } = await insertGameInvite(admin, invite);
+    if (inviteError) {
+        await deleteGame(admin, data.id);
+        return NextResponse.json({ error: inviteError.message }, { status: 400 });
+    }
+
+    // The creator is the only caller that ever receives the token, and only here.
+    return NextResponse.json({ token: invite.token, game_id: data.id });
 }
