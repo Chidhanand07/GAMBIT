@@ -14,14 +14,12 @@ interface MatchmakingOptions {
     getTcMinutes: () => TcMinutes;
     /** Called when the server starts a game for this user (e.g. a friend joined the invite). */
     onGameStart: () => void;
+    /** Called when the server paired us but could not create the game (we are out of the queue). */
+    onMatchFailed?: (reason: string) => void;
 }
 
-/**
- * Queue state, the search timer and the match_found / game_start / connect
- * listeners. Unmounting removes the listeners but does NOT emit leave_queue.
- */
-export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameStart }: MatchmakingOptions) {
-    const [searching, setSearching] = useState(false);
+/** Seconds spent searching; resets to 0 when the search stops. */
+function useSearchTimer(searching: boolean): number {
     const [searchTime, setSearchTime] = useState(0);
 
     useEffect(() => {
@@ -34,12 +32,36 @@ export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameSt
         return () => clearInterval(interval);
     }, [searching]);
 
+    return searchTime;
+}
+
+/**
+ * Queue state, the search timer and the match_found / match_failed / game_start / connect
+ * listeners. Unmounting removes the listeners but does NOT emit leave_queue.
+ */
+export function useMatchmaking({
+    socket,
+    router,
+    profile,
+    getTcMinutes,
+    onGameStart,
+    onMatchFailed,
+}: MatchmakingOptions) {
+    const [searching, setSearching] = useState(false);
+    const searchTime = useSearchTimer(searching);
+
     useEffect(() => {
         if (!socket) return;
 
         const onMatchFound = (data: { id?: string; game_id?: string; white_id: string; black_id: string }) => {
             setSearching(false);
             router.push(`/game/${data.id ?? data.game_id}`);
+        };
+
+        // The pairing fell through on the server: stop "searching" and say so.
+        const onMatchFailure = (data: { reason: string }) => {
+            setSearching(false);
+            onMatchFailed?.(data.reason);
         };
 
         const onGameStarted = (data: { id: string }) => {
@@ -60,15 +82,17 @@ export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameSt
         };
 
         socket.on('match_found', onMatchFound);
+        socket.on('match_failed', onMatchFailure);
         socket.on('game_start', onGameStarted);
         socket.on('connect', onConnect);
 
         return () => {
             socket.off('match_found', onMatchFound);
+            socket.off('match_failed', onMatchFailure);
             socket.off('game_start', onGameStarted);
             socket.off('connect', onConnect);
         };
-    }, [socket, router, profile, searching, getTcMinutes, onGameStart]);
+    }, [socket, router, profile, searching, getTcMinutes, onGameStart, onMatchFailed]);
 
     const joinQueue = (payload: JoinQueuePayload) => {
         socket?.emit('join_queue', payload);

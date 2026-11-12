@@ -76,9 +76,14 @@ describe('createQueueEntry', () => {
         });
     });
 
-    test.each([0, null, undefined])('falsy rating %p → 1200 (`||`, not `??`)', (rating) => {
+    test.each([null, undefined])('missing rating %p → 1200', (rating) => {
         const e = createQueueEntry({ user: { id: 'u', username: 'u', rating }, socketId: 's', now: NOW });
         expect(e.rating).toBe(1200);
+    });
+
+    test('a rating of 0 is a rating, not "missing" (`??`, not `||`) [G12]', () => {
+        const e = createQueueEntry({ user: { id: 'u', username: 'u', rating: 0 }, socketId: 's', now: NOW });
+        expect(e.rating).toBe(0);
         expect(e.isProvisional).toBe(true);
     });
 });

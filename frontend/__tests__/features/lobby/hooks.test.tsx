@@ -102,6 +102,20 @@ describe('useMatchmaking', () => {
         ]);
     });
 
+    test('match_failed stops the search and reports it; nothing navigates [G12]', () => {
+        const onMatchFailed = jest.fn();
+        const { result } = renderHook(() =>
+            useMatchmaking({ socket, router, profile, getTcMinutes: () => ({ mins: 3, inc: 0 }), onGameStart: jest.fn(), onMatchFailed }),
+        );
+        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3+0', increment: 0 }));
+        expect(result.current.searching).toBe(true);
+
+        act(() => fake.serverSends('match_failed', { reason: 'game_creation_failed' }));
+        expect(result.current.searching).toBe(false);
+        expect(onMatchFailed).toHaveBeenCalledWith('game_creation_failed');
+        expect(router.push).not.toHaveBeenCalled();
+    });
+
     test('match_found stops searching and navigates (id, else game_id); game_start calls onGameStart', () => {
         const onGameStart = jest.fn();
         const { result } = setup(onGameStart);

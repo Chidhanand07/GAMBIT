@@ -109,22 +109,22 @@ export interface ClientToServerEvents {
 
 // ── server → client ──────────────────────────────────────────────────────────
 
-/** Matchmaking queue entry (server/services/matchmaking.js), sent as `match_found.opponent`. */
-export interface QueueEntry {
+/** What `match_found` tells a player about the opponent: public facts only. */
+export interface MatchOpponent {
     user_id: string;
     username: string;
     rating: number;
     isProvisional: boolean;
-    time_control: TimeControl;
-    increment: number;
-    isRated: boolean;
-    joined_at: number;
-    socketId: string;
 }
 
 export interface MatchFoundPayload extends Game {
     color: PlayerColor;
-    opponent: QueueEntry;
+    opponent: MatchOpponent;
+}
+
+/** The server paired us but could not create the game; we are out of the queue. */
+export interface MatchFailedPayload {
+    reason: 'game_creation_failed';
 }
 
 export interface ClockSyncPayload {
@@ -210,6 +210,7 @@ export interface ServerToClientEvents {
     /** Broadcast to every socket. */
     queue_status: (payload: { players_searching: number }) => void;
     match_found: (payload: MatchFoundPayload) => void;
+    match_failed: (payload: MatchFailedPayload) => void;
     /** Emitted by POST /api/games/join/:token with the joined game row. */
     game_start: (payload: Game) => void;
     game_state_sync: (payload: GameStateSyncPayload) => void;

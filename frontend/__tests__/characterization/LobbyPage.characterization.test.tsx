@@ -66,9 +66,9 @@ describe('mount & static content', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/games/active']])
     })
 
-    test('subscribes only to match_found, game_start and connect (no queue_joined / queue_status handling)', async () => {
+    test('subscribes to match_found, match_failed, game_start and connect (no queue_joined / queue_status handling)', async () => {
         await renderLobby()
-        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_found'])
+        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_failed', 'match_found'])
         expect(socket.emit).not.toHaveBeenCalled()
     })
 

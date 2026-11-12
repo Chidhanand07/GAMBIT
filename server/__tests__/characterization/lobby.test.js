@@ -12,7 +12,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, waitFor, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS } = require('./harness');
+const { useServer, once, record, sleep, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS } = require('./harness');
 
 const ctx = useServer();
 
@@ -102,9 +102,9 @@ describe('join_queue', () => {
         expect(ctx.matchmaking.queue.get('q1')).toMatchObject({ rating: 1200, isProvisional: true, isRated: true });
     });
 
-    test('rating 0 in the DB becomes 1200 inside matchmaking (`|| 1200`)', async () => {
+    test('rating 0 in the DB stays 0 inside matchmaking (`??`, not `||`) [G12]', async () => {
         await queued('q1', {}, { rating_rapid: 0 });
-        expect(ctx.matchmaking.queue.get('q1').rating).toBe(1200);
+        expect(ctx.matchmaking.queue.get('q1').rating).toBe(0);
     });
 
     test('the queued player is the verified user: no payload id is needed, and a foreign one is ignored [S2]', async () => {
@@ -199,21 +199,6 @@ describe('pairing', () => {
         return { s1, s2, m1, m2 };
     }
 
-    function entry(id, socketId, rating, extra = {}) {
-        return {
-            user_id: id,
-            username: `${id}-name`,
-            rating,
-            isProvisional: false,
-            time_control: '10+0',
-            increment: 0,
-            isRated: true,
-            joined_at: expect.any(Number),
-            socketId,
-            ...extra,
-        };
-    }
-
     test('Math.random() <= 0.5 → the later player is white', async () => {
         const { m1, m2 } = await pairUp(0.5);
         expect(m1).toMatchObject({ white_id: 'p2', black_id: 'p1', color: 'black', opponent: { user_id: 'p2' } });
@@ -232,9 +217,12 @@ describe('pairing', () => {
             status: 'active',
             started_at: ISO_DATE,
         };
-        // NOTE pinned: `opponent` is the raw queue entry, leaking the opponent's socketId.
-        expect(m1).toEqual({ ...row, color: 'white', opponent: entry('p2', s2.id, 1520) });
-        expect(m2).toEqual({ ...row, color: 'black', opponent: entry('p1', s1.id, 1500) });
+        // Was: `opponent` is the raw queue entry, leaking the opponent's socketId (pinned). Now four public fields [G12].
+        const opponent = (id, rating) => ({ user_id: id, username: `${id}-name`, rating, isProvisional: false });
+        expect(m1).toEqual({ ...row, color: 'white', opponent: opponent('p2', 1520) });
+        expect(m2).toEqual({ ...row, color: 'black', opponent: opponent('p1', 1500) });
+        expect(JSON.stringify([m1, m2])).not.toContain(s1.id);
+        expect(JSON.stringify([m1, m2])).not.toContain(s2.id);
         expect(ctx.matchmaking.queue.size).toBe(0);
 
         expect(opsFor('games')).toEqual([
@@ -319,14 +307,18 @@ describe('pairing', () => {
         expect(ctx.matchmaking.queue.size).toBe(2);
     });
 
-    test('games insert failure drops BOTH players from the queue with no event (pinned)', async () => {
+    test('games insert failure: both players get match_failed and leave the queue; nothing is seeded [G12]', async () => {
+        // Was: "drops BOTH players from the queue with no event (pinned)".
         supabase.queue('games', { data: null, error: { message: 'insert failed' } });
         const { s: s1 } = await queued('p1', {}, { rating_rapid: 1500 });
         const found = record(s1, 'match_found');
+        const failed1 = once(s1, 'match_failed', TICK_TIMEOUT_MS);
         const { s: s2 } = await queued('p2', {}, { rating_rapid: 1500 });
         const found2 = record(s2, 'match_found');
-        await waitFor(() => opsFor('games').length === 1, TICK_TIMEOUT_MS, 'games insert');
-        await sleep(50);
+        const failed2 = once(s2, 'match_failed', TICK_TIMEOUT_MS);
+
+        expect(await failed1).toEqual({ reason: 'game_creation_failed' });
+        expect(await failed2).toEqual({ reason: 'game_creation_failed' });
         expect(opsFor('games')).toHaveLength(1);
         expect(found).toEqual([]);
         expect(found2).toEqual([]);

@@ -17,6 +17,7 @@ import { SearchPanel } from '@/features/lobby/components/SearchPanel';
 import { TimeControlPicker } from '@/features/lobby/components/TimeControlPicker';
 import { WelcomeBar } from '@/features/lobby/components/WelcomeBar';
 import { useActiveGame } from '@/features/lobby/hooks/useActiveGame';
+import { useMatchFailedToast } from '@/features/lobby/hooks/useMatchFailedToast';
 import { useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
 import { usePrivateGame } from '@/features/lobby/hooks/usePrivateGame';
 import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSelection';
@@ -37,12 +38,14 @@ export default function LobbyPage() {
     const timeControl = useTimeControlSelection();
     const activeGame = useActiveGame();
     const closePrivateModalOnStart = useCallback(() => setIsPrivateModalOpen(false), []);
+    const reportMatchFailed = useMatchFailedToast();
     const matchmaking = useMatchmaking({
         socket,
         router,
         profile: myProfile,
         getTcMinutes: timeControl.getTcMinutes,
         onGameStart: closePrivateModalOnStart,
+        onMatchFailed: reportMatchFailed,
     });
     const privateGame = usePrivateGame({
         socket,

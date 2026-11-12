@@ -5,12 +5,16 @@
  * owns the 1 s interval.
  */
 const pairing = require('../domain/matchmaking/pairing');
+const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
 const { DEFAULT_TIME_CONTROL, formatTimeControl, parseTimeControl, ratingField } = require('../domain/timeControl');
 
 const DEFAULT_RATING = 1200;
 const ESTIMATED_WAIT_SECONDS = 10;
 const INVALID_TIME_CONTROL = Object.freeze({ ok: false, error: 'invalid_time_control' });
+const GAME_CREATION_FAILED = Object.freeze({ reason: 'game_creation_failed' });
+/** Above this `random()` value the longer-waiting player gets White. */
+const WHITE_FOR_FIRST_THRESHOLD = 0.5;
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -92,28 +96,52 @@ async function requestMatch(mm, data, socketId) {
 }
 
 /**
+ * Insert the `games` row for a pair. A failure (an error result or a throw) is
+ * logged and reported as null.
+ * @param {Matchmaker} mm
+ * @param {QueueEntry} white
+ * @param {QueueEntry} black
+ * @returns {Promise<any | null>} the created row
+ */
+async function insertGame({ gamesRepo }, white, black) {
+    try {
+        const { data, error } = await gamesRepo.insertReturning({
+            white_id: white.user_id,
+            black_id: black.user_id,
+            time_control: white.time_control,
+            increment: white.increment,
+            status: 'active',
+            started_at: new Date().toISOString(),
+        });
+        if (!error && data) return data;
+        console.error('[matchmaking] createGame error:', error?.message);
+    } catch (e) {
+        console.error('[matchmaking] createGame error:', /** @type {Error} */ (e).message);
+    }
+    return null;
+}
+
+/**
  * Create the DB game and Redis state for a pair and notify both sockets.
+ *
+ * If the game cannot be created both players are told (`match_failed`) and
+ * are out of the queue: they used to be dropped without a word, still showing
+ * "searching" (G12). They are not re-queued automatically: with the database
+ * failing that would retry the insert every second for every pair.
  * @param {Matchmaker} mm
  * @param {QueueEntry} p1
  * @param {QueueEntry} p2
  */
-async function createGame({ queue, gamesRepo, gameStore, emitter, random, now }, p1, p2) {
+async function createGame(mm, p1, p2) {
+    const { queue, gameStore, emitter, random, now } = mm;
     queue.delete(p1.user_id);
     queue.delete(p2.user_id);
 
-    const [white, black] = random() > 0.5 ? [p1, p2] : [p2, p1];
+    const [white, black] = random() > WHITE_FOR_FIRST_THRESHOLD ? [p1, p2] : [p2, p1];
 
-    const { data, error } = await gamesRepo.insertReturning({
-        white_id: white.user_id,
-        black_id: black.user_id,
-        time_control: p1.time_control,
-        increment: p1.increment,
-        status: 'active',
-        started_at: new Date().toISOString(),
-    });
-
-    if (error || !data) {
-        console.error('[matchmaking] createGame error:', error?.message);
+    const data = await insertGame(mm, white, black);
+    if (!data) {
+        for (const player of [p1, p2]) emitter.toRoom(player.socketId, 'match_failed', GAME_CREATION_FAILED);
         return;
     }
 
@@ -131,8 +159,10 @@ async function createGame({ queue, gamesRepo, gameStore, emitter, random, now },
     );
     await gameStore.addActiveGame(data.id);
 
-    emitter.toRoom(white.socketId, 'match_found', { ...data, color: 'white', opponent: black });
-    emitter.toRoom(black.socketId, 'match_found', { ...data, color: 'black', opponent: white });
+    // The public view of the game, and public facts about the opponent: nothing else.
+    const game = toPublicGame(data);
+    emitter.toRoom(white.socketId, 'match_found', { ...game, color: 'white', opponent: pairing.opponentView(black) });
+    emitter.toRoom(black.socketId, 'match_found', { ...game, color: 'black', opponent: pairing.opponentView(white) });
 }
 
 /**

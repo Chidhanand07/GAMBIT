@@ -55,7 +55,8 @@ function isProvisional(gamesPlayed) {
 }
 
 /**
- * The queue record for a player. A falsy rating (0, null, undefined) becomes 1200.
+ * The queue record for a player. A missing rating (null, undefined) becomes 1200;
+ * 0 is a rating like any other (G12).
  * @param {object} params
  * @param {{ id: string, username: string, rating?: number | null, games_played?: number | null }} params.user
  * @param {string} params.socketId
@@ -69,7 +70,7 @@ function createQueueEntry({ user, socketId, timeControl, increment, isRated, now
     return {
         user_id: user.id,
         username: user.username,
-        rating: user.rating || DEFAULT_QUEUE_RATING,
+        rating: user.rating ?? DEFAULT_QUEUE_RATING,
         isProvisional: isProvisional(user.games_played),
         time_control: timeControl,
         increment,
@@ -77,6 +78,17 @@ function createQueueEntry({ user, socketId, timeControl, increment, isRated, now
         joined_at: now,
         socketId,
     };
+}
+
+/**
+ * What one player is told about the other in `match_found`: public facts
+ * only. The queue entry itself also holds the opponent's socket id and queue
+ * timing, which are nobody else's business (G12).
+ * @param {QueueEntry} entry
+ * @returns {{ user_id: string, username: string, rating: number, isProvisional: boolean }}
+ */
+function opponentView({ user_id, username, rating, isProvisional }) {
+    return { user_id, username, rating, isProvisional };
 }
 
 /**
@@ -160,6 +172,7 @@ module.exports = {
     getSearchRadius,
     isProvisional,
     createQueueEntry,
+    opponentView,
     isRatingCompatible,
     sortByLongestWaiting,
     sameTimeControl,

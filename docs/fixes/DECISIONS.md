@@ -56,6 +56,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
 | [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
 | [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
+| [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
 
 ---
 
@@ -1346,3 +1347,28 @@ instead of one file per ADR under `docs/refactor/adr/`.
   sends (bounded to 64 characters). Identity is `from_user_id`; deriving the shown name from
   it is a web-client change (the game page would map the id to the player's username) and is
   listed for the last phase.
+
+## F-036
+
+**`match_found` is a minimal DTO, a failed game insert is reported with `match_failed`, and a rating of 0 is a rating (G12).**
+
+- **Context.** Three small defects in `matchmakingService.createGame`:
+  1. `match_found.opponent` was the raw queue entry: the opponent's socket id, queue timing,
+     time control and rated flag. The game part was the raw inserted row.
+  2. If the `games` insert failed, both players had already been removed from the queue, got
+     no event, and kept showing "searching" forever.
+  3. `rating: user.rating || 1200` turned a rating of 0 into 1200.
+- **Decision.**
+  1. `opponent` is `pairing.opponentView(entry)`: `{ user_id, username, rating,
+     isProvisional }`. The game part is `toPublicGame(row)`, the allow-list the join endpoints
+     already use (S8).
+  2. On failure (an error result *or* a throw, which is also caught now so one failed pair
+     cannot abort the whole pairing pass) both players receive
+     `match_failed { reason: 'game_creation_failed' }`. They stay out of the queue.
+  3. `??`.
+- **Notify, not re-queue** (the brief allows either). If the database is failing, re-queued
+  pairs would be paired and re-inserted every second, each attempt logging an error and adding
+  load to the thing that is failing. Telling the players is honest and lets each decide; the
+  lobby stops the search and shows a toast ("could not start the game, please search again").
+- **Web client.** `useMatchmaking` listens for `match_failed`; `MatchFoundPayload.opponent` is
+  typed as the four public fields. Nothing in the client read the removed fields.

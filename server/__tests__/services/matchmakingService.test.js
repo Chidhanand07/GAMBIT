@@ -139,3 +139,63 @@ describe('time controls are canonical in the queue and in the game [TIME-CONTROL
         expect(profilesRepo.findForMatchmaking).not.toHaveBeenCalled();
     });
 });
+
+describe('match_found is a minimal DTO; a failed game insert is reported [G12]', () => {
+    const queueTwo = (svc) => {
+        // An established player inside the 800–1400 band may meet a provisional one.
+        svc.joinQueue({ user: { id: 'a', username: 'alice', rating: 1300, games_played: 50 }, socketId: 'sa', timeControl: '5+3' });
+        svc.joinQueue({ user: { id: 'b', username: 'bob', rating: 1510, games_played: 2 }, socketId: 'sb', timeControl: '5+3' });
+    };
+
+    test('the opponent is described by four public fields: no socket id, no queue internals', async () => {
+        const { svc, emitter } = setup({ random: 0.9 });
+        queueTwo(svc);
+        await svc.matchPlayers();
+
+        const [toWhite, toBlack] = emitter.named('match_found').map((e) => e.args[0]);
+        expect(toWhite.opponent).toEqual({ user_id: 'b', username: 'bob', rating: 1510, isProvisional: true });
+        expect(toBlack.opponent).toEqual({ user_id: 'a', username: 'alice', rating: 1300, isProvisional: false });
+        expect(JSON.stringify([toWhite, toBlack])).not.toMatch(/socketId|joined_at|"sa"|"sb"/);
+    });
+
+    test('the game part of match_found is the public view of the row', async () => {
+        const { svc, emitter, gamesRepo } = setup({ random: 0.9 });
+        gamesRepo.insertReturning.mockImplementation((row) =>
+            result({ id: 'g1', ...row, invite_token: 'SECRET', some_internal_column: 'x' }),
+        );
+        queueTwo(svc);
+        await svc.matchPlayers();
+        const payload = emitter.named('match_found')[0].args[0];
+        expect(payload).toMatchObject({ id: 'g1', white_id: 'a', black_id: 'b', time_control: '5+3', color: 'white' });
+        expect(payload).not.toHaveProperty('invite_token');
+        expect(payload).not.toHaveProperty('some_internal_column');
+    });
+
+    test('a failed game insert tells both players (match_failed) instead of dropping them silently', async () => {
+        const { svc, emitter, gamesRepo, gameStore } = setup();
+        gamesRepo.insertReturning.mockReturnValue(result(null, { message: 'insert failed' }));
+        queueTwo(svc);
+        await svc.matchPlayers();
+
+        expect(emitter.named('match_found')).toEqual([]);
+        expect(emitter.named('match_failed').map((e) => [e.room, e.args[0]])).toEqual([
+            ['sa', { reason: 'game_creation_failed' }],
+            ['sb', { reason: 'game_creation_failed' }],
+        ]);
+        // Out of the queue: each client decides whether to search again (no retry storm against a failing DB).
+        expect(svc.queue.size).toBe(0);
+        expect(gameStore.state.size).toBe(0);
+        expect(console.error).toHaveBeenCalledWith('[matchmaking] createGame error:', 'insert failed');
+    });
+
+    test('an insert that throws is reported the same way and does not stop the pairing pass', async () => {
+        const { svc, emitter, gamesRepo } = setup();
+        gamesRepo.insertReturning.mockImplementation(() => {
+            throw new Error('network down');
+        });
+        queueTwo(svc);
+        await expect(svc.matchPlayers()).resolves.toBeUndefined();
+        expect(emitter.named('match_failed')).toHaveLength(2);
+        expect(emitter.named('queue_status')).toHaveLength(1);
+    });
+});
