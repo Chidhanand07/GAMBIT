@@ -69,11 +69,12 @@ describe('disconnect during an active game', () => {
         white.disconnect();
         expect(await notice).toEqual({ userId: 'white-user', timeoutSeconds: 20 });
 
-        // lastMoveAt is left untouched although the clock was already snapshotted.
+        // The charged clock is stored with a fresh reference point, so nothing charges it twice [G9].
         expect(await getGame(game.id)).toEqual({
             ...before,
             whiteClockMs: 55000,
             blackClockMs: 600000,
+            lastMoveAt: T,
             disconnectInfo: { userId: 'white-user', side: 'white', at: T },
         });
         await sleep(20);
@@ -85,8 +86,8 @@ describe('disconnect during an active game', () => {
             ],
         ]);
 
-        // While paused, clock_sync subtracts the elapsed time AGAIN from the snapshot (pinned).
-        expect(await once(black, 'clock_sync', TICK_TIMEOUT_MS)).toEqual({ whiteMs: 50000, blackMs: 600000, serverTs: T });
+        // While paused, clock_sync reports the frozen clocks: the elapsed time is charged once [G9].
+        expect(await once(black, 'clock_sync', TICK_TIMEOUT_MS)).toEqual({ whiteMs: 55000, blackMs: 600000, serverTs: T });
     });
 
     test('black disconnecting → side "black"; clocks rounded in the DB snapshot', async () => {

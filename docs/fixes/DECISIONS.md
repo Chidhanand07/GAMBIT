@@ -50,6 +50,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
 | [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
 | [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
+| [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
 
 ---
 
@@ -1178,3 +1179,40 @@ instead of one file per ADR under `docs/refactor/adr/`.
   - The `game_end` payload is the same five fields for every ending. The `is_rated` and
     `time_control` extras on flag fall are gone; nothing in the web app read them.
   - A rating failure after a clock ending is logged as `[clock] game <id> error: …`.
+
+## F-030
+
+**One view of the clocks; a disconnect charges elapsed time once, and a reconnect never starts a clock that was not running (G8, G9).**
+
+- **Context.** Clock state is `whiteClockMs` / `blackClockMs` (time left as of `lastMoveAt`)
+  plus `lastMoveAt` (null before the first move). Three functions read it differently:
+  `clocksAt`, the ticker's `tickerSnapshot`, and an inline special case in the state sync.
+  - *G9*: on disconnect the service stored the already charged clocks but kept `lastMoveAt`;
+    the ticker then subtracted `now - lastMoveAt` again in every `clock_sync`, so the
+    disconnected side's clock visibly kept falling, twice as fast as it had run.
+  - *G8*: on reconnect the service set `lastMoveAt = now` unconditionally. For a game with no
+    move yet that *started* White's clock.
+- **Options for G9** (the brief names both): (a) store the charged time and reset
+  `lastMoveAt`; (b) store the raw time and keep `lastMoveAt`, subtracting the absence later.
+- **Decision.** (a), with the rule in one place, `domain/clock.js`:
+  - `isClockRunning(state)`: a move has been made **and** nobody is disconnected.
+  - `clocksAt(state, now)`: the only view of the clocks. It charges the side to move only
+    while the clock is running; otherwise the stored values are the answer. The ticker, the
+    state sync and the snapshot all call it. `tickerSnapshot` is deleted.
+  - `freezeClocks(state, now)` (disconnect): charged clocks, `lastMoveAt = now` if the clock
+    had started, else null.
+  - `resumeClocks(state, now)` (reconnect): `lastMoveAt = now` if the clock had started, else
+    null.
+- **Why (a).** With (b) every reader has to know about the absence, and the value in the
+  database (written at disconnect, F-028) would not be the real remaining time. With (a) the
+  stored clocks are always true as of `lastMoveAt`, and "frozen" is a single predicate.
+- **Behaviour changes.**
+  - While a player is disconnected both clocks stand still for everyone; the time away is not
+    charged to either side (that part is unchanged, it is the 20 s grace period).
+  - `game_state_sync.clockActive` is false while a player is disconnected (it was true). The
+    web client uses it to decide whether to count down locally.
+  - Reconnecting before the first move leaves both clocks full and stopped.
+- **Tests.** Pure tests for the four functions, including the 3 s + 10 s away + 2 s case; the
+  characterization cases "clock_sync subtracts the elapsed time AGAIN (pinned)" and
+  "lastMoveAt is reset to now … starts white's clock before the first move (pinned)" now
+  assert the correct behaviour.

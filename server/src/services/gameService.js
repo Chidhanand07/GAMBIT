@@ -10,7 +10,7 @@
  * Clocks are persisted in one column pair, `white_clock_ms` / `black_clock_ms`
  * (G2): the same pair the restore reads.
  */
-const { clocksAt } = require('../domain/clock');
+const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
 const { adjudicate, REASON } = require('../domain/adjudication');
 const { gameStateFromRow } = require('../domain/gameState');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
@@ -118,12 +118,8 @@ function sendState(ctx, game, client) {
         return;
     }
 
-    // Compute real remaining time for the active player
-    // (clocks are frozen while a player is disconnected)
-    const at = ctx.now();
-    const { whiteMs, blackMs } = game.disconnectInfo
-        ? { whiteMs: game.whiteClockMs, blackMs: game.blackClockMs }
-        : clocksAt(game, at);
+    // Real remaining time (frozen while a player is disconnected or before the first move).
+    const { whiteMs, blackMs } = clocksAt(game, ctx.now());
 
     client.emit('game_state_sync', {
         fen: game.fen,
@@ -131,7 +127,7 @@ function sendState(ctx, game, client) {
         whiteMs,
         blackMs,
         activeSide: game.activeSide,
-        clockActive: game.lastMoveAt !== null,
+        clockActive: isClockRunning(game),
         whiteId: game.whiteId,
         blackId: game.blackId,
     });
@@ -150,7 +146,7 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
     if (!gameId) return;
     const resumed = await gameStore.mutateGame(gameId, (/** @type {any} */ game) =>
         game && game.status === 'active' && game.disconnectInfo?.userId === userId
-            ? { ...game, disconnectInfo: null, lastMoveAt: now() }
+            ? { ...game, disconnectInfo: null, ...resumeClocks(game, now()) }
             : null,
     );
     if (!resumed) return;
@@ -222,10 +218,9 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
     const frozen = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
         // Defence in depth: a link is only ever created for a participant (see joinGame).
         if (!game || game.status !== 'active' || !isParticipant(game, userId)) return null;
-        // Snapshot the clock at disconnect time
-        const { whiteMs: whiteClockMs, blackMs: blackClockMs } = clocksAt(game, at);
+        // Charge the time used so far once and stop the clocks (G9).
         const side = colorOfPlayer(userId, game.whiteId);
-        return { ...game, whiteClockMs, blackClockMs, disconnectInfo: { userId, side, at } };
+        return { ...game, ...freezeClocks(game, at), disconnectInfo: { userId, side, at } };
     });
     if (!frozen) return;
 

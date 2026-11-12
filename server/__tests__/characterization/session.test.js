@@ -108,12 +108,11 @@ describe('reconnect during an active game', () => {
             ['clock_sync', { whiteMs: 600000, blackMs: 590000 }],
         ]);
 
-        // NOTE pinned: lastMoveAt is reset to "now" even though no move was ever
-        // made (it was null), which starts white's clock before the first move.
+        // No move had been made (lastMoveAt null): reconnecting must not start a clock [G8].
         expect(await getGame(game.id)).toEqual({
             ...before,
             disconnectInfo: null,
-            lastMoveAt: expect.any(Number),
+            lastMoveAt: null,
         });
 
         // Back in the game room: room broadcasts reach the new socket.

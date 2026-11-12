@@ -7,7 +7,7 @@
  * payload as any other ending (G3, NODE-18).
  */
 const { REASON } = require('../domain/adjudication');
-const { tickerSnapshot, isGraceExpired } = require('../domain/clock');
+const { activeRemainingMs, clocksAt, isGraceExpired } = require('../domain/clock');
 const { opponentColor, sideToColor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
 
@@ -41,7 +41,7 @@ function clockVerdict(game, at) {
         return { winner: opponentColor(disconnectInfo.side), reason: REASON.ABANDONMENT };
     }
     // ── Clock timeout ──
-    if (tickerSnapshot(game, at).remainingMs > 0) return null;
+    if (activeRemainingMs(game, at) > 0) return null;
     return { winner: opponentColor(sideToColor(game.activeSide)), reason: REASON.TIME };
 }
 
@@ -61,8 +61,8 @@ async function tickGame(deps, gameId) {
     if (!isRunning(game)) return;
 
     const at = deps.now();
-    // Real remaining for the active player
-    const { whiteMs, blackMs } = tickerSnapshot(game, at);
+    // Real remaining for the active player (frozen while a player is disconnected)
+    const { whiteMs, blackMs } = clocksAt(game, at);
     deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
 
     if (!clockVerdict(game, at)) return;

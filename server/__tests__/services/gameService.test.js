@@ -23,8 +23,9 @@ function setup(games = {}) {
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
     const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter };
-    const svc = createGameService({ ...deps, now: () => T });
-    return { svc, ...deps };
+    let now = T;
+    const svc = createGameService({ ...deps, now: () => now });
+    return { svc, ...deps, advance: (ms) => (now += ms) };
 }
 
 beforeEach(() => {
@@ -342,6 +343,8 @@ describe('disconnect and reconnect', () => {
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
             whiteClockMs: 598000,
+            // The charged clock is stored together with a fresh reference point [G9].
+            lastMoveAt: T,
             disconnectInfo: { userId: 'black-user', side: 'black', at: T },
         });
         expect(ctx.gamesRepo.updateIfActive).toHaveBeenCalledWith('g', {
@@ -476,4 +479,46 @@ test('spectate joins only existing games', async () => {
     await ctx.svc.spectate('missing', client);
     await ctx.svc.spectate('g', client);
     expect(client.joined).toEqual(['game_g']);
+});
+
+describe('clock around a disconnect [G8, G9]', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+    test('a client joining during the disconnect sees the frozen clocks, not a second deduction [G9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: T - 2000 }) });
+        ctx.sessions.setActiveGame('black-user', 'g');
+        await ctx.svc.handleDisconnect('black-user');
+        ctx.advance(9000);
+
+        const client = fakeClient();
+        await ctx.svc.joinGame('g', client, 'white-user');
+        expect(client.emitted[0]).toMatchObject({ event: 'game_state_sync', args: [{ whiteMs: 598000, blackMs: 600000 }] });
+    });
+
+    test('reconnecting after 9 s away: the clock runs again from now, the absence is not charged [G9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: T - 2000 }) });
+        ctx.sessions.setActiveGame('black-user', 'g');
+        await ctx.svc.handleDisconnect('black-user');
+        ctx.advance(9000);
+        await ctx.svc.reconnect('black-user', fakeClient());
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ whiteClockMs: 598000, lastMoveAt: T + 9000, disconnectInfo: null });
+    });
+
+    test('a disconnect and reconnect before the first move never starts a clock [G8]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START, lastMoveAt: null }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        await ctx.svc.handleDisconnect('white-user');
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ lastMoveAt: null, whiteClockMs: 600000 });
+
+        ctx.advance(5000);
+        const client = fakeClient();
+        await ctx.svc.reconnect('white-user', client);
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ lastMoveAt: null, disconnectInfo: null, whiteClockMs: 600000 });
+
+        // A later join still shows full clocks and a stopped clock.
+        ctx.advance(60000);
+        const viewer = fakeClient('s2');
+        await ctx.svc.joinGame('g', viewer, 'black-user');
+        expect(viewer.emitted[0].args[0]).toMatchObject({ whiteMs: 600000, blackMs: 600000, clockActive: false });
+    });
 });

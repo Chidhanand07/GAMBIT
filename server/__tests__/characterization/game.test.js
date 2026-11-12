@@ -45,7 +45,8 @@ describe('join_game: game in Redis', () => {
             whiteMs: 111000,
             blackMs: 222000,
             activeSide: 'b',
-            clockActive: true,
+            // Frozen while a player is disconnected: no clock is counting down.
+            clockActive: false,
             whiteId: 'white-user',
             blackId: 'black-user',
         });
