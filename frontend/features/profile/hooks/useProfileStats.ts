@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchProfileStats } from '@/lib/api/profile';
 import type { Profile } from '@/types/profile';
 import type { ProfileStats } from '@/types/profilePage';
@@ -10,22 +10,48 @@ interface ProfileStatsArgs {
     profile: Profile | null;
 }
 
-/** Stats tab data, fetched the first time the tab is shown and then kept. */
+interface StatsResult {
+    profileId: string;
+    stats: ProfileStats | null;
+    failed: boolean;
+}
+
+async function loadStats(username: string): Promise<ProfileStats> {
+    const res = await fetchProfileStats(username);
+    if (!res.ok) throw new Error(`stats request failed: ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Stats tab data, fetched the first time the tab is shown for a profile and
+ * then kept. A failed request (status or network) becomes `failed`, which the
+ * tab shows with a Retry button instead of an endless spinner (F12).
+ */
 export function useProfileStats({ username, activeTab, profile }: ProfileStatsArgs) {
-    const [statsData, setStatsData] = useState<ProfileStats | null>(null);
+    const [result, setResult] = useState<StatsResult | null>(null);
+    const [attempt, setAttempt] = useState(0);
+    const profileId = profile?.id;
+    const own = result !== null && result.profileId === profileId ? result : null;
+    const loaded = own?.stats != null;
 
-    // Re-runs only on tab or profile-id change (legacy dependency list, kept on purpose).
     useEffect(() => {
-        if (activeTab === 'stats' && !statsData && profile) {
-            // LEGACY: no .catch — a rejected fetch is an unhandled rejection, as before.
-            void fetchProfileStats(username)
-                .then((r) => (r.ok ? r.json() : null))
-                .then((d) => {
-                    if (d) setStatsData(d);
-                });
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: legacy deps [activeTab, profile?.id]
-    }, [activeTab, profile?.id]);
+        if (activeTab !== 'stats' || !profileId || loaded) return;
+        let current = true;
+        void loadStats(username)
+            .then((stats) => ({ profileId, stats, failed: false }))
+            .catch(() => ({ profileId, stats: null, failed: true }))
+            .then((next) => {
+                if (current) setResult(next);
+            });
+        return () => {
+            current = false;
+        };
+    }, [activeTab, profileId, username, loaded, attempt]);
 
-    return statsData;
+    const retry = useCallback(() => {
+        setResult(null);
+        setAttempt((n) => n + 1);
+    }, []);
+
+    return { stats: own?.stats ?? null, failed: own?.failed ?? false, retry };
 }

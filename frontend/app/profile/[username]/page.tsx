@@ -29,7 +29,7 @@ export default function ProfilePage(props: { params: Promise<{ username: string 
     const { status, profile, meProfile, isOwnProfile, reload } = useProfileData(username);
     const { friendStatus, addFriend } = useFriendStatus({ username, profile, meProfile, isOwnProfile });
     const gameHistory = useGameHistory({ username, activeTab, profile });
-    const statsData = useProfileStats({ username, activeTab, profile });
+    const statsState = useProfileStats({ username, activeTab, profile });
     const friendsState = useFriends({ activeTab, profile, isOwnProfile });
     const isOnline = useProfilePresence(profile?.id);
 
@@ -73,7 +73,9 @@ export default function ProfilePage(props: { params: Promise<{ username: string 
                         onLoadMore={gameHistory.loadMore}
                     />
                 )}
-                {activeTab === 'stats' && <StatsTab stats={statsData} />}
+                {activeTab === 'stats' && (
+                    <StatsTab stats={statsState.stats} failed={statsState.failed} onRetry={statsState.retry} />
+                )}
                 {activeTab === 'friends' && (
                     <FriendsTab profile={profile} isOwnProfile={isOwnProfile} friendsState={friendsState} />
                 )}

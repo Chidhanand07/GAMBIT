@@ -489,6 +489,30 @@ describe('stats tab', () => {
         await settle()
         expect(urls().filter(u => u === '/api/profile/bob/stats')).toHaveLength(1)
     })
+
+    test('F12: a failed stats request shows an error with Retry instead of a spinner forever', async () => {
+        let calls = 0
+        routes['/api/profile/bob/stats'] = () => {
+            calls++
+            return calls === 1 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
+        }
+        await renderProfile()
+        click(screen.getByRole('button', { name: 'Stats' }))
+        await settle()
+        expect(screen.getByText('Could not load stats.')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await settle()
+        expect(screen.getByText('Total Games')).toBeInTheDocument()
+        expect(screen.getByText('3')).toBeInTheDocument()
+    })
+
+    test('F12: a rejected stats fetch is handled (error state, no unhandled rejection)', async () => {
+        routes['/api/profile/bob/stats'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        click(screen.getByRole('button', { name: 'Stats' }))
+        await settle()
+        expect(screen.getByText('Could not load stats.')).toBeInTheDocument()
+    })
 })
 
 // ── Friends tab ─────────────────────────────────────────────────────────────
