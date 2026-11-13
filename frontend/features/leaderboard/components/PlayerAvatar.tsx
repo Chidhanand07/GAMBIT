@@ -1,4 +1,5 @@
 import type { LeaderboardPlayer } from '../types';
+import { AvatarImage } from '@/components/ui/AvatarImage';
 
 const INITIAL_FONT_RATIO = 0.38;
 
@@ -16,11 +17,7 @@ export function PlayerAvatar({ player, size = 36 }: { player: LeaderboardPlayer;
                 color: 'var(--accent)',
             }}
         >
-            {player.avatar_url ? (
-                <img src={player.avatar_url} alt="" style={{ width: size, height: size, objectFit: 'cover' }} />
-            ) : (
-                initial
-            )}
+            {player.avatar_url ? <AvatarImage src={player.avatar_url} size={size} className="object-cover" /> : initial}
         </div>
     );
 }

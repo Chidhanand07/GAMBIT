@@ -1,5 +1,8 @@
 'use client';
 
+import Image from 'next/image';
+import { PIECE_IMAGE_PX } from '@/components/ui/Piece';
+
 const PROMO_PIECES = [
     { type: 'q', name: 'Queen' },
     { type: 'r', name: 'Rook' },
@@ -28,9 +31,12 @@ export default function PromotionModal({
                             onClick={() => onSelect(p.type)}
                             className="w-14 h-14 flex flex-col items-center justify-center rounded-lg bg-elevated border border-border hover:border-accent hover:bg-accent/10 transition-all group"
                         >
-                            <img
+                            <Image
                                 src={`/pieces/classic/${c}${p.type}.png`}
                                 alt={p.name}
+                                width={PIECE_IMAGE_PX}
+                                height={PIECE_IMAGE_PX}
+                                unoptimized
                                 className="w-9 h-9 object-contain"
                                 draggable={false}
                                 style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))' }}

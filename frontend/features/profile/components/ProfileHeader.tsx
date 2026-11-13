@@ -28,12 +28,15 @@ function Banner() {
     );
 }
 
+/** The header avatar box is w-[88px]. */
+const HEADER_AVATAR_PX = 88;
+
 function Avatar({ profile, isOnline }: { profile: HeaderProfile; isOnline: boolean }) {
     return (
         <div className="relative shrink-0">
             <div className="w-[88px] h-[88px] rounded-full bg-surface border-2 border-border-strong flex items-center justify-center overflow-hidden">
                 {profile.avatar_url ? (
-                    <AvatarImg src={profile.avatar_url} />
+                    <AvatarImg src={profile.avatar_url} size={HEADER_AVATAR_PX} />
                 ) : (
                     <span className="text-accent text-3xl font-medium select-none">
                         {avatarInitial(profile.display_name, profile.username)}

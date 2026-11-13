@@ -4,6 +4,9 @@ import type { Friend } from '@/types/friendship';
 import { AvatarImg } from './AvatarImg';
 import { challengeHref, profileHref } from '../links';
 
+/** The friend avatar box is w-10. */
+const FRIEND_AVATAR_PX = 40;
+
 const DEFAULT_RATING = 1200;
 
 /** Case-insensitive match on username or display name; an empty query keeps everyone. */
@@ -19,7 +22,7 @@ function FriendRow({ friend: f, canChallenge }: { friend: Friend; canChallenge: 
             <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-elevated border border-border-strong flex items-center justify-center overflow-hidden shrink-0">
                     {f.avatar_url ? (
-                        <AvatarImg src={f.avatar_url} />
+                        <AvatarImg src={f.avatar_url} size={FRIEND_AVATAR_PX} />
                     ) : (
                         <span className="text-accent font-medium">{(f.username ?? '?')[0].toUpperCase()}</span>
                     )}

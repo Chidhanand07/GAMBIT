@@ -3,10 +3,8 @@ const path = require('node:path');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '*.supabase.co' },
-      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
-    ],
+    // One list, shared with lib/imageHosts.ts (which decides when an avatar can be optimized).
+    remotePatterns: require('./lib/imageHosts.json'),
   },
   reactStrictMode: true,
   // The app lives in frontend/ inside a monorepo with its own lockfile at the repo root.

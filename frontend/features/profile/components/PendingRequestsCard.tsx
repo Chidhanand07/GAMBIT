@@ -5,6 +5,8 @@ import { AvatarImg } from './AvatarImg';
 import { profileHref } from '../links';
 
 const DEFAULT_RATING = 1200;
+/** The requester avatar box is w-9. */
+const REQUESTER_AVATAR_PX = 36;
 
 type RespondFn = (friendshipId: string, action: FriendRequestAction) => Promise<void>;
 
@@ -12,7 +14,7 @@ function RequesterAvatar({ requester }: { requester: PendingFriendRequest['reque
     return (
         <div className="w-9 h-9 rounded-full bg-elevated border border-border-strong flex items-center justify-center overflow-hidden shrink-0">
             {requester?.avatar_url ? (
-                <AvatarImg src={requester.avatar_url} />
+                <AvatarImg src={requester.avatar_url} size={REQUESTER_AVATAR_PX} />
             ) : (
                 <span className="text-accent text-sm font-medium">{(requester?.username ?? '?')[0].toUpperCase()}</span>
             )}
