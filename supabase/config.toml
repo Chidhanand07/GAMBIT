@@ -1,0 +1,4 @@
+# Supabase CLI project config (local development and the "Database (Supabase)" CI job).
+# Only the project id is set; every other setting is the CLI default.
+# Docs: https://supabase.com/docs/guides/local-development/cli/config
+project_id = "gambit"

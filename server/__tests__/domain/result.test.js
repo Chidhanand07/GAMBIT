@@ -1,6 +1,6 @@
 const {
     resultLabel,
-    parseOutcome,
+    outcomeOfRow,
     opponentColor,
     sideToColor,
     colorOfPlayer,
@@ -21,22 +21,33 @@ describe('resultLabel', () => {
     ])('%p → %p', (outcome, label) => expect(resultLabel(outcome)).toBe(label));
 });
 
-describe('parseOutcome', () => {
-    test.each([
-        ['White wins', 'white'],
-        ['WHITE', 'white'],
-        ['Black wins', 'black'],
-        ['black resigned', 'black'],
-        ['white and black', 'white'], // "white" is checked first
-        ['Draw', 'draw'],
-        ['stalemate', 'draw'],
-        ['', 'draw'],
-        [null, 'draw'],
-        [undefined, 'draw'],
-    ])('%p → %p', (text, outcome) => expect(parseOutcome(text)).toBe(outcome));
+describe('outcomeOfRow: outcome of a finished games row [S3]', () => {
+    const seats = { white_id: 'w-id', black_id: 'b-id' };
 
-    test('non-string input throws, like the original inline code', () => {
-        expect(() => parseOutcome(/** @type {any} */ (1))).toThrow(TypeError);
+    test.each([
+        ['white', 'white'],
+        ['black', 'black'],
+        ['draw', 'draw'],
+    ])('result %p is used as written', (result, outcome) => {
+        // The winner column is ignored when `result` is a known outcome.
+        expect(outcomeOfRow({ ...seats, result, winner_id: null })).toBe(outcome);
+    });
+
+    test.each([
+        ['w-id', 'white'],
+        ['b-id', 'black'],
+        [null, 'draw'],
+        ['someone-else', 'draw'],
+    ])('rows written before the fix (result null): winner_id %p → %p', (winner_id, outcome) => {
+        expect(outcomeOfRow({ ...seats, result: null, winner_id })).toBe(outcome);
+    });
+
+    test('an unknown result string falls back to the winner column', () => {
+        expect(outcomeOfRow({ ...seats, result: 'white_wins', winner_id: 'b-id' })).toBe('black');
+    });
+
+    test('a missing seat never matches a missing winner', () => {
+        expect(outcomeOfRow({ white_id: null, black_id: null, result: null, winner_id: null })).toBe('draw');
     });
 });
 

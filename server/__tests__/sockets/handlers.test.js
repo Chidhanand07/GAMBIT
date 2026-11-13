@@ -5,18 +5,21 @@
 const { registerSocketHandlers } = require('../../src/sockets');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
 
-function connect(deps) {
+function connect(deps, userId = 'u1') {
     let onConnection;
-    registerSocketHandlers({ on: (event, cb) => (onConnection = cb) }, deps);
+    const middlewares = [];
+    registerSocketHandlers({ on: (event, cb) => (onConnection = cb), use: (mw) => middlewares.push(mw) }, deps);
     const handlers = {};
     const socket = {
         id: 'sock-1',
+        // What the handshake middleware stores after verifying the token.
+        data: { userId },
         on: (event, cb) => (handlers[event] = cb),
         join: jest.fn(),
         emit: jest.fn(),
     };
     onConnection(socket);
-    return { socket, handlers };
+    return { socket, handlers, middlewares };
 }
 
 function deps() {
@@ -30,9 +33,10 @@ function deps() {
             joinGame: fn(),
             spectate: fn(),
             makeMove: fn(),
-            endGame: fn(),
+            resign: fn(),
         },
         chatService: { sendMessage: fn() },
+        verifyToken: jest.fn(async () => 'u1'),
         socialService: {
             requestRematch: fn(),
             acceptRematch: fn(),
@@ -47,18 +51,20 @@ function deps() {
 beforeEach(() => jest.spyOn(console, 'log').mockImplementation(() => {}));
 afterEach(() => jest.restoreAllMocks());
 
-test('registers exactly the original events', () => {
-    const { handlers } = connect(deps());
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('registers the handshake middleware and exactly the supported events (no `authenticate`, no client `game_end`)', () => {
+    const { handlers, middlewares } = connect(deps());
+    expect(middlewares).toHaveLength(1);
     expect(Object.keys(handlers).sort()).toEqual(
         [
-            'authenticate',
             'join_queue',
             'leave_queue',
             'join_game',
             'spectate_game',
             'make_move',
             'send_message',
-            'game_end',
+            'resign',
             'rematch_request',
             'rematch_accept',
             'rematch_decline',
@@ -71,41 +77,110 @@ test('registers exactly the original events', () => {
     expect(console.log).toHaveBeenCalledWith('Client connected:', 'sock-1');
 });
 
-test('authenticate registers the session, joins user_<id>, acks, then reconnects', async () => {
+test('the handshake middleware rejects a connection without a valid token [S2]', async () => {
     const d = deps();
-    const { socket, handlers } = connect(d);
-    await handlers.authenticate('u1');
+    d.verifyToken.mockResolvedValue(null);
+    const { middlewares } = connect(d);
+    const socket = { handshake: { auth: { token: 'forged' } }, data: {} };
+    const err = await new Promise((resolve) => middlewares[0](socket, resolve));
+    expect(err.message).toBe('unauthorized');
+    expect(socket.data.userId).toBeUndefined();
+});
+
+test('a connection registers the verified user, joins user_<id>, then resumes their game [S2]', async () => {
+    const d = deps();
+    const { socket } = connect(d, 'u1');
+    await flush();
     expect(d.sessions.userIdOf('sock-1')).toBe('u1');
     expect(socket.join).toHaveBeenCalledWith('user_u1');
-    expect(socket.emit).toHaveBeenCalledWith('authenticated', { userId: 'u1' });
+    expect(socket.emit).not.toHaveBeenCalledWith('authenticated', expect.anything());
+    expect(d.gameService.reconnect).toHaveBeenCalledWith('u1', expect.objectContaining({ id: 'sock-1' }));
     const client = d.gameService.reconnect.mock.calls[0][1];
-    expect(client.id).toBe('sock-1');
     client.emit('rematch_declined');
     expect(socket.emit).toHaveBeenLastCalledWith('rematch_declined');
 });
 
-test('payloads go to the services unchanged, with the socket id where identity matters', () => {
+test('a failing reconnect on connection is logged, not thrown [S15]', async () => {
+    const d = deps();
+    d.gameService.reconnect.mockRejectedValue(new Error('redis down'));
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    connect(d);
+    await flush();
+    expect(error).toHaveBeenCalledWith('[socket] connection failed:', 'redis down');
+});
+
+test('validated payloads go to the services; the actor is always the verified user [S2]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const data = { game_id: 'g' };
+    const move = { game_id: 'g', from: 'e2', to: 'e4' };
+    await handlers.join_queue({ user: { id: 'victim' }, time_control: '10' });
+    await handlers.join_game('g');
+    await handlers.make_move({ ...move, fen: 'client-fen', san: 'e4' });
+    await handlers.send_message(data);
+    await handlers.resign({ ...data, result: 'White wins' });
+    await handlers.leave_queue('victim');
+    expect(d.matchmaking.requestMatch).toHaveBeenCalledWith({ time_control: '10', user: { id: 'u1' } }, 'sock-1');
+    expect(d.gameService.joinGame).toHaveBeenCalledWith('g', expect.objectContaining({ id: 'sock-1' }), 'u1');
+    expect(d.gameService.makeMove).toHaveBeenCalledWith(move, 'u1', expect.objectContaining({ id: 'sock-1' }));
+    expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
+    expect(d.gameService.resign).toHaveBeenCalledWith(data, 'u1');
+    expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
+});
+
+test('social events: requests are sent *from*, and answers given *by*, the verified user [S2][S4]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    await handlers.rematch_request({ from_user_id: 'victim', to_user_id: 'u2', time_control: '5' });
+    await handlers.challenge_request({ from_user_id: 'victim', to_user_id: 'u2', color: 'white' });
+    await handlers.rematch_accept({ from_user_id: 'u2', to_user_id: 'victim' });
+    await handlers.challenge_accept({ from_user_id: 'u2', to_user_id: 'victim' });
+    await handlers.rematch_decline({ from_user_id: 'u2', to_user_id: 'victim' });
+    await handlers.challenge_decline({ from_user_id: 'u2', by_username: 'me' });
+    expect(d.socialService.requestRematch).toHaveBeenCalledWith({
+        from_user_id: 'u1',
+        to_user_id: 'u2',
+        time_control: '5',
+    });
+    expect(d.socialService.requestChallenge).toHaveBeenCalledWith({
+        from_user_id: 'u1',
+        to_user_id: 'u2',
+        color: 'white',
+    });
+    expect(d.socialService.acceptRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
+    expect(d.socialService.acceptChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
+    expect(d.socialService.declineRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
+    expect(d.socialService.declineChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', by_username: 'me', to_user_id: 'u1' });
+});
+
+test('an invalid payload never reaches a service and is acked as invalid_payload [S15]', async () => {
     const d = deps();
     const { handlers } = connect(d);
-    const data = { game_id: 'g' };
-    handlers.join_queue(data);
-    handlers.make_move(data);
-    handlers.send_message(data);
-    handlers.game_end(data);
-    handlers.rematch_decline(data);
-    handlers.leave_queue('u9');
-    expect(d.matchmaking.requestMatch).toHaveBeenCalledWith(data, 'sock-1');
-    expect(d.gameService.makeMove).toHaveBeenCalledWith(data, 'sock-1');
-    expect(d.chatService.sendMessage).toHaveBeenCalledWith(data, 'sock-1');
-    expect(d.gameService.endGame).toHaveBeenCalledWith(data);
-    expect(d.socialService.declineRematch).toHaveBeenCalledWith(data);
-    expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u9');
+    const ack = jest.fn();
+    await handlers.make_move(null, ack);
+    await handlers.resign({ game_id: 123 }, ack);
+    await handlers.send_message('not an object', ack);
+    expect(d.gameService.makeMove).not.toHaveBeenCalled();
+    expect(d.gameService.resign).not.toHaveBeenCalled();
+    expect(d.chatService.sendMessage).not.toHaveBeenCalled();
+    expect(ack.mock.calls).toEqual(Array(3).fill([{ ok: false, error: 'invalid_payload' }]));
+});
+
+test('a failing service is logged and acked, not thrown [S15]', async () => {
+    const d = deps();
+    d.gameService.makeMove.mockRejectedValue(new Error('redis down'));
+    d.gameService.handleDisconnect.mockRejectedValue(new Error('redis down'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const { handlers } = connect(d);
+    const ack = jest.fn();
+    await expect(handlers.make_move({ game_id: 'g', from: 'e2', to: 'e4' }, ack)).resolves.toBeUndefined();
+    await expect(handlers.disconnect()).resolves.toBeUndefined();
+    expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
 });
 
 test('disconnect leaves the queue, forgets the session, then handles the game', async () => {
     const d = deps();
-    const { handlers } = connect(d);
-    await handlers.authenticate('u1');
+    const { handlers } = connect(d, 'u1');
     await handlers.disconnect();
     expect(d.matchmaking.leaveQueueBySocket).toHaveBeenCalledWith('sock-1');
     expect(d.sessions.userIdOf('sock-1')).toBeUndefined();

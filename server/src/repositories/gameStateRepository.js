@@ -61,6 +61,53 @@ function createGameLock() {
 }
 
 /**
+ * The `active_games` set the clock ticker walks. Errors are logged and swallowed.
+ * @param {RedisLike} redis
+ */
+function createActiveGameSet(redis) {
+    /**
+     * Add a game to the set the clock ticker walks (errors logged).
+     * @param {string} gameId
+     * @returns {Promise<void>}
+     */
+    async function addActiveGame(gameId) {
+        try {
+            await redis.sadd(ACTIVE_SET, gameId);
+        } catch (e) {
+            console.error('[gameStore] addActiveGame error:', /** @type {Error} */ (e).message);
+        }
+    }
+
+    /**
+     * Remove a game from the active set (errors logged).
+     * @param {string} gameId
+     * @returns {Promise<void>}
+     */
+    async function removeActiveGame(gameId) {
+        try {
+            await redis.srem(ACTIVE_SET, gameId);
+        } catch (e) {
+            console.error('[gameStore] removeActiveGame error:', /** @type {Error} */ (e).message);
+        }
+    }
+
+    /**
+     * Ids of all active games; [] when Redis fails.
+     * @returns {Promise<string[]>}
+     */
+    async function getActiveGameIds() {
+        try {
+            return await redis.smembers(ACTIVE_SET);
+        } catch (e) {
+            console.error('[gameStore] getActiveGameIds error:', /** @type {Error} */ (e).message);
+            return [];
+        }
+    }
+
+    return { addActiveGame, removeActiveGame, getActiveGameIds };
+}
+
+/**
  * Create the Redis game-state repository.
  * @param {RedisLike} redis
  */
@@ -117,6 +164,29 @@ function createGameStateRepository(redis) {
     }
 
     /**
+     * Atomic state transition: under the per-game lock, read the state, let
+     * `mutate` decide, and write what it returns. `mutate` gets null for an
+     * unknown game and returns null to leave the state untouched. Because the
+     * read and the write share one lock, two callers can never both act on
+     * the same state (a move applied twice, a game finalized twice).
+     *
+     * The lock is per process (see createGameLock); a multi-instance deploy
+     * needs a Redis-side transition (NODE-17).
+     * @template T
+     * @param {string} gameId
+     * @param {(game: any) => T | null | Promise<T | null>} mutate
+     * @returns {Promise<T | null>} the state written, or null when nothing was
+     */
+    async function mutateGame(gameId, mutate) {
+        return withGameLock(gameId, async () => {
+            const next = await mutate(await getGame(gameId));
+            if (!next) return null;
+            await setGame(gameId, next);
+            return next;
+        });
+    }
+
+    /**
      * Delete a game's state (errors logged).
      * @param {string} gameId
      * @returns {Promise<void>}
@@ -129,46 +199,7 @@ function createGameStateRepository(redis) {
         }
     }
 
-    /**
-     * Add a game to the set the clock ticker walks (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function addActiveGame(gameId) {
-        try {
-            await redis.sadd(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] addActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Remove a game from the active set (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function removeActiveGame(gameId) {
-        try {
-            await redis.srem(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] removeActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Ids of all active games; [] when Redis fails.
-     * @returns {Promise<string[]>}
-     */
-    async function getActiveGameIds() {
-        try {
-            return await redis.smembers(ACTIVE_SET);
-        } catch (e) {
-            console.error('[gameStore] getActiveGameIds error:', /** @type {Error} */ (e).message);
-            return [];
-        }
-    }
-
-    return { getGame, setGame, updateGame, deleteGame, addActiveGame, removeActiveGame, getActiveGameIds };
+    return { getGame, setGame, updateGame, mutateGame, deleteGame, ...createActiveGameSet(redis) };
 }
 
 module.exports = { createGameStateRepository };

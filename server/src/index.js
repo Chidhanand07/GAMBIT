@@ -21,6 +21,7 @@ const privateGames = require('../services/friends');
 const ratingService = require('../services/rating');
 const { supabase } = require('../supabase');
 const gameStore = require('../lib/gameStore');
+const redis = require('../lib/redis');
 const { startGlobalClock } = require('../services/clock');
 const env = require('./config/env');
 const { buildPgnFromMoveLog } = require('./domain/pgn');
@@ -30,18 +31,21 @@ const { createMovesRepository } = require('./repositories/movesRepository');
 const { createMessagesRepository } = require('./repositories/messagesRepository');
 const { createProfilesRepository } = require('./repositories/profilesRepository');
 const { createNotificationsRepository } = require('./repositories/notificationsRepository');
+const { createPendingRequestsRepository } = require('./repositories/pendingRequestsRepository');
 const { createIoEmitter } = require('./services/emitter');
 const { createReviewService } = require('./services/reviewService');
 const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
 const { createProfileService } = require('./services/profileService');
+const { createTokenVerifier } = require('./services/tokenVerifier');
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
+const { registerProcessHandlers } = require('./processHandlers');
 
-const engineClient = createEngineClient({ baseUrl: env.engineUrl });
+const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
 
 const app = createApp({ frontendUrl: env.frontendUrl });
@@ -58,13 +62,13 @@ const emitter = createIoEmitter(io);
 const socialService = createSocialService({
     privateGames,
     notificationsRepo: createNotificationsRepository(supabase),
+    pendingRequests: createPendingRequestsRepository(redis),
     emitter,
 });
 const gameService = createGameService({
     gameStore,
     gamesRepo,
     movesRepo: createMovesRepository(supabase),
-    engineClient,
     ratingService,
     reviewService: createReviewService({ engineClient }),
     sessions,
@@ -86,10 +90,21 @@ registerRoutes(app, {
     requireUserId: createRequireUserId({ getUser: (token) => supabase.auth.getUser(token) }),
 });
 
-registerSocketHandlers(io, { sessions, matchmaking: matchmaking.service, gameService, chatService, socialService });
+const getUser = /** @type {import('./services/tokenVerifier').GetUser} */ ((token) => supabase.auth.getUser(token));
+const tokenVerifier = createTokenVerifier({ getUser });
+
+registerSocketHandlers(io, {
+    sessions,
+    matchmaking: matchmaking.service,
+    gameService,
+    chatService,
+    socialService,
+    verifyToken: tokenVerifier.verify,
+});
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
+    registerProcessHandlers();
     const PORT = env.port();
     server.listen(PORT, () => {
         console.log(`Node server running on port ${PORT}`);

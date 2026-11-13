@@ -83,7 +83,8 @@ describe('challenge/[username]', () => {
         fireEvent.click(screen.getByRole('button', { name: '♚ Black' }))
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
         expect(socket.emitted('challenge_request')).toEqual([
-            { from_user_id: 'me', to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
+            // S2: no from_user_id — the server takes the sender from the socket handshake.
+            { to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
         ])
         expect(screen.getByText('Challenge sent! Waiting for bob to accept…')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Challenge Sent…/ })).toBeDisabled()
@@ -183,10 +184,10 @@ describe('join/[token]', () => {
         expect(push.mock.calls).toEqual([['/login?redirect=/join/tok_FAKE_0001']])
     })
 
-    test('creator authenticates, joins the room and follows game_start', async () => {
+    test('creator joins the room (identity comes from the socket handshake) and follows game_start', async () => {
         routes({ ...GAME, white_id: null, black_id: 'creator', white: null, black: { username: 'carl' }, time_control: '1' }, { id: 'creator' })
         await renderJoin()
-        expect(socket.emit.mock.calls).toEqual([['authenticate', 'creator'], ['join_game', 'g-1']])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g-1']])
         expect(screen.getByText('Waiting for opponent to join...')).toBeInTheDocument()
         expect(screen.getByText('♚ Black')).toBeInTheDocument()
         expect(screen.getByText(/Bullet · 1 min/)).toBeInTheDocument()

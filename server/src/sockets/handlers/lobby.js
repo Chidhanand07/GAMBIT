@@ -1,7 +1,11 @@
 // @ts-check
 /**
- * Matchmaking queue events. `leave_queue` accepts any user id (known bug, preserved).
+ * Matchmaking queue events. The queued player is always the connection's
+ * verified user; ids in the payload are ignored (NODE-10, G13).
  */
+
+const { schemas } = require('../schemas');
+const { wrap } = require('../wrap');
 
 /**
  * @param {import('socket.io').Socket} socket
@@ -9,10 +13,20 @@
  *   leaveQueue: (userId: string) => void } }} deps
  */
 function registerLobbyHandlers(socket, { matchmaking }) {
-    socket.on('join_queue', (data) => matchmaking.requestMatch(data, socket.id));
-    socket.on('leave_queue', (userId) => {
-        matchmaking.leaveQueue(userId);
-    });
+    /** @type {string} */
+    const userId = socket.data.userId;
+    socket.on(
+        'join_queue',
+        wrap('join_queue', schemas.join_queue, (data) =>
+            matchmaking.requestMatch({ ...data, user: { id: userId } }, socket.id),
+        ),
+    );
+    socket.on(
+        'leave_queue',
+        wrap('leave_queue', schemas.leave_queue, () => {
+            matchmaking.leaveQueue(userId);
+        }),
+    );
 }
 
 module.exports = { registerLobbyHandlers };

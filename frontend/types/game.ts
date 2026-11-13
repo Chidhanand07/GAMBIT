@@ -45,8 +45,6 @@ export interface Game {
     white_move_classifications?: MoveClassification[] | null;
     black_move_classifications?: MoveClassification[] | null;
     critical_moments?: unknown;
-    invite_token?: string | null;
-    invite_expires_at?: string | null;
     is_rated: boolean | null;
     spectator_count?: number | null;
     started_at?: string | null;
@@ -76,7 +74,7 @@ export interface Move {
 
 /** Entry of the realtime server's in-memory move log (`game_state_sync.moveLog`). */
 export interface MoveLogEntry {
-    /** UCI from the client's `move` field; the current client never sends it, so it is undefined. */
+    /** UCI computed by the server (absent on entries written before server-side validation). */
     move?: string;
     fen: string;
     san: string;

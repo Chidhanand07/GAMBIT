@@ -83,6 +83,18 @@ describe('moves', () => {
         expect(s).toMatchObject({ fen: AFTER_E4, lastMove: { from: 'e2', to: 'e4' }, pendingPromotion: null, moveList: [] })
     })
 
+    test('moveRejected drops the optimistic highlight, selection and promotion prompt [S1]', () => {
+        const s = run([
+            { type: 'moveCommitted', fen: AFTER_E4, from: 'e2', to: 'e4' },
+            { type: 'squareSelected', square: 'a7', dests: ['a8'] },
+            { type: 'promotionPending', move: { from: 'a7', to: 'a8' } },
+            { type: 'moveRejected' },
+        ])
+        expect(s).toMatchObject({ lastMove: null, selectedSq: null, legalDests: [], pendingPromotion: null })
+        // The position itself is corrected by the game_state_sync the server sends next.
+        expect(s.fen).toBe(AFTER_E4)
+    })
+
     test('promotionPending clears the selection', () => {
         const s = run([
             { type: 'squareSelected', square: 'a7', dests: ['a8'] },

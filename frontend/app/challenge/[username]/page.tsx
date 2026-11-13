@@ -43,7 +43,6 @@ export default function ChallengePage({ params }: { params: { username: string }
         if (!socket || !opponentProfile) return;
         setSending(true);
         socket.emit('challenge_request', {
-            from_user_id: myProfile.id,
             to_user_id: opponentProfile.id,
             from_username: myProfile.display_name || myProfile.username,
             time_control: timeControl,

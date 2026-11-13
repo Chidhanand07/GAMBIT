@@ -87,3 +87,65 @@ test('a ticker-level failure is logged', async () => {
     await svc.tick();
     expect(console.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
 });
+
+test('a flag fall that loses the race to another ending does nothing (one finalizer wins) [S3]', async () => {
+    const game = makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' });
+    const { svc, emitter, gameStore, rating, gamesRepo } = setup(game);
+    // The tick reads the game as active, but a resignation completes it before the tick's transition.
+    gameStore.getGame.mockImplementationOnce(async () => {
+        const stale = structuredClone(gameStore.state.get(game.id));
+        gameStore.state.set(game.id, { ...stale, status: 'completed', result: 'black', reason: 'Resignation' });
+        return stale;
+    });
+    await svc.tick();
+
+    expect(gameStore.state.get(game.id)).toMatchObject({ result: 'black', reason: 'Resignation' });
+    expect(emitter.named('game_end')).toEqual([]);
+    expect(gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    expect(rating.processGameEnd).not.toHaveBeenCalled();
+});
+
+describe('the clock decides on the state it holds the lock on (review finding 5)', () => {
+    /** The tick reads `game`; `change` lands before the tick's own transition. */
+    function changeBeforeTransition(gameStore, id, change) {
+        gameStore.getGame.mockImplementationOnce(async () => {
+            const stale = structuredClone(gameStore.state.get(id));
+            gameStore.state.set(id, change(structuredClone(stale)));
+            return stale;
+        });
+    }
+
+    test('a player who reconnects just before the grace period is adjudicated is not forfeited', async () => {
+        const game = makeGame({ lastMoveAt: T - 30000, disconnectInfo: { userId: 'white-user', side: 'white', at: T - 21000 } });
+        const { svc, emitter, gameStore, gamesRepo } = setup(game);
+        changeBeforeTransition(gameStore, game.id, (g) => ({ ...g, disconnectInfo: null, lastMoveAt: T }));
+        await svc.tick();
+
+        expect(gameStore.state.get(game.id)).toMatchObject({ status: 'active', disconnectInfo: null });
+        expect(emitter.named('game_end')).toEqual([]);
+        expect(gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('a move that beats the flag by a hair is not overruled by a stale read', async () => {
+        const game = makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' });
+        const { svc, emitter, gameStore, gamesRepo } = setup(game);
+        // Black moved in time: clock charged, increment added, white now to move.
+        changeBeforeTransition(gameStore, game.id, (g) => ({ ...g, blackClockMs: 2000, activeSide: 'w', lastMoveAt: T }));
+        await svc.tick();
+
+        expect(gameStore.state.get(game.id)).toMatchObject({ status: 'active', activeSide: 'w' });
+        expect(emitter.named('game_end')).toEqual([]);
+        expect(gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('the verdict uses the fresh state: the side that is actually out of time loses', async () => {
+        const game = makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' });
+        const { svc, emitter, gameStore } = setup(game);
+        // State moved on, but black is still the side to move and still out of time.
+        changeBeforeTransition(gameStore, game.id, (g) => ({ ...g, moveLog: [{ move: 'e2e4', fen: 'x', san: 'e4' }] }));
+        await svc.tick();
+
+        expect(emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'White wins', reason: 'Time' });
+        expect(gameStore.state.get(game.id).moveLog).toHaveLength(1);
+    });
+});

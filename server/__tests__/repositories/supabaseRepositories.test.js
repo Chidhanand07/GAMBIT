@@ -5,6 +5,7 @@
  */
 const { createSupabaseMock } = require('../helpers/mockSupabase');
 const { createGamesRepository } = require('../../src/repositories/gamesRepository');
+const { createGameInvitesRepository } = require('../../src/repositories/gameInvitesRepository');
 const { createMovesRepository } = require('../../src/repositories/movesRepository');
 const { createMessagesRepository } = require('../../src/repositories/messagesRepository');
 const { createProfilesRepository } = require('../../src/repositories/profilesRepository');
@@ -32,22 +33,34 @@ describe('gamesRepository', () => {
         const { table, ops } = await run(repo.findForRestore('g1'));
         expect(table).toBe('games');
         expect(ops).toEqual([
-            ['select', 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms'],
+            // result + winner_id: so a finished game restores with its real outcome (G1).
+            [
+                'select',
+                'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id',
+            ],
             ['eq', 'id', 'g1'],
             ['maybeSingle'],
         ]);
     });
 
-    test('findByInviteToken keeps the multi-line select verbatim', async () => {
-        const { ops } = await run(repo.findByInviteToken('tok'));
+    test('findByIdWithPlayers keeps the multi-line select verbatim and filters by id (never by token) [INV-TOKEN]', async () => {
+        const { table, ops } = await run(repo.findByIdWithPlayers('g1'));
+        expect(table).toBe('games');
         expect(ops).toEqual([
             [
                 'select',
                 '\n                *,\n                white:profiles!white_id(username, avatar_url),\n                black:profiles!black_id(username, avatar_url)\n            ',
             ],
-            ['eq', 'invite_token', 'tok'],
+            ['eq', 'id', 'g1'],
             ['maybeSingle'],
         ]);
+        expect(repo.findByInviteToken).toBeUndefined();
+    });
+
+    test('deleteById', async () => {
+        const { table, ops } = await run(repo.deleteById('g1'));
+        expect(table).toBe('games');
+        expect(ops).toEqual([['delete'], ['eq', 'id', 'g1']]);
     });
 
     test('insertReturning', async () => {
@@ -103,6 +116,26 @@ test('movesRepository.insert / messagesRepository.insert', async () => {
     supabase.reset();
     const messages = await run(createMessagesRepository(supabase).insert(row));
     expect([messages.table, messages.ops]).toEqual(['messages', [['insert', row]]]);
+});
+
+describe('gameInvitesRepository [INV-TOKEN]', () => {
+    let repo;
+    beforeEach(() => {
+        repo = createGameInvitesRepository(supabase);
+    });
+
+    test('insert stores game_id, token and expiry in game_invites', async () => {
+        const row = { game_id: 'g1', token: 'tok', expires_at: '2026-01-03T00:00:00.000Z' };
+        const { table, ops } = await run(repo.insert(row));
+        expect(table).toBe('game_invites');
+        expect(ops).toEqual([['insert', row]]);
+    });
+
+    test('findByToken selects only game_id and expires_at, by token', async () => {
+        const { table, ops } = await run(repo.findByToken('tok'));
+        expect(table).toBe('game_invites');
+        expect(ops).toEqual([['select', 'game_id, expires_at'], ['eq', 'token', 'tok'], ['maybeSingle']]);
+    });
 });
 
 describe('profilesRepository', () => {

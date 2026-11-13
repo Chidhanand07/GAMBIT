@@ -12,7 +12,6 @@ const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
 function makeCtx(over: Partial<SocketHandlerContext> = {}) {
     const ctx: SocketHandlerContext = {
         socket: { emit: jest.fn() } as never,
-        myProfileId: 'me',
         gameId: 'g1',
         myColor: 'white',
         soundOn: true,
@@ -32,19 +31,28 @@ function makeCtx(over: Partial<SocketHandlerContext> = {}) {
 
 beforeEach(() => jest.clearAllMocks())
 
-test('registers the 13 events in the legacy order', () => {
+test('registers the legacy 13 events in order, plus move_rejected [S1]', () => {
     const { handlers } = makeCtx()
     expect([...handlers.keys()]).toEqual([
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
+        'move_rejected',
     ])
 })
 
-test('connect marks connected then re-emits authenticate + join_game', () => {
+test('connect marks connected then re-emits join_game only (no authenticate) [S2]', () => {
     const { ctx, fire, dispatched } = makeCtx()
     fire('connect')
     expect(dispatched()).toEqual([{ type: 'connectionChanged', connected: true }])
-    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['join_game', 'g1']])
+})
+
+test('move_rejected: clears the optimistic move for this game only [S1]', () => {
+    const { fire, dispatched } = makeCtx()
+    fire('move_rejected', { game_id: 'other', reason: 'illegal_move' })
+    expect(dispatched()).toEqual([])
+    fire('move_rejected', { game_id: 'g1', reason: 'not_your_turn' })
+    expect(dispatched()).toEqual([{ type: 'moveRejected' }])
 })
 
 test('move_made: activates the clock before loading the FEN, de-duplicates, ignores other games', () => {
@@ -64,10 +72,15 @@ test('move_made with an invalid FEN still activates the clock (legacy order) and
     expect(dispatched()).toEqual([{ type: 'clockActivated' }])
 })
 
-test('move_made checkmate: game over from the side that just moved; end sound reflects my colour', () => {
+test('move_made checkmate: the page does NOT declare the result; the server’s game_end does [S3]', () => {
     const { fire, dispatched } = makeCtx({ myColor: 'black' })
     const mated = 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3'
     fire('move_made', { game_id: 'g1', from: 'd8', to: 'h4', fen: mated, san: 'Qh4#' })
+    expect(dispatched().map((a) => a.type)).toEqual(['clockActivated', 'moveReceived'])
+    expect(sounds.playCheckmateSound).toHaveBeenCalledTimes(1)
+    expect(sounds.playGameEndSound).not.toHaveBeenCalled()
+
+    fire('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Checkmate', white_id: 'w', black_id: 'b' })
     expect(dispatched()).toContainEqual({ type: 'gameEnded', info: { result: 'Black wins', reason: 'Checkmate' } })
     expect(sounds.playGameEndSound).toHaveBeenCalledWith(true)
 })

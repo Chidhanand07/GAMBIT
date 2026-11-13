@@ -90,18 +90,21 @@ describe('disconnect during an active game', () => {
         expect(supabase.op(supabase.callsFor('games')[0], 'update')[0]).toEqual({ white_time_ms: 1235, black_time_ms: 30000 });
     });
 
-    test('a non-player who joined the room is recorded as the BLACK side when disconnecting (pinned)', async () => {
+    test('a non-player who joined the room is a spectator: their disconnect changes nothing [S9]', async () => {
         const { game, black } = await ctx.seatedGame();
         const stranger = await ctx.connect('stranger');
         stranger.emit('join_game', game.id);
-        await once(stranger, 'game_state_sync');
-        const notice = once(black, 'opponent_disconnected');
+        // Spectators still receive the state.
+        expect(await once(stranger, 'game_state_sync')).toMatchObject({ whiteId: 'white-user', blackId: 'black-user' });
+        const notices = record(black, 'opponent_disconnected');
         stranger.disconnect();
-        expect(await notice).toEqual({ userId: 'stranger', timeoutSeconds: 20 });
-        expect((await getGame(game.id)).disconnectInfo).toEqual({ userId: 'stranger', side: 'black', at: expect.any(Number) });
+        await sleep(80);
+        expect(notices).toEqual([]);
+        expect((await getGame(game.id)).disconnectInfo).toBeNull();
+        expect(supabase.calls).toEqual([]);
     });
 
-    test('completed game or unauthenticated socket → no notice, no DB write', async () => {
+    test('completed game or a user without a game → no notice, no DB write', async () => {
         const { game, white, black } = await ctx.seatedGame();
         await patchGame(game.id, { status: 'completed' });
         const anon = await ctx.connect();

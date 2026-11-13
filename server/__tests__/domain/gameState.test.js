@@ -11,6 +11,7 @@ const NOW = 1_700_000_000_000;
 const KEY_ORDER = [
     'id',
     'fen',
+    'startFen',
     'whiteId',
     'blackId',
     'whiteClockMs',
@@ -40,6 +41,7 @@ describe('createInitialGameState', () => {
             JSON.stringify({
                 id: 'g1',
                 fen: START_FEN,
+                startFen: START_FEN,
                 whiteId: 'w',
                 blackId: 'b',
                 whiteClockMs: 180000,
@@ -117,6 +119,8 @@ describe('gameStateFromRow', () => {
         expect(state).toEqual({
             id: 'g-id',
             fen: row.fen,
+            // The move log is empty after a restore, so the rules replay from the restored position.
+            startFen: row.fen,
             whiteId: 'w',
             blackId: 'b',
             whiteClockMs: 1000,

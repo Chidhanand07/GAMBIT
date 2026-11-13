@@ -5,6 +5,7 @@ function makeGame(overrides = {}) {
     return {
         id: 'game-1',
         fen: START_FEN,
+        startFen: START_FEN,
         whiteId: 'white-user',
         blackId: 'black-user',
         whiteClockMs: 600000,

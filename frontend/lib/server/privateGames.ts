@@ -27,22 +27,27 @@ function assignSeats(color: string | undefined, userId: string) {
     return { white_id, black_id };
 }
 
-/** `games` row for a private invite game that expires in 48 hours. */
+/**
+ * `games` row for a private invite game. It carries no invite columns: `games` is readable
+ * through the public API key, so the token lives in `game_invites` (see {@link newInvite}).
+ */
 export function buildPrivateGameRow(
     userId: string,
     input: { timeControl: string; color?: string; isRated?: boolean },
 ): Record<string, unknown> {
-    const token = generateInviteToken(INVITE_TOKEN_LENGTH);
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + INVITE_TTL_HOURS);
     const { white_id, black_id } = assignSeats(input.color, userId);
     return {
         white_id,
         black_id,
         time_control: input.timeControl,
         status: 'waiting',
-        invite_token: token,
-        invite_expires_at: expiresAt.toISOString(),
         is_rated: input.isRated ?? false,
     };
+}
+
+/** A fresh invite (random token, valid for 48 hours) for the `game_invites` table. */
+export function newInvite(gameId: string): { game_id: string; token: string; expires_at: string } {
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + INVITE_TTL_HOURS);
+    return { game_id: gameId, token: generateInviteToken(INVITE_TOKEN_LENGTH), expires_at: expiresAt.toISOString() };
 }

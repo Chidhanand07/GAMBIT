@@ -80,11 +80,11 @@ describe('send_message', () => {
         expect(opsFor('messages')).toHaveLength(1);
     });
 
-    test('unauthenticated socket, missing game_id, or game not in Redis → ignored, nothing persisted', async () => {
+    test('a non-participant, a missing game_id, or a game not in Redis → ignored, nothing persisted', async () => {
         const { game, black } = await ctx.seatedGame();
-        const anon = await ctx.connect();
+        const outsider = await ctx.connect();
         const got = record(black, 'chat_message');
-        anon.emit('send_message', { game_id: game.id, message: 'anon' });
+        outsider.emit('send_message', { game_id: game.id, message: 'outsider' });
         black.emit('send_message', { message: 'no game id' });
         black.emit('send_message', { game_id: 'not-in-redis', message: 'lost' });
         await sleep(100);

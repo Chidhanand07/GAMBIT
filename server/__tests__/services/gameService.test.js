@@ -9,7 +9,7 @@ const { makeGame } = require('../helpers/fixtures');
 const T = 2_000_000;
 const NEXT_FEN = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 
-function setup(games = {}, { engine } = {}) {
+function setup(games = {}) {
     const gameStore = fakeGameStore(games);
     const emitter = fakeEmitter();
     const sessions = createSessionRegistry();
@@ -20,14 +20,9 @@ function setup(games = {}, { engine } = {}) {
         finishIfActive: jest.fn(() => result({ id: 'g' })),
     };
     const movesRepo = { insert: jest.fn(() => result()) };
-    const engineClient = {
-        validateMove: jest.fn(
-            engine ?? (async () => ({ ok: true, json: async () => ({ valid: true, new_fen: NEXT_FEN }) })),
-        ),
-    };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const deps = { gameStore, gamesRepo, movesRepo, engineClient, ratingService, reviewService, sessions, emitter };
+    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter };
     const svc = createGameService({ ...deps, now: () => T });
     return { svc, ...deps };
 }
@@ -41,15 +36,42 @@ afterEach(() => jest.restoreAllMocks());
 describe('joinGame', () => {
     test('joins the room, links the user and syncs the running clock', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 1000 }) });
-        ctx.sessions.register('white-user', 's1');
         const client = fakeClient('s1');
-        await ctx.svc.joinGame('g', client);
+        await ctx.svc.joinGame('g', client, 'white-user');
         expect(client.joined).toEqual(['game_g']);
         expect(ctx.sessions.activeGameOf('white-user')).toBe('g');
         expect(client.emitted[0]).toEqual({
             event: 'game_state_sync',
             args: [expect.objectContaining({ whiteMs: 599000, blackMs: 600000, clockActive: true })],
         });
+    });
+
+    test('a non-participant joins as a spectator: room + state, but never linked to the game [S9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const client = fakeClient('s2');
+        await ctx.svc.joinGame('g', client, 'stranger');
+        expect(client.joined).toEqual(['game_g']);
+        expect(client.emitted[0].event).toBe('game_state_sync');
+        expect(ctx.sessions.hasActiveGame('stranger')).toBe(false);
+
+        await ctx.svc.handleDisconnect('stranger');
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+    });
+
+    test('joining a game that is not in Redis or the DB links nobody [S9]', async () => {
+        const ctx = setup();
+        await ctx.svc.joinGame('ghost', fakeClient(), 'white-user');
+        expect(ctx.sessions.hasActiveGame('white-user')).toBe(false);
+    });
+
+    test('a stale link to a game the user does not play in cannot trigger abandonment [S9]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('stranger', 'g');
+        await ctx.svc.handleDisconnect('stranger');
+        expect(ctx.gameStore.state.get('g').disconnectInfo).toBeNull();
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+        expect(ctx.gamesRepo.updateIfActive).not.toHaveBeenCalled();
     });
 
     test('restores an active DB game into Redis; reports a completed DB game', async () => {
@@ -82,12 +104,14 @@ describe('joinGame', () => {
     });
 });
 
-describe('makeMove', () => {
-    test('validated move: engine FEN, clocks charged, broadcast, then persisted', async () => {
+describe('makeMove: the server is the authority [S1][S10]', () => {
+    const E4 = { game_id: 'g', from: 'e2', to: 'e4' };
+
+    test('legal move: server-computed fen/san/uci, clocks charged, broadcast, then persisted', async () => {
         const ctx = setup({ g: makeGame({ id: 'g', lastMoveAt: T - 3000, incrementMs: 2000 }) });
-        ctx.sessions.register('white-user', 's1');
-        const data = { game_id: 'g', move: 'e2e4', fen: 'client-fen', san: 'e4', extra: 1 };
-        await ctx.svc.makeMove(data, 's1');
+        // Everything a cheating client might add is ignored.
+        const data = { ...E4, promotion: 'q', fen: 'client-fen', san: 'Qxf7#', move: 'd1f7', captured: true };
+        expect(await ctx.svc.makeMove(data, 'white-user', fakeClient())).toEqual({ ok: true });
         await flush();
 
         expect(ctx.gameStore.state.get('g')).toMatchObject({
@@ -95,76 +119,213 @@ describe('makeMove', () => {
             activeSide: 'b',
             whiteClockMs: 599000,
             lastMoveAt: T,
+            moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
         });
         expect(ctx.emitter.sent).toEqual([
             {
                 room: 'game_g',
                 event: 'move_made',
-                args: [{ ...data, fen: NEXT_FEN, whiteMs: 599000, blackMs: 600000 }],
+                args: [
+                    {
+                        game_id: 'g',
+                        from: 'e2',
+                        to: 'e4',
+                        move: 'e2e4',
+                        san: 'e4',
+                        fen: NEXT_FEN,
+                        captured: false,
+                        flags: 'b',
+                        whiteMs: 599000,
+                        blackMs: 600000,
+                    },
+                ],
             },
         ]);
-        expect(ctx.movesRepo.insert).toHaveBeenCalledWith(
-            expect.objectContaining({ move_number: 1, color: 'white', uci: 'e2e4', clock_ms_remaining: 599000 }),
-        );
+        expect(ctx.movesRepo.insert).toHaveBeenCalledWith({
+            game_id: 'g',
+            move_number: 1,
+            color: 'white',
+            uci: 'e2e4',
+            san: 'e4',
+            fen_after: NEXT_FEN,
+            clock_ms_remaining: 599000,
+        });
         expect(ctx.gamesRepo.updateById).toHaveBeenCalledWith('g', { fen: NEXT_FEN });
     });
 
-    test('wrong player, illegal move → nothing happens', async () => {
-        const ctx = setup(
-            { g: makeGame({ id: 'g' }) },
-            { engine: async () => ({ ok: true, json: async () => ({ valid: false }) }) },
-        );
-        ctx.sessions.register('black-user', 'sb');
-        ctx.sessions.register('white-user', 'sw');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e7e5' }, 'sb');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e2e5' }, 'sw');
-        expect(ctx.emitter.sent).toHaveLength(0);
-        expect(console.warn).toHaveBeenCalledWith('[make_move] illegal move rejected:', 'e2e5', 'from', makeGame().fen);
+    test('a promotion reports the promoted piece', async () => {
+        const fen = '8/P6k/8/8/8/8/7K/8 w - - 0 1';
+        const ctx = setup({ g: makeGame({ id: 'g', fen, startFen: fen }) });
+        await ctx.svc.makeMove({ game_id: 'g', from: 'a7', to: 'a8', promotion: 'r' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('move_made')[0].args[0]).toMatchObject({ move: 'a7a8r', san: 'a8=R', promotion: 'r' });
     });
 
-    test('engine unreachable → the client FEN is accepted (known bug, pinned)', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g' }) }, { engine: async () => Promise.reject(new Error('down')) });
-        ctx.sessions.register('white-user', 'sw');
-        await ctx.svc.makeMove({ game_id: 'g', move: 'e2e4', fen: 'client-fen' }, 'sw');
-        expect(ctx.gameStore.state.get('g').fen).toBe('client-fen');
+    test('illegal move: rejected to the sender with a fresh sync; nothing stored, broadcast or persisted', async () => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        const client = fakeClient('sw');
+        const out = await ctx.svc.makeMove({ game_id: 'g', from: 'e2', to: 'e5', fen: 'client-fen' }, 'white-user', client);
+        await flush();
+        expect(out).toEqual({ ok: false, error: 'illegal_move' });
+        expect(client.emitted).toEqual([
+            { event: 'move_rejected', args: [{ game_id: 'g', reason: 'illegal_move' }] },
+            { event: 'game_state_sync', args: [expect.objectContaining({ fen: game.fen, moveLog: [], activeSide: 'w' })] },
+        ]);
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(ctx.movesRepo.insert).not.toHaveBeenCalled();
+        expect(ctx.gamesRepo.updateById).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['out of turn', 'black-user', { game_id: 'g', from: 'e7', to: 'e5' }, 'not_your_turn'],
+        ['by a spectator', 'stranger', E4, 'not_a_player'],
+    ])('a move %s is rejected and changes nothing', async (_name, userId, data, reason) => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove(data, userId, client)).toEqual({ ok: false, error: reason });
+        expect(client.emitted[0]).toEqual({ event: 'move_rejected', args: [{ game_id: 'g', reason }] });
+        expect(client.emitted[1].event).toBe('game_state_sync');
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+    });
+
+    test('a move on a finished game is rejected and the sender is told the result', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', status: 'completed', result: 'black', reason: 'Checkmate' }) });
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove(E4, 'white-user', client)).toEqual({ ok: false, error: 'game_not_active' });
+        expect(client.emitted.map((e) => e.event)).toEqual(['move_rejected', 'game_end']);
+        expect(ctx.emitter.sent).toEqual([]);
+    });
+
+    test('a move for a game the server does not hold is rejected (no client state is adopted)', async () => {
+        const ctx = setup();
+        const client = fakeClient();
+        expect(await ctx.svc.makeMove({ ...E4, fen: NEXT_FEN }, 'white-user', client)).toEqual({
+            ok: false,
+            error: 'game_not_found',
+        });
+        expect(client.emitted).toEqual([{ event: 'move_rejected', args: [{ game_id: 'g', reason: 'game_not_found' }] }]);
+        expect(ctx.gameStore.state.has('g')).toBe(false);
+    });
+
+    test('the same move submitted twice is applied once', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        // The fake store has no lock; serialise like the real per-game lock does.
+        let chain = Promise.resolve();
+        const mutate = ctx.gameStore.mutateGame.getMockImplementation();
+        ctx.gameStore.mutateGame.mockImplementation((id, fn) => (chain = chain.then(() => mutate(id, fn))));
+        const results = await Promise.all([
+            ctx.svc.makeMove(E4, 'white-user', fakeClient()),
+            ctx.svc.makeMove(E4, 'white-user', fakeClient()),
+        ]);
+        expect(results).toEqual([{ ok: true }, { ok: false, error: 'not_your_turn' }]);
+        expect(ctx.emitter.named('move_made')).toHaveLength(1);
+        expect(ctx.gameStore.state.get('g').moveLog).toHaveLength(1);
+    });
+
+    test('there is no engine dependency to fall back on [S10]', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        expect(ctx.engineClient).toBeUndefined();
+        const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('engine down'));
+        expect(await ctx.svc.makeMove(E4, 'white-user', fakeClient())).toEqual({ ok: true });
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test('an unusable stored position fails closed (throws; nothing is written)', async () => {
+        const game = makeGame({ id: 'g', fen: 'garbage w - - 0 1' });
+        const ctx = setup({ g: game });
+        await expect(ctx.svc.makeMove(E4, 'white-user', fakeClient())).rejects.toThrow();
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
     });
 });
 
-describe('endGame', () => {
-    test('completes, broadcasts the client payload, unlinks users, finalizes, reviews and rates', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g', moveLog: [{ san: 'e4' }] }) });
-        ctx.sessions.setActiveGame('white-user', 'g');
-        ctx.ratingService.processGameEnd.mockResolvedValue({ white: { change: 8 } });
-        await ctx.svc.endGame({ game_id: 'g', result: 'Black wins', note: 'x' });
+describe('results are decided by the server [S3]', () => {
+    const MATE_IN_ONE = 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2';
 
-        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black' });
-        expect(ctx.sessions.hasActiveGame('white-user')).toBe(false);
+    test('a checkmating move ends the game: move_made, then game_end, then finalization', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: MATE_IN_ONE, startFen: MATE_IN_ONE, activeSide: 'b' }) });
+        expect(await ctx.svc.makeMove({ game_id: 'g', from: 'd8', to: 'h4' }, 'black-user', fakeClient())).toEqual({ ok: true });
+        await flush();
+
+        expect(ctx.emitter.sent.map((e) => e.event)).toEqual(['move_made', 'game_end']);
         expect(ctx.emitter.named('game_end')[0].args[0]).toEqual({
             game_id: 'g',
             result: 'Black wins',
-            note: 'x',
+            reason: 'Checkmate',
             white_id: 'white-user',
             black_id: 'black-user',
         });
-        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: null, winner_id: 'black-user' });
-        expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledWith('g', [{ san: 'e4' }], '10');
-        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith(
-            'g',
-            'white-user',
-            'black-user',
-            'black',
-            '10',
-            true,
-        );
-        expect(ctx.emitter.named('rating_updated')).toHaveLength(1);
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black', reason: 'Checkmate' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: 'black', winner_id: 'black-user' });
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith('g', 'white-user', 'black-user', 'black', '10', true);
     });
 
-    test('already finalized in the DB → no review, no rating', async () => {
+    test('a stalemating move ends the game as a draw', async () => {
+        // White: Kg6, Qe7 → Qf7 stalemates the king on h8.
+        const fen = '7k/4Q3/6K1/8/8/8/8/8 w - - 0 1';
+        const ctx = setup({ g: makeGame({ id: 'g', fen, startFen: fen }) });
+        await ctx.svc.makeMove({ game_id: 'g', from: 'e7', to: 'f7' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('game_end')[0].args[0]).toMatchObject({ result: 'Draw', reason: 'Stalemate' });
+        expect(ctx.gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ result: 'draw', winner_id: null });
+    });
+
+    test('an ordinary move does not end the game', async () => {
         const ctx = setup({ g: makeGame({ id: 'g' }) });
-        ctx.gamesRepo.finishIfActive.mockReturnValue(result(null));
-        await ctx.svc.endGame({ game_id: 'g', result: 'Draw' });
-        expect(ctx.reviewService.triggerGameReview).not.toHaveBeenCalled();
-        expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
+        await ctx.svc.makeMove({ game_id: 'g', from: 'e2', to: 'e4' }, 'white-user', fakeClient());
+        expect(ctx.emitter.named('game_end')).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('there is no client-facing endGame: a result can only come from a move, a resignation or the clock', () => {
+        const ctx = setup();
+        expect(ctx.svc.endGame).toBeUndefined();
+    });
+});
+
+describe('resign [S3]', () => {
+    test.each([
+        ['white-user', 'Black wins', 'black'],
+        ['black-user', 'White wins', 'white'],
+    ])('%s resigning → %s by Resignation', async (userId, label, stored) => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        expect(await ctx.svc.resign({ game_id: 'g' }, userId)).toEqual({ ok: true });
+        expect(ctx.emitter.named('game_end')[0].args[0]).toEqual({
+            game_id: 'g',
+            result: label,
+            reason: 'Resignation',
+            white_id: 'white-user',
+            black_id: 'black-user',
+        });
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: stored, reason: 'Resignation' });
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
+    });
+
+    test('resigning is allowed on the opponent’s turn', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) }); // white to move
+        expect(await ctx.svc.resign({ game_id: 'g' }, 'black-user')).toEqual({ ok: true });
+    });
+
+    test.each([
+        ['a spectator', 'g', 'stranger', 'not_a_player'],
+        ['an unknown game', 'nope', 'white-user', 'game_not_found'],
+    ])('%s cannot resign a game', async (_name, gameId, userId, reason) => {
+        const game = makeGame({ id: 'g' });
+        const ctx = setup({ g: game });
+        expect(await ctx.svc.resign({ game_id: gameId }, userId)).toEqual({ ok: false, error: reason });
+        expect(ctx.gameStore.state.get('g')).toEqual(game);
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+    });
+
+    test('a finished game cannot be resigned (no second result, no second rating)', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        await ctx.svc.resign({ game_id: 'g' }, 'white-user');
+        expect(await ctx.svc.resign({ game_id: 'g' }, 'black-user')).toEqual({ ok: false, error: 'game_not_active' });
+        expect(ctx.emitter.named('game_end')).toHaveLength(1);
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -199,6 +360,108 @@ describe('disconnect and reconnect', () => {
         await ctx.svc.handleDisconnect('nobody');
         await ctx.svc.reconnect('nobody', fakeClient());
         expect(ctx.gameStore.getGame).not.toHaveBeenCalled();
+        expect(ctx.gameStore.mutateGame).not.toHaveBeenCalled();
+    });
+});
+
+describe('disconnect / reconnect cannot clobber a concurrent write (review findings 1–3)', () => {
+    /**
+     * Make `change` land "in between": a caller that reads with getGame and writes
+     * later sees the state from BEFORE the change (the old, racy code path), while a
+     * caller that goes through mutateGame gets the lock only AFTER the change.
+     */
+    function interleave(ctx, id, change) {
+        let applied = false;
+        const apply = () => {
+            if (applied) return;
+            applied = true;
+            ctx.gameStore.state.set(id, change(structuredClone(ctx.gameStore.state.get(id))));
+        };
+        ctx.gameStore.getGame.mockImplementationOnce(async () => {
+            const stale = structuredClone(ctx.gameStore.state.get(id));
+            apply();
+            return stale;
+        });
+        const mutate = ctx.gameStore.mutateGame.getMockImplementation();
+        ctx.gameStore.mutateGame.mockImplementationOnce(async (gameId, fn) => {
+            apply();
+            return mutate(gameId, fn);
+        });
+    }
+
+    const afterE4 = (game) => ({
+        ...game,
+        fen: NEXT_FEN,
+        activeSide: 'b',
+        lastMoveAt: T,
+        moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
+    });
+
+    test('a disconnect that overlaps a move keeps the move (no server-side takeback)', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', afterE4);
+        await ctx.svc.handleDisconnect('white-user');
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            fen: NEXT_FEN,
+            moveLog: [{ move: 'e2e4', fen: NEXT_FEN, san: 'e4' }],
+            activeSide: 'b',
+            disconnectInfo: { userId: 'white-user', side: 'white', at: T },
+        });
+    });
+
+    test('a disconnect that overlaps the end of the game cannot resurrect it', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', (game) => ({ ...game, status: 'completed', result: 'black', reason: 'Resignation' }));
+        await ctx.svc.handleDisconnect('white-user');
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            status: 'completed',
+            result: 'black',
+            reason: 'Resignation',
+            disconnectInfo: null,
+        });
+        expect(ctx.emitter.named('opponent_disconnected')).toEqual([]);
+        expect(ctx.gamesRepo.updateIfActive).not.toHaveBeenCalled();
+    });
+
+    test('a reconnect that overlaps the opponent’s move keeps the move AND clears the grace period', async () => {
+        const disconnectInfo = { userId: 'white-user', side: 'white', at: T - 5000 };
+        const ctx = setup({ g: makeGame({ id: 'g', fen: NEXT_FEN, activeSide: 'b', disconnectInfo }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        const AFTER_E5 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2';
+        interleave(ctx, 'g', (game) => ({
+            ...game,
+            fen: AFTER_E5,
+            activeSide: 'w',
+            moveLog: [{ move: 'e7e5', fen: AFTER_E5, san: 'e5' }],
+        }));
+        const client = fakeClient();
+        await ctx.svc.reconnect('white-user', client);
+
+        // Was: either the move was lost, or disconnectInfo came back and the
+        // connected player was forfeited for abandonment 20 s later.
+        expect(ctx.gameStore.state.get('g')).toMatchObject({
+            fen: AFTER_E5,
+            moveLog: [{ move: 'e7e5', fen: AFTER_E5, san: 'e5' }],
+            disconnectInfo: null,
+        });
+        expect(ctx.emitter.named('opponent_reconnected')).toHaveLength(1);
+    });
+
+    test('a reconnect after the game ended changes nothing', async () => {
+        const disconnectInfo = { userId: 'white-user', side: 'white', at: T - 5000 };
+        const ctx = setup({ g: makeGame({ id: 'g', disconnectInfo }) });
+        ctx.sessions.setActiveGame('white-user', 'g');
+        interleave(ctx, 'g', (game) => ({ ...game, status: 'completed', result: 'black', reason: 'Abandonment' }));
+        const client = fakeClient();
+        await ctx.svc.reconnect('white-user', client);
+
+        expect(ctx.gameStore.state.get('g')).toMatchObject({ status: 'completed', result: 'black' });
+        expect(ctx.emitter.sent).toEqual([]);
+        expect(client.emitted).toEqual([]);
     });
 });
 

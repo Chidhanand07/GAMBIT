@@ -1,18 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createUserWithProfile } from '@/lib/server/auth';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
+import { supabaseSecretKey } from '@/lib/server/env';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
+
+const USERNAME_RULE = 'Username must be 3 to 20 letters, numbers or underscores';
 
 // POST /api/auth/signup — body { email, password, username }
+// PUBLIC on purpose: this is how an account is created (docs/fixes/DECISIONS.md F-012).
 export async function POST(request: NextRequest) {
-    const { email, password, username } = await request.json();
+    const body = await parseJsonBody(request, schemas.signup, 'Missing required fields');
+    if (!body.ok) return body.response;
+    const { email, password, username } = body.data;
 
-    if (!email || !password || !username) {
-        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // The form applies the same rule; the server must not rely on it (the name is stored and shown).
+    if (!schemas.newUsername.safeParse(username).success) {
+        return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
     }
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        console.error('SUPABASE_SERVICE_ROLE_KEY is not set in frontend/.env.local');
+    if (!supabaseSecretKey()) {
+        console.error('SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) is not set');
         return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 

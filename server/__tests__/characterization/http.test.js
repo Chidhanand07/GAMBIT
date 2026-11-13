@@ -13,7 +13,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const request = require('supertest');
 const { supabase } = require('../../supabase');
 const { getGame, setGame, getActiveGameIds } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, opsFor, compact, makeGame, ISO_DATE, START_FEN } = require('./harness');
+const { useServer, once, record, sleep, opsFor, compact, makeGame, ISO_DATE, START_FEN, ENGINE_HEADERS } = require('./harness');
 
 const ctx = useServer();
 
@@ -24,6 +24,19 @@ const MINUTE_MS = 60 * 1000;
 
 const inMinutes = (m) => new Date(Date.now() + m * MINUTE_MS).toISOString();
 
+/** What a browser may see of a games row: no invite token, no expiry [S8]. */
+function publicView({ invite_token: _token, invite_expires_at: _expires, ...rest }) {
+    return rest;
+}
+
+/** The `game_invites` lookup the server does first: token → { game_id, expires_at } [INV-TOKEN]. */
+const INVITE_LOOKUP = (token) => [['select', 'game_id, expires_at'], ['eq', 'token', token], ['maybeSingle']];
+
+/** Queue the invite row a token resolves to (default: game pg-1, valid for another hour). */
+function queueInvite(expiresAt = inMinutes(60), gameId = 'pg-1') {
+    supabase.queue('game_invites', { data: { game_id: gameId, expires_at: expiresAt }, error: null });
+}
+
 function waitingGame(overrides = {}) {
     return {
         id: 'pg-1',
@@ -31,8 +44,6 @@ function waitingGame(overrides = {}) {
         black_id: null,
         time_control: '5+2',
         status: 'waiting',
-        invite_token: 'tok1234567',
-        invite_expires_at: inMinutes(60),
         is_rated: true,
         white: { username: 'alice', avatar_url: null },
         black: null,
@@ -54,7 +65,7 @@ describe('GET /api/health', () => {
 describe('GET /api/matchmaking/status', () => {
     test('reports the live queue size', async () => {
         expect((await request(ctx.app).get('/api/matchmaking/status')).body).toEqual({ players_searching: 0 });
-        const s = await ctx.connect();
+        const s = await ctx.connect('p1');
         supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_rapid: 1500, games_played: 9 }, error: null });
         s.emit('join_queue', { user: { id: 'p1' }, time_control: '10' });
         await once(s, 'queue_joined');
@@ -112,7 +123,7 @@ describe('POST /api/analysis/engine', () => {
                 'http://localhost:8001/analyze',
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: ENGINE_HEADERS,
                     body: JSON.stringify({ fen: START_FEN, depth: 12 }),
                 },
             ],
@@ -165,36 +176,54 @@ describe('POST /api/analysis/engine', () => {
 });
 
 describe('GET /api/games/join/:token', () => {
-    test('returns the joined row verbatim; looks it up by invite_token', async () => {
+    test('returns the public view of the game (no invite_token / invite_expires_at); token → game_invites → games by id [S8][INV-TOKEN]', async () => {
         const row = waitingGame();
+        queueInvite();
         supabase.queue('games', { data: row, error: null });
         const res = await request(ctx.app).get('/api/games/join/tok1234567');
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(row);
+        // Was: the whole row, token and expiry included.
+        expect(res.body).toEqual(publicView(row));
+        expect(res.text).not.toContain('invite_token');
+        expect(res.text).not.toContain('invite_expires_at');
+        // Was: games filtered by invite_token. The token is now only ever compared in game_invites.
+        expect(opsFor('game_invites')).toEqual([INVITE_LOOKUP('tok1234567')]);
         expect(opsFor('games').map(normalisedOps)).toEqual([
-            [['select', BY_TOKEN_SELECT], ['eq', 'invite_token', 'tok1234567'], ['maybeSingle']],
+            [['select', BY_TOKEN_SELECT], ['eq', 'id', 'pg-1'], ['maybeSingle']],
         ]);
     });
 
     test('expired less than 5 minutes ago is still served (grace period)', async () => {
-        supabase.queue('games', { data: waitingGame({ invite_expires_at: inMinutes(-4) }), error: null });
+        queueInvite(inMinutes(-4));
+        supabase.queue('games', { data: waitingGame(), error: null });
         expect((await request(ctx.app).get('/api/games/join/t')).status).toBe(200);
     });
 
     test.each([
-        ['not found', { data: null, error: null }],
-        ['expired > 5 min', { data: waitingGame({ invite_expires_at: inMinutes(-6) }), error: null }],
-        ['null expiry (epoch)', { data: waitingGame({ invite_expires_at: null }), error: null }],
-        ['DB error', { data: null, error: { message: 'boom' } }],
-    ])('%s → 404 { error: "Not found or expired" }', async (_label, result) => {
-        supabase.queue('games', result);
+        ['not found', () => ({ data: null, error: null })],
+        ['expired > 5 min', () => ({ data: { game_id: 'pg-1', expires_at: inMinutes(-6) }, error: null })],
+        ['null expiry (epoch)', () => ({ data: { game_id: 'pg-1', expires_at: null }, error: null })],
+        ['DB error', () => ({ data: null, error: { message: 'boom' } })],
+    ])('%s → 404 { error: "Not found or expired" }, and the game is never read', async (_label, invite) => {
+        supabase.queue('game_invites', invite());
+        supabase.queue('games', { data: waitingGame(), error: null });
         const res = await request(ctx.app).get('/api/games/join/t');
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'Not found or expired' });
+        expect(opsFor('games')).toEqual([]);
+    });
+
+    test('the invite exists but its game does not (or cannot be read) → 404', async () => {
+        queueInvite();
+        supabase.queue('games', { data: null, error: null });
+        expect((await request(ctx.app).get('/api/games/join/t')).status).toBe(404);
+        queueInvite();
+        supabase.queue('games', { data: null, error: { message: 'boom' } });
+        expect((await request(ctx.app).get('/api/games/join/t')).status).toBe(404);
     });
 
     test('a thrown error → 400 { error }', async () => {
-        supabase.queue('games', () => {
+        supabase.queue('game_invites', () => {
             throw new Error('kaput');
         });
         const res = await request(ctx.app).get('/api/games/join/t');
@@ -203,6 +232,7 @@ describe('GET /api/games/join/:token', () => {
     });
 
     test('a non-waiting game is still returned (status not checked on GET)', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame({ status: 'completed' }), error: null });
         expect((await request(ctx.app).get('/api/games/join/t')).body).toMatchObject({ status: 'completed' });
     });
@@ -219,25 +249,30 @@ describe('POST /api/games/join/:token', () => {
     }
 
     test('joins as the missing colour, returns the updated row, emits game_start to game_<id>, seeds Redis', async () => {
-        supabase.setUsers({ 'fake-test-token': 'bob' });
         const host = await roomListener('pg-1');
         const outsider = await ctx.connect('carol');
+        // After the sockets are connected: setUsers replaces the handshake token verifier too.
+        supabase.setUsers({ 'fake-test-token': 'bob' });
         const outsiderGot = record(outsider, 'game_start');
         const row = waitingGame();
         const joined = { ...row, black_id: 'bob', status: 'active', started_at: '2026-01-01T00:00:00.000Z' };
+        queueInvite();
         supabase.queue('games', { data: row, error: null }, { data: joined, error: null });
 
         const started = once(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/tok1234567').set(AUTH);
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(joined);
-        expect(await started).toEqual(joined);
+        // Response and game_start broadcast both carry the public view only [S8].
+        expect(res.body).toEqual(publicView(joined));
+        expect(res.text).not.toContain('tok1234567');
+        expect(await started).toEqual(publicView(joined));
         await sleep(30);
         expect(outsiderGot).toEqual([]);
 
         expect(supabase.auth.getUser).toHaveBeenCalledWith('fake-test-token');
+        expect(opsFor('game_invites')).toEqual([INVITE_LOOKUP('tok1234567')]);
         expect(opsFor('games').map(normalisedOps)).toEqual([
-            [['select', BY_TOKEN_SELECT], ['eq', 'invite_token', 'tok1234567'], ['maybeSingle']],
+            [['select', BY_TOKEN_SELECT], ['eq', 'id', 'pg-1'], ['maybeSingle']],
             [
                 ['update', { white_id: 'alice', black_id: 'bob', status: 'active', started_at: ISO_DATE }],
                 ['eq', 'id', 'pg-1'],
@@ -249,6 +284,7 @@ describe('POST /api/games/join/:token', () => {
         expect(await getGame('pg-1')).toEqual({
             id: 'pg-1',
             fen: START_FEN,
+            startFen: START_FEN,
             whiteId: 'alice',
             blackId: 'bob',
             whiteClockMs: 300000,
@@ -270,21 +306,23 @@ describe('POST /api/games/join/:token', () => {
     test('host waiting as black: joiner becomes white', async () => {
         supabase.setUsers({ 'fake-test-token': 'bob' });
         const row = waitingGame({ white_id: null, black_id: 'alice' });
+        queueInvite();
         supabase.queue('games', { data: row, error: null }, { data: { ...row, white_id: 'bob' }, error: null });
         await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(supabase.op(supabase.callsFor('games')[1], 'update')[0]).toMatchObject({ white_id: 'bob', black_id: 'alice' });
     });
 
     test('the creator re-joining gets the waiting row back, with NO update — game_start still emitted (pinned)', async () => {
-        supabase.setUsers({ 'fake-test-token': 'alice' });
         const host = await roomListener('pg-1');
+        supabase.setUsers({ 'fake-test-token': 'alice' });
         const row = waitingGame();
+        queueInvite();
         supabase.queue('games', { data: row, error: null });
         const started = once(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(res.status).toBe(200);
-        expect(res.body).toEqual(row);
-        expect(await started).toEqual(row);
+        expect(res.body).toEqual(publicView(row));
+        expect(await started).toEqual(publicView(row));
         expect(opsFor('games')).toHaveLength(1);
     });
 
@@ -295,6 +333,7 @@ describe('POST /api/games/join/:token', () => {
         ['unknown token', [{ data: null, error: null }], 'Invalid or expired token'],
     ])('%s → 400 { error: %p }', async (_label, results, message) => {
         supabase.setUsers({ 'fake-test-token': 'bob' });
+        if (message !== 'Invalid or expired token') queueInvite();
         supabase.queue('games', ...results);
         const res = await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(res.status).toBe(400);

@@ -33,7 +33,7 @@ function profile(id, overrides = {}) {
 
 /** Connect a socket and put `id` in the queue with the given profile row. */
 async function queued(id, joinData = {}, profileOverrides = {}) {
-    const s = await ctx.connect();
+    const s = await ctx.connect(id);
     supabase.queue('profiles', { data: profile(id, profileOverrides), error: null });
     s.emit('join_queue', { user: { id }, time_control: '10', ...joinData });
     const joined = await once(s, 'queue_joined');
@@ -80,7 +80,7 @@ describe('join_queue', () => {
         ['blitz', 1003], // parseInt → NaN → defaults to 10 minutes
         [undefined, 1003],
     ])('time_control %p reads rating %p', async (timeControl, rating) => {
-        const s = await ctx.connect();
+        const s = await ctx.connect('tc');
         supabase.queue('profiles', { data: profile('tc'), error: null });
         s.emit('join_queue', { user: { id: 'tc' }, time_control: timeControl });
         await once(s, 'queue_joined');
@@ -97,10 +97,18 @@ describe('join_queue', () => {
         expect(ctx.matchmaking.queue.get('q1').rating).toBe(1200);
     });
 
-    test('without data.user.id nothing is looked up or queued', async () => {
-        const s = await ctx.connect();
+    test('the queued player is the verified user: no payload id is needed, and a foreign one is ignored [S2]', async () => {
+        const s = await ctx.connect('q1');
+        supabase.queue('profiles', { data: profile('q1'), error: null });
+        s.emit('join_queue', { user: { id: 'someone-else' }, time_control: '10' });
+        await once(s, 'queue_joined');
+        expect(opsFor('profiles')).toEqual([[['select', PROFILE_COLUMNS], ['eq', 'id', 'q1'], ['maybeSingle']]]);
+        expect([...ctx.matchmaking.queue.keys()]).toEqual(['q1']);
+    });
+
+    test('a null payload is rejected: nothing is looked up or queued [S15]', async () => {
+        const s = await ctx.connect('q1');
         const joined = record(s, 'queue_joined');
-        s.emit('join_queue', { time_control: '10' });
         s.emit('join_queue', null);
         await sleep(80);
         expect(supabase.calls).toEqual([]);
@@ -108,7 +116,7 @@ describe('join_queue', () => {
     });
 
     test('unknown profile → lookup happens but nothing is queued or emitted', async () => {
-        const s = await ctx.connect();
+        const s = await ctx.connect('ghost');
         const joined = record(s, 'queue_joined');
         s.emit('join_queue', { user: { id: 'ghost' }, time_control: '10' });
         await sleep(80);
@@ -131,10 +139,13 @@ describe('join_queue', () => {
 });
 
 describe('leave_queue and queue_status', () => {
-    test('leave_queue removes the given user id — from ANY socket (pinned: no ownership check)', async () => {
-        await queued('q1');
+    test('leave_queue removes only the caller; another socket cannot remove someone else [G13]', async () => {
+        const { s } = await queued('q1');
         const stranger = await ctx.connect();
         stranger.emit('leave_queue', 'q1');
+        await sleep(50);
+        expect(ctx.matchmaking.queue.has('q1')).toBe(true);
+        s.emit('leave_queue');
         await sleep(50);
         expect(ctx.matchmaking.queue.has('q1')).toBe(false);
     });
@@ -236,6 +247,7 @@ describe('pairing', () => {
         expect(await getGame('match-1')).toEqual({
             id: 'match-1',
             fen: START_FEN,
+            startFen: START_FEN,
             whiteId: 'p1',
             blackId: 'p2',
             whiteClockMs: 600000,

@@ -22,6 +22,62 @@ test('concurrent updateGame calls on one game are serialised (no lost update)', 
     await expect(repo.getGame('g1')).resolves.toEqual({ a: 1, b: 2 });
 });
 
+describe('mutateGame: atomic read → decide → write under the per-game lock [S1][S3]', () => {
+    test('writes the state the callback returns and resolves with it', async () => {
+        const repo = createGameStateRepository(createRedisMock());
+        await repo.setGame('g1', { ply: 0 });
+        await expect(repo.mutateGame('g1', (game) => ({ ...game, ply: game.ply + 1 }))).resolves.toEqual({ ply: 1 });
+        await expect(repo.getGame('g1')).resolves.toEqual({ ply: 1 });
+    });
+
+    test('a callback that returns null writes nothing', async () => {
+        const redis = createRedisMock();
+        const repo = createGameStateRepository(redis);
+        await repo.setGame('g1', { ply: 0 });
+        const setex = jest.spyOn(redis, 'setex');
+        await expect(repo.mutateGame('g1', () => null)).resolves.toBeNull();
+        expect(setex).not.toHaveBeenCalled();
+    });
+
+    test('the callback receives null for an unknown game', async () => {
+        const repo = createGameStateRepository(createRedisMock());
+        const seen = [];
+        await repo.mutateGame('missing', (game) => {
+            seen.push(game);
+            return null;
+        });
+        expect(seen).toEqual([null]);
+    });
+
+    test('two concurrent mutations of one game never read the same state (no double apply)', async () => {
+        const repo = createGameStateRepository(createRedisMock());
+        await repo.setGame('g1', { ply: 0, status: 'active' });
+        // Both callers want to make "the" move for ply 0; only the first may.
+        const move = (game) => (game.ply === 0 ? { ...game, ply: 1 } : null);
+        const results = await Promise.all([repo.mutateGame('g1', move), repo.mutateGame('g1', move)]);
+        expect(results.filter(Boolean)).toHaveLength(1);
+        await expect(repo.getGame('g1')).resolves.toEqual({ ply: 1, status: 'active' });
+    });
+
+    test('mutateGame and updateGame share the lock', async () => {
+        const repo = createGameStateRepository(createRedisMock());
+        await repo.setGame('g1', { a: 0, b: 0 });
+        await Promise.all([repo.mutateGame('g1', (g) => ({ ...g, a: 1 })), repo.updateGame('g1', { b: 2 })]);
+        await expect(repo.getGame('g1')).resolves.toEqual({ a: 1, b: 2 });
+    });
+
+    test('a throwing callback rejects and releases the lock', async () => {
+        const repo = createGameStateRepository(createRedisMock());
+        await repo.setGame('g1', { ply: 0 });
+        await expect(
+            repo.mutateGame('g1', () => {
+                throw new Error('bad state');
+            }),
+        ).rejects.toThrow('bad state');
+        await expect(repo.mutateGame('g1', (g) => ({ ...g, ply: 1 }))).resolves.toEqual({ ply: 1 });
+    });
+});
+
 test('a failed update releases the lock for the next caller', async () => {
     const repo = createGameStateRepository(createRedisMock());
     await expect(repo.updateGame('missing', {})).rejects.toThrow('Game missing not found in Redis');

@@ -7,3 +7,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      # Shared secret for X-Engine-Key; set the same value on Railway and Vercel.
+      - key: ENGINE_SHARED_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      # Secret key (sb_secret_...). The legacy SUPABASE_SERVICE_KEY is still read as a fallback.
+      - key: SUPABASE_SECRET_KEY
+        sync: false

@@ -21,6 +21,9 @@ const { makeGame, START_FEN } = require('../helpers/fixtures');
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const ISO_DATE = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 const DEFAULT_ENGINE = 'http://localhost:8001';
+const ENGINE_TEST_SECRET = 'test-engine-secret';
+/** Headers of every request the server sends to the engine. */
+const ENGINE_HEADERS = { 'Content-Type': 'application/json', 'X-Engine-Key': ENGINE_TEST_SECRET };
 const EVENT_TIMEOUT_MS = 1000;
 /** Matchmaking and the global clock tick every 1000 ms of real time. */
 const TICK_TIMEOUT_MS = 2500;
@@ -85,6 +88,17 @@ function compact(selectList) {
     return String(selectList).replace(/\s+/g, '');
 }
 
+const TOKEN_PREFIX = 'test-token:';
+/** The fake access token the mocked Supabase Auth resolves to `userId`. */
+const tokenFor = (userId) => `${TOKEN_PREFIX}${userId}`;
+
+/** Stand-in for Supabase `auth.getUser(token)`: only `tokenFor(...)` tokens verify. */
+async function verifyTestToken(token) {
+    return typeof token === 'string' && token.startsWith(TOKEN_PREFIX)
+        ? { data: { user: { id: token.slice(TOKEN_PREFIX.length) } }, error: null }
+        : { data: { user: null }, error: { message: 'invalid token' } };
+}
+
 let idCounter = 0;
 /** Unique id per test so in-memory maps inside server.js never leak between tests. */
 function uniqueId(prefix) {
@@ -97,7 +111,7 @@ function uniqueId(prefix) {
  * server on an ephemeral port and reset the mocks between tests.
  *
  * @returns {object} ctx with url, app, server, io, matchmaking, fetch (spy),
- *   connect(userId), seatedGame(overrides)
+ *   open(auth), connect(userId, prepare), seatedGame(overrides)
  */
 function useServer() {
     const ctx = { clients: [] };
@@ -108,7 +122,9 @@ function useServer() {
         Object.assign(ctx, require('../../server'));
         await new Promise((resolve) => ctx.server.listen(0, '127.0.0.1', resolve));
         ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
-        for (const k of ['ENGINE_URL', 'FRONTEND_URL']) savedEnv[k] = process.env[k];
+        for (const k of ['GAMBIT_ENGINE_URL', 'ENGINE_URL', 'FRONTEND_URL', 'ENGINE_SHARED_SECRET']) {
+            savedEnv[k] = process.env[k];
+        }
     });
 
     afterAll(async () => {
@@ -122,11 +138,15 @@ function useServer() {
     });
 
     beforeEach(() => {
+        delete process.env.GAMBIT_ENGINE_URL;
         delete process.env.ENGINE_URL;
         delete process.env.FRONTEND_URL;
+        // The engine client refuses to call the engine without its shared secret (ENG-AUTH).
+        process.env.ENGINE_SHARED_SECRET = ENGINE_TEST_SECRET;
         supabase.reset();
         redis._reset();
         ctx.matchmaking.queue.clear();
+        supabase.auth.getUser.mockImplementation(verifyTestToken);
         ctx.fetch = jest.spyOn(global, 'fetch').mockImplementation(defaultEngine);
         jest.spyOn(console, 'error').mockImplementation(() => {});
         jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -139,15 +159,23 @@ function useServer() {
         jest.spyOn(console, 'log').mockImplementation(() => {});
     });
 
-    /** Connect a fresh client; authenticate it as `userId` when given. */
-    ctx.connect = async (userId) => {
-        const socket = ioClient(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false });
+    /** A client that has not finished its handshake yet; `auth` is sent as `handshake.auth`. */
+    ctx.open = (auth) => {
+        const socket = ioClient(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false, auth });
         ctx.clients.push(socket);
-        await once(socket, 'connect');
-        if (userId !== undefined && userId !== null) {
-            socket.emit('authenticate', userId);
-            await once(socket, 'authenticated');
-        }
+        return socket;
+    };
+
+    /**
+     * Connect a client whose handshake token verifies as `userId` (a fresh
+     * stranger when omitted). `prepare(socket)` runs before the connection is
+     * established, to attach listeners for events the server sends on connect.
+     */
+    ctx.connect = async (userId = uniqueId('stranger'), prepare = () => {}) => {
+        const socket = ctx.open({ token: tokenFor(userId) });
+        prepare(socket);
+        // Generous: the handshake now includes an (async) token check, and suites run in parallel.
+        await once(socket, 'connect', TICK_TIMEOUT_MS);
         return socket;
     };
 
@@ -172,6 +200,7 @@ module.exports = {
     START_FEN,
     ISO_DATE,
     DEFAULT_ENGINE,
+    ENGINE_HEADERS,
     TICK_TIMEOUT_MS,
     makeGame,
     sleep,
@@ -182,5 +211,6 @@ module.exports = {
     opsFor,
     compact,
     uniqueId,
+    tokenFor,
     useServer,
 };

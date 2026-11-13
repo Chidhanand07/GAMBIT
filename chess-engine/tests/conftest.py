@@ -113,9 +113,23 @@ def stockfish(engine_switch):
     return engine_switch
 
 
+# The shared secret the tests configure the engine with (see `engine_key`).
+ENGINE_TEST_KEY = "test-engine-key"
+
+
+@pytest.fixture(autouse=True)
+def engine_key(monkeypatch):
+    """Configure ENGINE_SHARED_SECRET for every test (tests may override or unset it)."""
+    import config
+
+    monkeypatch.setattr(config, "ENGINE_SHARED_SECRET", ENGINE_TEST_KEY)
+    return ENGINE_TEST_KEY
+
+
 @pytest.fixture
-def client():
+def client(engine_key):
+    """A caller that holds the shared secret (what the game server and Next.js send)."""
     from fastapi.testclient import TestClient
     import main
 
-    return TestClient(main.app)
+    return TestClient(main.app, headers={"X-Engine-Key": engine_key})

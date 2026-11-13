@@ -2,6 +2,7 @@
 /**
  * Game outcomes. An outcome is 'white' | 'black' | 'draw' (the winner's colour,
  * or draw); a result label is the human string sent in `game_end` events.
+ * Outcomes are always computed by the server; nothing here parses client text.
  */
 
 /**
@@ -13,19 +14,6 @@ function resultLabel(outcome) {
     if (outcome === 'white') return 'White wins';
     if (outcome === 'black') return 'Black wins';
     return 'Draw';
-}
-
-/**
- * Outcome from a client-supplied result string: contains "white" (any case) →
- * 'white', else contains "black" → 'black', else 'draw'. A nullish input is a
- * draw; a non-string input throws, as the original inline code did.
- * @param {string | null | undefined} resultText
- * @returns {'white' | 'black' | 'draw'}
- */
-function parseOutcome(resultText) {
-    if (resultText?.toLowerCase().includes('white')) return 'white';
-    if (resultText?.toLowerCase().includes('black')) return 'black';
-    return 'draw';
 }
 
 /**
@@ -80,4 +68,30 @@ function winnerIdFor(outcome, { whiteId, blackId }) {
     return null;
 }
 
-module.exports = { resultLabel, parseOutcome, opponentColor, sideToColor, colorOfPlayer, playerIdOf, winnerIdFor };
+const OUTCOMES = ['white', 'black', 'draw'];
+
+/**
+ * Outcome of a finished `games` row. Rows written since the server decides
+ * results carry it in `result`; older decisive rows have `result` null and
+ * only `winner_id`, so the winner column is the fallback. No winner → draw.
+ * @param {{ result?: unknown, winner_id?: unknown, white_id?: unknown, black_id?: unknown }} row
+ * @returns {'white' | 'black' | 'draw'}
+ */
+function outcomeOfRow(row) {
+    if (OUTCOMES.includes(/** @type {string} */ (row.result))) {
+        return /** @type {'white' | 'black' | 'draw'} */ (row.result);
+    }
+    if (row.winner_id && row.winner_id === row.white_id) return 'white';
+    if (row.winner_id && row.winner_id === row.black_id) return 'black';
+    return 'draw';
+}
+
+module.exports = {
+    resultLabel,
+    opponentColor,
+    sideToColor,
+    colorOfPlayer,
+    playerIdOf,
+    winnerIdFor,
+    outcomeOfRow,
+};
