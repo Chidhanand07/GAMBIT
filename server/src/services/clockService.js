@@ -10,6 +10,7 @@
 const { clocksAt } = require('../domain/clock');
 const { clockVerdict } = require('../domain/clockVerdict');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -65,12 +66,12 @@ async function tick(deps) {
                 try {
                     await tickGame(deps, gameId);
                 } catch (e) {
-                    console.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
+                    log.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
                 }
             }),
         );
     } catch (e) {
-        console.error('[clock] ticker error:', /** @type {Error} */ (e).message);
+        log.error('[clock] ticker error:', /** @type {Error} */ (e).message);
     }
 }
 

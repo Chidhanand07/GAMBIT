@@ -6,6 +6,7 @@ const { createGameFinalizer } = require('../../src/services/gameFinalizer');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
 const { fakeEmitter, fakeGameStore, result } = require('./fakes');
 const { makeGame } = require('../helpers/fixtures');
+const { log } = require('../../src/observability/log');
 
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/);
@@ -327,7 +328,7 @@ describe('failures while a game is being finished [ERRORS]', () => {
         expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
 
         expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(3);
-        expect(console.error).toHaveBeenCalledWith('[finalizer] game g: result not persisted after 3 attempts:', 'db down');
+        expect(log.error).toHaveBeenCalledWith('[finalizer] game g: result not persisted after 3 attempts:', 'db down');
         expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
         // The players were told: the game IS over (Redis is committed); only the record is missing.
         expect(ctx.emitter.named('game_end')).toHaveLength(1);
@@ -359,7 +360,7 @@ describe('failures while a game is being finished [ERRORS]', () => {
         ctx.gameStore.removeActiveGame.mockRejectedValueOnce(new Error('redis srem failed'));
         expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
         expect(ctx.emitter.named('game_end')).toHaveLength(1);
-        expect(console.error).toHaveBeenCalledWith('[finalizer] game g: could not leave the active set:', 'redis srem failed');
+        expect(log.error).toHaveBeenCalledWith('[finalizer] game g: could not leave the active set:', 'redis srem failed');
         expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(1);
     });
 });

@@ -25,7 +25,7 @@ afterAll(() => {
 beforeEach(() => supabase.reset());
 
 test('server.js exports the composition root and does not listen when required', () => {
-    expect(Object.keys(ctx).sort()).toEqual(['app', 'buildPgnFromMoveLog', 'io', 'matchmaking', 'server', 'start']);
+    expect(Object.keys(ctx).sort()).toEqual(['app', 'buildPgnFromMoveLog', 'io', 'matchmaking', 'readiness', 'server', 'start']);
     expect(ctx.server.listening).toBe(false);
 });
 

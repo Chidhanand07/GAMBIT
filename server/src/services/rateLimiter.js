@@ -9,6 +9,7 @@
  * self-inflicted outage on top of it.
  */
 const { decide } = require('../domain/rateLimits');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {import('../domain/rateLimits').Rule} Rule
@@ -32,10 +33,7 @@ function createRateLimiter({ store, rules }) {
             try {
                 return decide(await store.hit(`${ruleName}:${subject}`, rule.windowMs), rule);
             } catch (e) {
-                console.error(
-                    `[rate-limit] store unavailable, allowing ${ruleName}:`,
-                    /** @type {Error} */ (e).message,
-                );
+                log.error(`[rate-limit] store unavailable, allowing ${ruleName}:`, /** @type {Error} */ (e).message);
                 return { ok: true };
             }
         },

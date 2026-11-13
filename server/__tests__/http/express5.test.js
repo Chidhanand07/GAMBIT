@@ -7,6 +7,7 @@ const request = require('supertest');
 const { version } = require('express/package.json');
 const { createApp, attachErrorHandler } = require('../../src/http/app');
 const { AppError } = require('../../src/services/errors');
+const { log } = require('../../src/observability/log');
 
 const allowAll = () => ({ isAllowed: () => true, allowsRequest: () => true });
 
@@ -46,7 +47,7 @@ test('an async handler that throws anything else → 500 internal_error, logged,
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'internal_error' });
     expect(res.text).not.toContain('hunter2');
-    expect(console.error).toHaveBeenCalledWith('[http] GET /x failed:', 'db password is hunter2');
+    expect(log.error).toHaveBeenCalledWith('[http] GET /x failed:', 'db password is hunter2');
 });
 
 test('a malformed JSON body → 400 invalid_request JSON (was Express 4\'s HTML error page)', async () => {

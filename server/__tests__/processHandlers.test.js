@@ -3,11 +3,12 @@
  */
 const { EventEmitter } = require('events');
 const { registerProcessHandlers } = require('../src/processHandlers');
+const { log } = require('../src/observability/log');
 
 afterEach(() => jest.restoreAllMocks());
 
 test('an unhandled rejection is logged with its stack and does not throw', () => {
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const error = jest.spyOn(log, 'error');
     const proc = new EventEmitter();
     registerProcessHandlers(proc);
     const reason = new Error('boom');
@@ -16,7 +17,7 @@ test('an unhandled rejection is logged with its stack and does not throw', () =>
 });
 
 test('a non-Error reason is logged as given', () => {
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const error = jest.spyOn(log, 'error');
     const proc = new EventEmitter();
     registerProcessHandlers(proc);
     proc.emit('unhandledRejection', 'plain reason');

@@ -11,6 +11,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { sendError } = require('./respond');
+const { createRequestLog } = require('./requestLog');
 
 const HTTP_FORBIDDEN = 403;
 const HTTP_NOT_FOUND = 404;
@@ -32,6 +33,7 @@ function createApp({ originPolicy }) {
     // Railway terminates TLS in front of the app: one proxy hop, so req.ip is the client (rate limits).
     app.set('trust proxy', 1);
     app.disable('x-powered-by');
+    app.use(createRequestLog());
     app.use((req, res, next) => {
         if (originPolicy().allowsRequest(req.headers.origin)) return next();
         res.status(HTTP_FORBIDDEN).json(ORIGIN_NOT_ALLOWED);

@@ -5,6 +5,7 @@
 const { createRedisMock } = require('../helpers/mockRedis');
 const { createRateLimitRepository } = require('../../src/repositories/rateLimitRepository');
 const { createRateLimiter } = require('../../src/services/rateLimiter');
+const { log } = require('../../src/observability/log');
 
 const RULES = { tight: { limit: 2, windowMs: 1000 } };
 
@@ -50,7 +51,7 @@ test('the counter key expires with the window (no unbounded keys)', async () => 
 });
 
 test('Redis failing → allowed and logged (fail open, ADR F-046)', async () => {
-    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const err = log.error;
     const { redis, limiter } = setup();
     redis._failNext('exec');
     expect(await limiter.check('tight', 'u1')).toEqual({ ok: true });

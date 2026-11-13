@@ -6,6 +6,7 @@ const { createGameFinalizer } = require('../../src/services/gameFinalizer');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
 const { fakeEmitter, fakeGameStore, result } = require('./fakes');
 const { makeGame } = require('../helpers/fixtures');
+const { log } = require('../../src/observability/log');
 
 const T = 1_000_000;
 
@@ -110,7 +111,7 @@ test('a game the database already finalized is not rated or reviewed again; a ra
     const failing = setup(makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' }));
     failing.rating.processGameEnd.mockRejectedValue(new Error('boom'));
     await failing.svc.tick();
-    expect(console.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'boom');
+    expect(log.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'boom');
     // The game is over for the players all the same.
     expect(failing.emitter.named('game_end')).toHaveLength(1);
 });
@@ -124,7 +125,7 @@ test('a ticker-level failure is logged', async () => {
     const { svc, gameStore } = setup(makeGame());
     gameStore.getActiveGameIds.mockRejectedValue(new Error('redis down'));
     await svc.tick();
-    expect(console.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
+    expect(log.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
 });
 
 test('a flag fall that loses the race to another ending does nothing (one finalizer wins) [S3]', async () => {

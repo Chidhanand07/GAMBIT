@@ -12,6 +12,7 @@
 const { clocksAt } = require('../domain/clock');
 const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 const DEFAULT_TIME_CONTROL = '10';
 /** How often the finished row is written before giving up, and the pauses in between. */
@@ -79,7 +80,7 @@ async function writeResult({ gamesRepo, sleep }, gameId, row) {
             lastError = /** @type {Error} */ (e).message;
         }
     }
-    console.error(`[finalizer] game ${gameId}: result not persisted after ${PERSIST_ATTEMPTS} attempts:`, lastError);
+    log.error(`[finalizer] game ${gameId}: result not persisted after ${PERSIST_ATTEMPTS} attempts:`, lastError);
     return null;
 }
 
@@ -176,10 +177,7 @@ function createGameFinalizer({
         try {
             await gameStore.removeActiveGame(gameId);
         } catch (e) {
-            console.error(
-                `[finalizer] game ${gameId}: could not leave the active set:`,
-                /** @type {Error} */ (e).message,
-            );
+            log.error(`[finalizer] game ${gameId}: could not leave the active set:`, /** @type {Error} */ (e).message);
         }
         await persist(gameId, finished, outcome);
         return true;

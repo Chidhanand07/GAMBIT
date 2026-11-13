@@ -1833,3 +1833,32 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Path syntax.** All routes use plain `:param` segments; nothing uses the patterns Express 5
   changed (`*`, optional `?`, regex strings), checked by search.
 - **Not verified.** No deploy; Railway runs the same `node server.js`.
+
+## F-055
+
+**Structured logs with pino; `/livez` and `/readyz` (OBSERVABILITY).**
+
+- **Context.** The game server logged with `console.*` (33 calls): plain text, no request or
+  socket context, nothing redacted. There was one health route, `/api/health`, which said "ok"
+  even with Redis down.
+- **Decision.**
+  - `src/observability/log.js`: pino, JSON lines on stdout, ISO time, `service: 'gambit-server'`,
+    `redact` for authorization/cookie/engine-key headers and token/password/secret fields
+    (`[REDACTED]`). Code uses a two-argument port, `log.error(message, detail?)`, written as
+    `{ detail, msg }`, so every former console call kept its message and argument and tests
+    assert the same pair on the logger. `log.child(bindings)` adds context.
+  - Level from `LOG_LEVEL` (default `info`; `silent` under test). The config module cannot import
+    the logger (the logger reads its level from config), so config warnings go through a sink
+    the logger registers (`env.setWarningSink`).
+  - Requests: `pino-http` with a request id (a sane incoming `X-Request-Id` is kept, otherwise a
+    UUID), echoed as `X-Request-Id`. Sockets: `socket.data.log` is a child with `socketId` and
+    `userId`; finalizer lines name the game id in the message.
+  - `/livez` (process up), `/readyz` (Redis `PING` and a one-row PostgREST `HEAD` request, 2 s
+    timeout each; 503 naming the failed check; 503 while draining). `/api/health` stays for the
+    current Railway healthcheck setting.
+  - No `console` call is left in `server/src` or the legacy facades.
+- **Not done.** The socket handler wrapper (`wrap`) logs through the process logger, not the
+  socket's child (it does not receive the socket); the request id is not propagated to Supabase
+  or engine calls. An error tracker (SEC-12) is not part of this item.
+- **Owner action.** Point Railway's healthcheck at `/readyz` when convenient (NODE-21); keep
+  `/api/health` until then. Optional `LOG_LEVEL`.

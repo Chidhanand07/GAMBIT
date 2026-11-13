@@ -8,6 +8,7 @@ jest.mock('../supabase', () => ({
 
 const { supabase } = require('../supabase');
 const ratingService = require('../services/rating');
+const { log } = require('../src/observability/log');
 
 function profile(id, overrides = {}) {
     return {
@@ -194,6 +195,6 @@ describe('processGameEnd', () => {
         supabase.queue('rpc:apply_game_result', { data: null, error: { message: 'write failed' } });
         const res = await ratingService.processGameEnd('g1', 'w', 'b', 'white', '10', true);
         expect(res).toBeNull();
-        expect(console.error).toHaveBeenCalledWith('[rating] game g1: not applied:', 'write failed');
+        expect(log.error).toHaveBeenCalledWith('[rating] game g1: not applied:', 'write failed');
     });
 });

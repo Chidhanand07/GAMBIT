@@ -5,6 +5,7 @@
  * `socket.data.userId`. There is no `authenticate` event, and no handler reads
  * a user id from a payload. Any failure rejects the connection (SEC-09).
  */
+const { log } = require('../observability/log');
 
 /** Supabase access tokens are ~1 KB; anything far larger is not a token. */
 const MAX_TOKEN_LENGTH = 8192;
@@ -39,7 +40,7 @@ function createHandshakeAuth({ verifyToken, tokenDeadline }) {
             if (tokenDeadline) socket.data.tokenExpiresAt = tokenDeadline(token);
             next();
         } catch (error) {
-            console.error('[socket] token verification failed:', /** @type {Error} */ (error).message);
+            log.error('[socket] token verification failed:', /** @type {Error} */ (error).message);
             next(new Error(UNAUTHORIZED));
         }
     };

@@ -7,6 +7,7 @@
  */
 const { playerRejection } = require('../domain/moveAuthorization');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {{ game_id: string, text: string, from?: string }} ChatRequest validated by the socket schema
@@ -44,7 +45,7 @@ function createChatService({ gameStore, messagesRepo, emitter }) {
             messagesRepo
                 .insert({ game_id: gameId, user_id: userId, content: text, created_at: new Date().toISOString() })
                 .then(({ error }) => {
-                    if (error) console.error('[send_message] persist:', error.message);
+                    if (error) log.error('[send_message] persist:', error.message);
                 });
             return { ok: true };
         },

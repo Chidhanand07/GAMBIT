@@ -16,6 +16,7 @@ jest.mock('ioredis', () =>
 );
 
 const { createRedisClient } = require('../../src/clients/redisClient');
+const { log } = require('../../src/observability/log');
 
 afterEach(() => jest.restoreAllMocks());
 
@@ -26,7 +27,7 @@ test('passes the URL and the original options', () => {
 });
 
 test('retryStrategy backs off 200ms per attempt, capped at 2000, gives up after 3', () => {
-    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const errSpy = jest.spyOn(log, 'error');
     const { retryStrategy } = createRedisClient('redis://h:1').options;
     expect([1, 2, 3].map(retryStrategy)).toEqual([200, 400, 600]);
     expect(retryStrategy(4)).toBeNull();
@@ -36,8 +37,8 @@ test('retryStrategy backs off 200ms per attempt, capped at 2000, gives up after 
 });
 
 test('logs connect and error events', () => {
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = jest.spyOn(log, 'info');
+    const errSpy = jest.spyOn(log, 'error');
     createRedisClient('redis://h:1');
     handlers.connect();
     handlers.error(new Error('boom'));

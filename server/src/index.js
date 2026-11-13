@@ -47,11 +47,16 @@ const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
 const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
 const { createHttpRateLimit } = require('./http/rateLimit');
 const { createSocketRateLimit } = require('./sockets/rateLimit');
+const { createReadiness } = require('./services/readiness');
+const { redisProbe, supabaseProbe } = require('./clients/healthProbes');
+
+const READINESS_TIMEOUT_MS = 2000;
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
+const { log } = require('./observability/log');
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
@@ -106,9 +111,15 @@ const chatService = createChatService({
 // Rate limits live in Redis, so every instance shares them (NODE-12).
 const rateLimiter = createRateLimiter({ store: createRateLimitRepository(redis), rules: RATE_LIMIT_RULES });
 app.use(createHttpRateLimit({ limiter: rateLimiter }));
+// /readyz: Redis and Supabase answer within 2 s, and the process is not draining (NODE-21).
+const readiness = createReadiness({
+    probes: { redis: redisProbe(redis), supabase: supabaseProbe(supabase) },
+    timeoutMs: READINESS_TIMEOUT_MS,
+});
 
 registerRoutes(app, {
     queueSize: () => matchmaking.queue.size,
+    readiness,
     profileService: createProfileService({ profilesRepo: createProfilesRepository(supabase) }),
     analysisService: createAnalysisService({ engineClient }),
     privateGames,
@@ -137,8 +148,8 @@ function start() {
     registerProcessHandlers();
     const PORT = env.port();
     server.listen(PORT, () => {
-        console.log(`Node server running on port ${PORT}`);
+        log.info(`Node server running on port ${PORT}`);
     });
 }
 
-module.exports = { app, server, io, matchmaking, buildPgnFromMoveLog, start };
+module.exports = { app, server, io, matchmaking, readiness, buildPgnFromMoveLog, start };

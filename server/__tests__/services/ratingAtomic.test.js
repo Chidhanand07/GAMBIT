@@ -9,6 +9,7 @@
  */
 const { createRatingService } = require('../../src/services/ratingService');
 const { fakeRatingDb } = require('./fakes');
+const { log } = require('../../src/observability/log');
 
 const player = (id, rating) => ({
     id,
@@ -34,7 +35,6 @@ function serviceOn(db) {
     return createRatingService({ profilesRepo: db.profilesRepo, gameResultsRepo: db.gameResultsRepo });
 }
 
-beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
 afterEach(() => jest.restoreAllMocks());
 
 test('two games of the same player finishing concurrently both count (no lost update)', async () => {
@@ -123,7 +123,7 @@ test('a refused call (e.g. aborted game) writes nothing, is logged and yields nu
 
     expect(res).toBeNull();
     expect(db.profileRows.get('p')).toEqual(player('p', 1500));
-    expect(console.error).toHaveBeenCalledWith('[rating] game g4: not applied:', 'game is aborted, not completed');
+    expect(log.error).toHaveBeenCalledWith('[rating] game g4: not applied:', 'game is aborted, not completed');
 });
 
 test('stale inputs are recomputed a bounded number of times, then the game is left unrated', async () => {
@@ -142,7 +142,7 @@ test('stale inputs are recomputed a bounded number of times, then the game is le
     expect(db.gameResultsRepo.applyGameResult).toHaveBeenCalledTimes(5);
     expect(db.profileRows.get('p')).toEqual(player('p', 1500));
     expect(db.gameRows.get('g1').rated_at).toBeNull();
-    expect(console.error).toHaveBeenCalledWith(
+    expect(log.error).toHaveBeenCalledWith(
         '[rating] game g1: profiles kept changing, not rated after 5 attempts',
     );
 });

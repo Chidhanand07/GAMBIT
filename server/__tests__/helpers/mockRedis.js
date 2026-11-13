@@ -87,6 +87,7 @@ function createRedisMock() {
         },
         async srem(key, member) { maybeFail('srem'); return sets.get(key)?.delete(member) ? 1 : 0; },
         async smembers(key) { maybeFail('smembers'); return [...(sets.get(key) ?? [])]; },
+        async ping() { maybeFail('ping'); return 'PONG'; },
         on() { return redis; },
 
         _failNext(cmd) { failures.add(cmd); },

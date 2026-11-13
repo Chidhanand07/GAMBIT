@@ -5,13 +5,14 @@
  * through from timers or fire-and-forget chains instead of letting Node's
  * default (exit on an unhandled rejection) take every live game down.
  */
+const { log } = require('./observability/log');
 
 /** @type {WeakSet<object>} */
 const registered = new WeakSet();
 
 /** @param {unknown} reason */
 function logUnhandledRejection(reason) {
-    console.error('[process] unhandledRejection:', reason instanceof Error ? reason.stack : reason);
+    log.error('[process] unhandledRejection:', reason instanceof Error ? reason.stack : reason);
 }
 
 /**

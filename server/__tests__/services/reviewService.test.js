@@ -3,6 +3,7 @@
  */
 const { createReviewService } = require('../../src/services/reviewService');
 const { flush } = require('./fakes');
+const { log } = require('../../src/observability/log');
 
 beforeEach(() => jest.spyOn(console, 'warn').mockImplementation(() => {}));
 afterEach(() => jest.restoreAllMocks());
@@ -27,10 +28,10 @@ test('engine errors are warnings, never thrown', async () => {
     const engineClient = { analyseGame: jest.fn(async () => ({ ok: false, status: 503 })) };
     createReviewService({ engineClient }).triggerGameReview('g', [{ san: 'e4' }], 5);
     await flush();
-    expect(console.warn).toHaveBeenCalledWith('[game_review] engine returned', 503);
+    expect(log.warn).toHaveBeenCalledWith('[game_review] engine returned', 503);
 
     engineClient.analyseGame.mockRejectedValue(new Error('ECONNREFUSED'));
     createReviewService({ engineClient }).triggerGameReview('g', [{ san: 'e4' }], 5);
     await flush();
-    expect(console.warn).toHaveBeenCalledWith('[game_review] trigger failed:', 'ECONNREFUSED');
+    expect(log.warn).toHaveBeenCalledWith('[game_review] trigger failed:', 'ECONNREFUSED');
 });

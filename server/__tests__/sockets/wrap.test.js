@@ -4,6 +4,7 @@
  */
 const { z } = require('zod');
 const { wrap, guard } = require('../../src/sockets/wrap');
+const { log } = require('../../src/observability/log');
 
 const schema = z.object({ game_id: z.string() });
 
@@ -51,14 +52,14 @@ describe('wrap', () => {
         const ack = jest.fn();
         await expect(wrap('make_move', schema, handler)({ game_id: 'g1' }, ack)).resolves.toBeUndefined();
         expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
-        expect(console.error).toHaveBeenCalledWith('[socket] make_move failed:', 'boom');
+        expect(log.error).toHaveBeenCalledWith('[socket] make_move failed:', 'boom');
     });
 
     test('a thrown Supabase-style { message } object is logged by its message', async () => {
         await wrap('make_move', schema, async () => Promise.reject({ message: 'insert failed', code: '23505' }))({
             game_id: 'g1',
         });
-        expect(console.error).toHaveBeenCalledWith('[socket] make_move failed:', 'insert failed');
+        expect(log.error).toHaveBeenCalledWith('[socket] make_move failed:', 'insert failed');
     });
 
     test('a throwing ack callback cannot escape either', async () => {
@@ -76,6 +77,6 @@ describe('guard (events without a payload, e.g. disconnect)', () => {
         });
         await expect(guard('disconnect', handler)('transport close')).resolves.toBeUndefined();
         expect(handler).toHaveBeenCalledTimes(1);
-        expect(console.error).toHaveBeenCalledWith('[socket] disconnect failed:', 'redis down');
+        expect(log.error).toHaveBeenCalledWith('[socket] disconnect failed:', 'redis down');
     });
 });

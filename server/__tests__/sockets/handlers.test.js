@@ -4,6 +4,7 @@
  */
 const { registerSocketHandlers } = require('../../src/sockets');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
+const { log } = require('../../src/observability/log');
 
 function connect(deps, userId = 'u1') {
     let onConnection;
@@ -49,13 +50,13 @@ function deps() {
     };
 }
 
-beforeEach(() => jest.spyOn(console, 'log').mockImplementation(() => {}));
+beforeEach(() => jest.spyOn(log, 'info'));
 afterEach(() => jest.restoreAllMocks());
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 test('registers the handshake middleware and exactly the supported events (no `authenticate`, no client `game_end`)', () => {
-    const { handlers, middlewares } = connect(deps());
+    const { handlers, middlewares, socket } = connect(deps());
     expect(middlewares).toHaveLength(1);
     expect(Object.keys(handlers).sort()).toEqual(
         [
@@ -75,7 +76,8 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'disconnect',
         ].sort(),
     );
-    expect(console.log).toHaveBeenCalledWith('Client connected:', 'sock-1');
+    // The connection line comes from a child logger bound to the socket and user [OBSERVABILITY].
+    expect(socket.data.log).toBeDefined();
 });
 
 test('the handshake middleware rejects a connection without a valid token [S2]', async () => {
@@ -104,7 +106,7 @@ test('a connection registers the verified user, joins user_<id>, then resumes th
 test('a failing reconnect on connection is logged, not thrown [S15]', async () => {
     const d = deps();
     d.gameService.reconnect.mockRejectedValue(new Error('redis down'));
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const error = jest.spyOn(log, 'error');
     connect(d);
     await flush();
     expect(error).toHaveBeenCalledWith('[socket] connection failed:', 'redis down');
@@ -172,7 +174,7 @@ test('a failing service is logged and acked, not thrown [S15]', async () => {
     const d = deps();
     d.gameService.makeMove.mockRejectedValue(new Error('redis down'));
     d.gameService.handleDisconnect.mockRejectedValue(new Error('redis down'));
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(log, 'error');
     const { handlers } = connect(d);
     const ack = jest.fn();
     await expect(handlers.make_move({ game_id: 'g', from: 'e2', to: 'e4' }, ack)).resolves.toBeUndefined();

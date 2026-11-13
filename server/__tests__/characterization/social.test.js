@@ -16,6 +16,7 @@ const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame } = require('../../lib/gameStore');
 const { useServer, once, record, recordAll, sleep, opsFor, compact, ISO_DATE, START_FEN } = require('./harness');
+const { log } = require('../../src/observability/log');
 
 /** Emit with an ack callback and resolve with what the server acknowledged. */
 const emitAck = (socket, event, payload) => new Promise((resolve) => socket.emit(event, payload, resolve));
@@ -222,7 +223,7 @@ describe('rematch', () => {
         await sleep(50);
         expect(events.filter(([e]) => e !== 'queue_status')).toEqual([]);
         expect(opsFor('games')).toHaveLength(1);
-        expect(console.error).toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
+        expect(log.error).toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
     });
 
     test('rematch_decline sends rematch_declined (no payload) to the REQUESTER and clears the request', async () => {

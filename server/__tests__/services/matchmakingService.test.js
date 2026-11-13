@@ -3,6 +3,7 @@
  */
 const { createMatchmakingService } = require('../../src/services/matchmakingService');
 const { fakeEmitter, fakeGameStore, result } = require('./fakes');
+const { log } = require('../../src/observability/log');
 
 const T = 5_000_000;
 
@@ -88,7 +89,7 @@ test('a failed insert logs and drops both players (pinned)', async () => {
     svc.joinQueue({ user: { id: 'a', username: 'a' }, socketId: 'sa', timeControl: '10', increment: 0 });
     svc.joinQueue({ user: { id: 'b', username: 'b' }, socketId: 'sb', timeControl: '10', increment: 0 });
     await svc.matchPlayers();
-    expect(console.error).toHaveBeenCalledWith('[matchmaking] createGame error:', 'insert failed');
+    expect(log.error).toHaveBeenCalledWith('[matchmaking] createGame error:', 'insert failed');
     expect(svc.queue.size).toBe(0);
     expect(emitter.named('match_found')).toHaveLength(0);
 });
@@ -185,7 +186,7 @@ describe('match_found is a minimal DTO; a failed game insert is reported [G12]',
         // Out of the queue: each client decides whether to search again (no retry storm against a failing DB).
         expect(svc.queue.size).toBe(0);
         expect(gameStore.state.size).toBe(0);
-        expect(console.error).toHaveBeenCalledWith('[matchmaking] createGame error:', 'insert failed');
+        expect(log.error).toHaveBeenCalledWith('[matchmaking] createGame error:', 'insert failed');
     });
 
     test('an insert that throws is reported the same way and does not stop the pairing pass', async () => {

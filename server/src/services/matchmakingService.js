@@ -8,6 +8,7 @@ const pairing = require('../domain/matchmaking/pairing');
 const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
 const { DEFAULT_TIME_CONTROL, formatTimeControl, parseTimeControl, ratingField } = require('../domain/timeControl');
+const { log } = require('../observability/log');
 
 const DEFAULT_RATING = 1200;
 const ESTIMATED_WAIT_SECONDS = 10;
@@ -114,9 +115,9 @@ async function insertGame({ gamesRepo }, white, black) {
             started_at: new Date().toISOString(),
         });
         if (!error && data) return data;
-        console.error('[matchmaking] createGame error:', error?.message);
+        log.error('[matchmaking] createGame error:', error?.message);
     } catch (e) {
-        console.error('[matchmaking] createGame error:', /** @type {Error} */ (e).message);
+        log.error('[matchmaking] createGame error:', /** @type {Error} */ (e).message);
     }
     return null;
 }

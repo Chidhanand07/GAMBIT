@@ -93,8 +93,9 @@ describe('engine URL [G5]', () => {
     beforeEach(() => {
         jest.isolateModules(() => {
             env = require('../../src/config/env');
+            // Warnings go through the structured logger (NODE-20) of the same fresh module set.
+            warn = jest.spyOn(require('../../src/observability/log').log, 'warn');
         });
-        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
     afterEach(() => warn.mockRestore());
 
@@ -134,8 +135,9 @@ describe('engine shared secret [ENG-AUTH]', () => {
     beforeEach(() => {
         jest.isolateModules(() => {
             env = require('../../src/config/env');
+            // Warnings go through the structured logger (NODE-20) of the same fresh module set.
+            warn = jest.spyOn(require('../../src/observability/log').log, 'warn');
         });
-        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
     afterEach(() => warn.mockRestore());
 

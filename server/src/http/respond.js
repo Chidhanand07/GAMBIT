@@ -3,6 +3,7 @@
  * Request parsing and error responses shared by the routes (NODE-07, NODE-08).
  */
 const { AppError } = require('../services/errors');
+const { log } = require('../observability/log');
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_INTERNAL_ERROR = 500;
@@ -48,7 +49,7 @@ function sendError(res, route, error) {
         res.status(error.httpStatus).json({ error: error.code });
         return;
     }
-    console.error(`[http] ${route} failed:`, /** @type {Error} */ (error)?.message ?? error);
+    log.error(`[http] ${route} failed:`, /** @type {Error} */ (error)?.message ?? error);
     res.status(HTTP_INTERNAL_ERROR).json(INTERNAL_ERROR);
 }
 

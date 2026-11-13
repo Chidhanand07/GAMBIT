@@ -500,3 +500,35 @@ describe('rate limits (shared in Redis, per client IP) [RATE-LIMITS]', () => {
         expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
     });
 });
+
+describe('health endpoints [OBSERVABILITY] (NODE-21)', () => {
+    test('/livez: the process is up', async () => {
+        const res = await request(ctx.app).get('/livez');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ status: 'ok' });
+    });
+
+    test('/api/health still answers for the Railway healthcheck', async () => {
+        expect((await request(ctx.app).get('/api/health')).body).toEqual({ status: 'ok' });
+    });
+
+    test('/readyz: 200 with each check, or 503 naming the failed one', async () => {
+        const ready = await request(ctx.app).get('/readyz');
+        expect(ready.status).toBe(200);
+        expect(ready.body).toMatchObject({ ready: true, checks: { redis: 'ok', supabase: 'ok' } });
+
+        supabase.queue('profiles', { data: null, error: { message: 'connection refused' } });
+        const notReady = await request(ctx.app).get('/readyz');
+        expect(notReady.status).toBe(503);
+        expect(notReady.body).toMatchObject({ ready: false, checks: { supabase: 'failed' } });
+    });
+
+    test('every response carries a request id; a sane incoming X-Request-Id is kept', async () => {
+        const fresh = await request(ctx.app).get('/api/health');
+        expect(fresh.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+        const kept = await request(ctx.app).get('/api/health').set('X-Request-Id', 'abc-123');
+        expect(kept.headers['x-request-id']).toBe('abc-123');
+        const junk = await request(ctx.app).get('/api/health').set('X-Request-Id', 'x'.repeat(300));
+        expect(junk.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+    });
+});

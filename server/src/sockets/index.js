@@ -12,6 +12,7 @@ const { registerLobbyHandlers } = require('./handlers/lobby');
 const { registerGameHandlers } = require('./handlers/game');
 const { registerChatHandlers } = require('./handlers/chat');
 const { registerSocialHandlers } = require('./handlers/social');
+const { log } = require('../observability/log');
 
 /**
  * The Socket.IO server. The handshake is refused for a browser origin that is
@@ -74,7 +75,9 @@ function clientOf(socket) {
 function registerSocketHandlers(io, deps) {
     io.use(createHandshakeAuth({ verifyToken: deps.verifyToken, tokenDeadline: deps.tokenDeadline }));
     io.on('connection', (socket) => {
-        console.log('Client connected:', socket.id);
+        // Every line about this connection carries its socket and user (NODE-20).
+        socket.data.log = log.child({ socketId: socket.id, userId: socket.data.userId });
+        socket.data.log.info('client connected');
         const client = clientOf(socket);
         if (deps.rateLimit) socket.use(deps.rateLimit(socket));
         registerSessionHandlers(socket, client, deps);
