@@ -60,10 +60,30 @@ describe('PATCH /api/profile/me', () => {
         expect(call.ops).toContainEqual(['eq', 'id', uid('me')])
     })
 
-    test('omitted avatarUrl is left unchanged; other omitted fields are cleared', async () => {
+    // F18 (was: 'omitted avatarUrl is left unchanged; other omitted fields are cleared' →
+    // { display_name: null, bio: 'only bio', country: null }).
+    test('omitted fields are left unchanged; only the sent ones are written', async () => {
         signInWithCookie(uid('me'))
         await patch({ bio: 'only bio' })
-        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, bio: 'only bio', country: null })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ bio: 'only bio' })
+    })
+
+    test('F18: an avatar-only PATCH (the settings upload) does not wipe name, bio or country', async () => {
+        signInWithCookie(uid('me'))
+        await patch({ avatarUrl: 'https://x.supabase.co/a.png' })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ avatar_url: 'https://x.supabase.co/a.png' })
+    })
+
+    test('F18: an explicit null still clears a field', async () => {
+        signInWithCookie(uid('me'))
+        await patch({ displayName: null, country: 'IN' })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, country: 'IN' })
+    })
+
+    test('F18: a PATCH with no profile field is a 400 and writes nothing', async () => {
+        signInWithCookie(uid('me'))
+        expect((await patch({ rating_rapid: 3000 })).status).toBe(400)
+        expect(db.callsFor('profiles')).toHaveLength(0)
     })
 
     test('database error → 500', async () => {
