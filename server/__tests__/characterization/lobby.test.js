@@ -12,7 +12,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS } = require('./harness');
+const { useServer, once, record, sleep, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS, gameKeys } = require('./harness');
 
 const ctx = useServer();
 
@@ -323,6 +323,6 @@ describe('pairing', () => {
         expect(found).toEqual([]);
         expect(found2).toEqual([]);
         expect(ctx.matchmaking.queue.size).toBe(0);
-        expect(redis._strings.size).toBe(0);
+        expect(gameKeys(redis)).toEqual([]); // rate-limit counters aside [RATE-LIMITS]
     });
 });

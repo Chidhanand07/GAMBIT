@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GoogleSignInButton, OrDivider } from '@/features/auth/components/GoogleSignInButton';
 import { startGoogleSignIn } from '@/features/auth/googleSignIn';
+import { safeRedirectPath } from '@/lib/safeRedirect';
 
 function LoginForm() {
     const [email, setEmail] = useState('');
@@ -57,8 +58,8 @@ function LoginForm() {
         }
 
         if (successRedirect) {
-            const redirectPath = searchParams.get('redirect') || '/lobby';
-            router.push(redirectPath);
+            // S6: only a path on this site is followed; anything else goes to /lobby.
+            router.push(safeRedirectPath(searchParams.get('redirect')));
             router.refresh();
         }
     };

@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
+from routers.fen import parse_fen
 from seams import EngineSeams
 from services import analysis as analysis_service
 from services import review as review_service
@@ -40,11 +41,16 @@ def build_router(seams: EngineSeams) -> APIRouter:
 
     @router.post("/analyse-game")
     def analyse_game(req: GameAnalysisReq, bg_tasks: BackgroundTasks):
-        # Quick check engine is available without holding a pool slot
-        sf_check = seams.get_stockfish_instance(1)
-        if not sf_check:
-            raise HTTPException(status_code=503, detail="Engine unavailable")
-        seams.release_stockfish_instance(sf_check)
+        # Nothing to review (empty, not PGN, no legal move): refuse instead of queueing.
+        if review_service.parse_game_with_moves(req.pgn) is None:
+            raise HTTPException(status_code=422, detail="PGN has no moves")
+
+        # Quick check that an engine is available, through the bounded request gate: when
+        # the pool is saturated this answers 503 "Engine busy" BEFORE anything is queued,
+        # so an admitted review is never rejected half-way (RATE-LIMITS ADR).
+        with seams.get_engine(1) as sf_check:
+            if not sf_check:
+                raise HTTPException(status_code=503, detail="Engine unavailable")
 
         # The review is written to the games row: only for a game that exists and is over.
         game_id = str(req.game_id)
@@ -58,6 +64,7 @@ def build_router(seams: EngineSeams) -> APIRouter:
     @router.post("/analyze")
     def analyze_position(req: AnalyzeReq):
         """Single-position analysis used by the Analysis page via the Node proxy."""
+        parse_fen(req.fen)
         with seams.get_engine(req.depth) as sf:
             if not sf:
                 raise HTTPException(status_code=503, detail="Engine unavailable")
@@ -68,6 +75,7 @@ def build_router(seams: EngineSeams) -> APIRouter:
 
     @router.post("/classify-move")
     def classify_move(req: MoveClassifyReq):
+        parse_fen(req.fen)
         with seams.get_engine(CLASSIFY_DEPTH) as sf:
             if not sf:
                 raise HTTPException(status_code=503, detail="Engine unavailable")

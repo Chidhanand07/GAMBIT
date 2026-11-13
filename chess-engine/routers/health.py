@@ -4,18 +4,15 @@ from fastapi import APIRouter
 
 from seams import EngineSeams
 
-HEALTH_PROBE_DEPTH = 1
-
 
 def build_router(seams: EngineSeams) -> APIRouter:
     router = APIRouter()
 
     @router.get("/health")
     def health():
-        # The context manager returns the instance to the pool on exit. Taking one
-        # without releasing it emptied the pool after STOCKFISH_POOL_SIZE probes.
-        with seams.get_engine(HEALTH_PROBE_DEPTH) as sf:
-            status = "Engine unavailable" if not sf else "online"
-        return {"status": "ok", "engine": status}
+        # Never takes a pool instance: taking one without releasing it emptied the pool
+        # (G18), and waiting for one let a busy pool block the platform's health checks
+        # (RATE-LIMITS). "online" means at least one Stockfish started.
+        return {"status": "ok", "engine": seams.engine_status()}
 
     return router

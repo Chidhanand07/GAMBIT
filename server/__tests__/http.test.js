@@ -113,16 +113,15 @@ describe('engine proxy', () => {
 });
 
 describe('CORS', () => {
-    test.each([
-        'http://localhost:3000',
-        'https://gambit-xyz.vercel.app',
-    ])('allows %s', async (origin) => {
-        const res = await request(app).get('/api/health').set('Origin', origin);
-        expect(res.headers['access-control-allow-origin']).toBe(origin);
+    test('allows a configured origin', async () => {
+        const res = await request(app).get('/api/health').set('Origin', 'http://localhost:3000');
+        expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
     });
 
-    test('rejects unknown origins', async () => {
-        const res = await request(app).get('/api/health').set('Origin', 'https://evil.example.com');
+    // Was allowed: any *.vercel.app origin, with credentials [S13].
+    test.each(['https://evil.example.com', 'https://gambit-xyz.vercel.app'])('rejects %s with 403', async (origin) => {
+        const res = await request(app).get('/api/health').set('Origin', origin);
+        expect(res.status).toBe(403);
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
 });

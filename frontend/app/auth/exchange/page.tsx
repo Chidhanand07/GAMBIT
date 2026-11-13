@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { safeRedirectPath } from '@/lib/safeRedirect'
 
 function ExchangeHandler() {
     const router = useRouter()
@@ -10,7 +11,8 @@ function ExchangeHandler() {
     const [errMsg, setErrMsg] = useState<string | null>(null)
 
     useEffect(() => {
-        const next = searchParams.get('next') ?? '/lobby'
+        // S6: only a path on this site is followed; anything else goes to /lobby.
+        const next = safeRedirectPath(searchParams.get('next'))
         const code = searchParams.get('code')
 
         // PKCE flow: code is in the URL query string
@@ -18,7 +20,6 @@ function ExchangeHandler() {
             const supabase = createClient()
             void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
                 if (error) {
-                    console.error('[auth/exchange] PKCE exchange failed:', error.message)
                     setErrMsg(error.message)
                     setTimeout(() => router.replace('/login?error=oauth_failed'), 2000)
                     return

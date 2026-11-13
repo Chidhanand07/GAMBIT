@@ -14,17 +14,22 @@ const { registerChatHandlers } = require('./handlers/chat');
 const { registerSocialHandlers } = require('./handlers/social');
 
 /**
- * The Socket.IO server. Every origin is accepted with credentials (permissive
- * fallback; known issue, preserved; NODE-09).
+ * The Socket.IO server. The handshake is refused for a browser origin that is
+ * not on the allow-list (`allowRequest`); CORS headers use the same policy
+ * (NODE-09, S13).
  * @param {import('http').Server} server
+ * @param {() => import('../http/app').OriginPolicy} originPolicy
  * @returns {import('socket.io').Server}
  */
-function createSocketServer(server) {
+function createSocketServer(server, originPolicy) {
     return socketIo(server, {
         cors: {
-            origin: (origin, callback) => callback(null, true),
+            origin: (/** @type {string | undefined} */ origin, /** @type {Function} */ callback) =>
+                callback(null, Boolean(origin && originPolicy().isAllowed(origin))),
             credentials: true,
         },
+        allowRequest: (/** @type {import('http').IncomingMessage} */ req, /** @type {Function} */ callback) =>
+            callback(null, originPolicy().allowsRequest(req.headers.origin)),
         transports: ['websocket', 'polling'], // prefer WebSocket, fall back to polling
     });
 }
@@ -57,6 +62,7 @@ function clientOf(socket) {
  * @property {import('./handlers/social').SocialHandlerService} socialService
  * @property {(token: string) => Promise<string | null>} verifyToken access token → user id (null when invalid)
  * @property {(token: string) => number} tokenDeadline when a socket opened with the token must be closed
+ * @property {ReturnType<typeof import('./rateLimit').createSocketRateLimit>} [rateLimit] per-user, per-event limit (NODE-12)
  */
 
 /**
@@ -70,6 +76,7 @@ function registerSocketHandlers(io, deps) {
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
         const client = clientOf(socket);
+        if (deps.rateLimit) socket.use(deps.rateLimit(socket));
         registerSessionHandlers(socket, client, deps);
         registerLobbyHandlers(socket, deps);
         registerGameHandlers(socket, client, deps);

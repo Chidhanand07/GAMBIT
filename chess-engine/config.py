@@ -23,5 +23,20 @@ ENGINE_SHARED_SECRET: str = os.environ.get("ENGINE_SHARED_SECRET", "")
 STOCKFISH_PATH: str | None = os.environ.get("STOCKFISH_PATH")
 POOL_SIZE: int = int(os.environ.get("STOCKFISH_POOL_SIZE", "4"))
 
+# Bounded wait for a pool instance (RATE-LIMITS). At most POOL_SIZE requests use
+# Stockfish and at most ENGINE_MAX_QUEUE more wait, each for at most
+# ENGINE_QUEUE_TIMEOUT_SECONDS; anything beyond answers 503 "Engine busy" with
+# Retry-After. Default queue: two waiting requests per instance (an analysis at the
+# app's depths takes about a second, so a full queue drains within the timeout).
+ENGINE_MAX_QUEUE: int = max(0, int(os.environ.get("ENGINE_MAX_QUEUE", str(POOL_SIZE * 2))))
+ENGINE_QUEUE_TIMEOUT_SECONDS: float = float(os.environ.get("ENGINE_QUEUE_TIMEOUT_SECONDS", "5"))
+if ENGINE_QUEUE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("ENGINE_QUEUE_TIMEOUT_SECONDS must be greater than 0")
+
 # MAVERICK style policy weights.
 MODEL_PATH: str = os.environ.get("STYLE_MODEL_PATH", "style_model.pt")
+# Fallback when MODEL_PATH does not exist: download the weights from this https URL
+# and accept them only if their SHA-256 equals MODEL_SHA256 (required with the URL).
+# With MODEL_SHA256 set, a file already at MODEL_PATH must match it too.
+MODEL_URL: str = os.environ.get("MAVERICK_MODEL_URL", "")
+MODEL_SHA256: str = os.environ.get("MAVERICK_MODEL_SHA256", "")

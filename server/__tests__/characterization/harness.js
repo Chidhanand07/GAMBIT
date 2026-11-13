@@ -195,7 +195,16 @@ function useServer() {
     return ctx;
 }
 
+/**
+ * Redis keys that hold game data, i.e. everything but the rate-limit counters (RATE-LIMITS).
+ * @param {{ _strings: Map<string, string> }} redis
+ */
+function gameKeys(redis) {
+    return [...redis._strings.keys()].filter((key) => !key.startsWith('ratelimit:'));
+}
+
 module.exports = {
+    gameKeys,
     AFTER_E4,
     START_FEN,
     ISO_DATE,

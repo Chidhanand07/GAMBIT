@@ -379,13 +379,9 @@ describe('POST /api/games/join/:token', () => {
     });
 });
 
-describe('CORS (Express)', () => {
-    test.each([
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'https://gambit.vercel.app',
-        'https://anyone-else.vercel.app', // any vercel.app subdomain, with credentials (pinned)
-    ])('allows %s with credentials', async (origin) => {
+describe('CORS (Express) [S13]', () => {
+    // The harness runs with NODE_ENV=test and no CORS_ORIGINS: the local development origins apply.
+    test.each(['http://localhost:3000', 'http://127.0.0.1:3000'])('allows %s with credentials', async (origin) => {
         const res = await request(ctx.app).get('/api/health').set('Origin', origin);
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBe(origin);
@@ -393,20 +389,27 @@ describe('CORS (Express)', () => {
         expect(res.headers.vary).toBe('Origin');
     });
 
-    test('FRONTEND_URL is read per request', async () => {
+    test('CORS_ORIGINS lists the allowed origins exactly (read per request)', async () => {
         const origin = 'https://gambit.example.org';
-        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(500);
-        process.env.FRONTEND_URL = origin;
+        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(403);
+        process.env.CORS_ORIGINS = `${origin}, https://www.gambit.example.org`;
         const res = await request(ctx.app).get('/api/health').set('Origin', origin);
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBe(origin);
+        delete process.env.CORS_ORIGINS;
+    });
+
+    test('FRONTEND_URL still works as a one-origin fallback when CORS_ORIGINS is not set', async () => {
+        const origin = 'https://legacy.example.org';
+        process.env.FRONTEND_URL = origin;
+        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(200);
+        delete process.env.FRONTEND_URL;
     });
 
     test('no Origin header → allowed, no allow-origin header', async () => {
         const res = await request(ctx.app).get('/api/health');
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
-        expect(res.headers['access-control-allow-credentials']).toBe('true');
     });
 
     test('allowed preflight → 204 with the default method list', async () => {
@@ -419,27 +422,80 @@ describe('CORS (Express)', () => {
         expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
     });
 
-    test.each(['https://evil.example.com', 'http://localhost:3001', 'https://vercel.app'])(
-        'rejected origin %s → 500 HTML error page, route never runs (pinned)',
-        async (origin) => {
-            const res = await request(ctx.app).post('/api/analysis/engine').set('Origin', origin).send({ fen: 'F' });
-            expect(res.status).toBe(500);
-            expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
-            expect(res.headers['access-control-allow-origin']).toBeUndefined();
-            expect(res.text).toContain('Error: Not allowed by CORS');
-            expect(ctx.fetch).not.toHaveBeenCalled();
-        },
-    );
+    test.each([
+        'https://evil.example.com',
+        'http://localhost:3001',
+        'https://vercel.app',
+        // Was allowed with credentials (pinned): any *.vercel.app subdomain.
+        'https://gambit.vercel.app',
+        'https://anyone-else.vercel.app',
+    ])('rejected origin %s → 403 JSON, no stack trace, route never runs', async (origin) => {
+        // Was: 500 HTML error page with "Error: Not allowed by CORS" and a stack trace (pinned).
+        const res = await request(ctx.app).post('/api/analysis/engine').set('Origin', origin).send({ fen: START_FEN });
+        expect(res.status).toBe(403);
+        expect(res.headers['content-type']).toMatch(/^application\/json/);
+        expect(res.body).toEqual({ error: 'origin_not_allowed' });
+        expect(res.text).not.toMatch(/at \w+ \(|node_modules|Error:/);
+        expect(res.headers['access-control-allow-origin']).toBeUndefined();
+        expect(ctx.fetch).not.toHaveBeenCalled();
+    });
 });
 
-describe('CORS (Socket.IO handshake)', () => {
-    test('every origin is accepted with credentials (permissive fallback, pinned)', async () => {
+describe('CORS (Socket.IO handshake) [S13]', () => {
+    test('an origin that is not on the list is refused by allowRequest', async () => {
+        // Was: "every origin is accepted with credentials (permissive fallback, pinned)".
         const res = await request(ctx.server)
             .get('/socket.io/?EIO=4&transport=polling')
             .set('Origin', 'https://evil.example.com');
+        expect(res.status).toBe(403);
+        expect(res.headers['access-control-allow-origin']).toBeUndefined();
+        expect(res.text).not.toMatch(/"sid"/);
+    });
+
+    test('an allowed origin gets the handshake with credentials', async () => {
+        const res = await request(ctx.server)
+            .get('/socket.io/?EIO=4&transport=polling')
+            .set('Origin', 'http://localhost:3000');
         expect(res.status).toBe(200);
-        expect(res.headers['access-control-allow-origin']).toBe('https://evil.example.com');
+        expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
         expect(res.headers['access-control-allow-credentials']).toBe('true');
         expect(res.text).toMatch(/^0\{"sid":/);
+    });
+
+    test('a client without an Origin header (a native client, the tests) connects', async () => {
+        const res = await request(ctx.server).get('/socket.io/?EIO=4&transport=polling');
+        expect(res.status).toBe(200);
+    });
+});
+
+describe('rate limits (shared in Redis, per client IP) [RATE-LIMITS]', () => {
+    test('the 21st analysis request in a minute → 429 with Retry-After; the engine is not called', async () => {
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ score: 0.1 }) });
+        for (let i = 0; i < 20; i++) {
+            expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
+        }
+        ctx.fetch.mockClear();
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(429);
+        expect(res.body).toEqual({ error: 'rate_limited' });
+        expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+        expect(Number(res.headers['retry-after'])).toBeLessThanOrEqual(60);
+        expect(ctx.fetch).not.toHaveBeenCalled();
+    });
+
+    test('limits are per client: another IP is not affected', async () => {
+        for (let i = 0; i < 61; i++) await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.1');
+        const other = await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.2');
+        expect(other.status).toBe(200);
+    });
+
+    test('routes without a rule are not limited', async () => {
+        for (let i = 0; i < 100; i++) expect((await request(ctx.app).get('/api/health')).status).toBe(200);
+    });
+
+    test('Redis failing → allowed (fail open, ADR F-046)', async () => {
+        require('../../lib/redis')._failNext('exec');
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
     });
 });

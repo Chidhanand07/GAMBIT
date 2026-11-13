@@ -187,21 +187,21 @@ describe('usePrivateGame', () => {
         expect(fake.emitted('join_game')).toEqual(['g9']);
     });
 
-    test('a body without a token logs and returns to config; a throw returns silently', async () => {
+    test('a body without a token returns to config without logging; a throw returns silently [S14]', async () => {
         const err = jest.spyOn(console, 'error').mockImplementation(() => {});
         fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }));
         const { result } = setup();
         await act(async () => {
             await result.current.createInvite();
         });
-        expect(err).toHaveBeenCalledWith('Private game error:', 'nope');
+        expect(err).not.toHaveBeenCalled();
         expect(result.current.inviteState).toBe('config');
         fetchMock.mockRejectedValueOnce(new Error('offline'));
         await act(async () => {
             await result.current.createInvite();
         });
         expect(result.current.inviteState).toBe('config');
-        expect(err).toHaveBeenCalledTimes(1);
+        expect(err).not.toHaveBeenCalled();
     });
 
     test('copyInviteLink flags justCopied for 2 s', async () => {

@@ -16,7 +16,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame, setGame } = require('../../lib/gameStore');
-const { useServer, once, record, recordAll, sleep, opsFor, makeGame, uniqueId, AFTER_E4, START_FEN } = require('./harness');
+const { useServer, once, record, recordAll, sleep, opsFor, makeGame, uniqueId, AFTER_E4, START_FEN, gameKeys } = require('./harness');
 
 const ctx = useServer();
 
@@ -100,7 +100,7 @@ describe('join_game: restore from the database (Redis empty)', () => {
         await sleep(80);
         expect(opsFor('games')).toEqual([[['select', GAME_COLUMNS], ['eq', 'id', 'nope'], ['maybeSingle']]]);
         expect(events.filter(([e]) => e !== 'queue_status')).toEqual([]);
-        expect(redis._strings.size).toBe(0);
+        expect(gameKeys(redis)).toEqual([]); // rate-limit counters aside [RATE-LIMITS]
     });
 
     test('active game with stored clocks → exact Redis object, clock running', async () => {
@@ -217,7 +217,7 @@ describe('join_game: restore from the database (Redis empty)', () => {
             white_id: 'w',
             black_id: 'b',
         });
-        expect(redis._strings.size).toBe(0);
+        expect(gameKeys(redis)).toEqual([]); // rate-limit counters aside [RATE-LIMITS]
     });
 
     test('a waiting game in DB → nothing emitted, nothing cached', async () => {
@@ -229,7 +229,7 @@ describe('join_game: restore from the database (Redis empty)', () => {
         await sleep(80);
         expect(events).toEqual([]);
         expect(ends).toEqual([]);
-        expect(redis._strings.size).toBe(0);
+        expect(gameKeys(redis)).toEqual([]); // rate-limit counters aside [RATE-LIMITS]
     });
 });
 
