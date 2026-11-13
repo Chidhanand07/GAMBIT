@@ -132,11 +132,35 @@ describe('initial load', () => {
         expect(urls()).not.toContain('/api/friends/status/bob')
     })
 
-    test('a missing profile leaves the spinner up forever and fetches nothing more', async () => {
+    // F12 (was: 'a missing profile leaves the spinner up forever and fetches nothing more').
+    test('a missing profile shows a not-found state and fetches nothing more', async () => {
         routes['/api/profile/ghost'] = FAIL({ error: 'not found' })
         await renderProfile('ghost')
-        expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+        expect(screen.getByRole('heading', { name: 'Player not found' })).toBeInTheDocument()
+        expect(screen.getByText(/ghost/)).toBeInTheDocument()
         expect(urls().slice().sort()).toEqual(['/api/profile/ghost', '/api/profile/me'])
+    })
+
+    test('F12: a failed profile request shows an error with Retry, and Retry loads the profile', async () => {
+        let failNext = true
+        routes['/api/profile/bob'] = () => {
+            if (failNext) {
+                failNext = false
+                return { ok: false, status: 500, json: async () => ({ error: 'boom' }) }
+            }
+            return jsonResponse(BOB)
+        }
+        await renderProfile()
+        expect(screen.getByText('Could not load this profile.')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await settle()
+        expect(screen.getByRole('heading', { level: 1, name: 'Bobby' })).toBeInTheDocument()
+    })
+
+    test('F12: a network error loading the profile shows the error state, not a spinner', async () => {
+        routes['/api/profile/bob'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        expect(screen.getByText('Could not load this profile.')).toBeInTheDocument()
     })
 
     test('usernames are URI-encoded everywhere EXCEPT the games-tab request', async () => {
