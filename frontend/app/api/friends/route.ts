@@ -1,17 +1,23 @@
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { listAcceptedFriendships, toFriendList } from '@/lib/server/friendships';
-import { getUserId } from '@/lib/server/identity';
+import { requireUser } from '@/lib/server/identity';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseInput, schemas } from '@/lib/server/validation';
 
-// GET /api/friends?userId=<uuid>  — list accepted friends for any user (for public profile)
-// GET /api/friends                — list MY accepted friends (uses cookie)
+// Per-user data: never prerendered or cached (NX-11).
+export const dynamic = 'force-dynamic';
+
+// GET /api/friends?userId=<uuid>  — accepted friends of that user (shown on their profile page)
+// GET /api/friends                — MY accepted friends
+// Signed-in callers only: profile pages are behind the login wall, so are their friend lists.
 export async function GET(req: NextRequest) {
-    const meId = getUserId(cookies());
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
 
-    // Allow viewing friends of another user (public profile) via ?userId param
-    const targetId = req.nextUrl.searchParams.get('userId') ?? meId;
-    if (!targetId) return NextResponse.json([]);
+    // The id ends up inside a PostgREST `or` filter string: only a UUID is accepted (S7).
+    const target = parseInput(schemas.uuid, req.nextUrl.searchParams.get('userId') ?? auth.userId, 'Invalid userId');
+    if (!target.ok) return target.response;
+    const targetId = target.data;
 
     const { data, error } = await listAcceptedFriendships(createAdminClient(), targetId);
 

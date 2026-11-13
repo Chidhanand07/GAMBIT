@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { LogIn, AlertCircle, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { GoogleSignInButton, OrDivider } from '@/features/auth/components/GoogleSignInButton';
 import { startGoogleSignIn } from '@/features/auth/googleSignIn';
 
-export default function LoginPage() {
+function LoginForm() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -111,5 +111,15 @@ export default function LoginPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Next 14.1+ fails the production build when a statically rendered page reads
+// useSearchParams() outside a Suspense boundary; the form is the part that reads them.
+export default function LoginPage() {
+    return (
+        <Suspense fallback={null}>
+            <LoginForm />
+        </Suspense>
     );
 }

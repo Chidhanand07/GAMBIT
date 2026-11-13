@@ -45,7 +45,7 @@ const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
 
-const engineClient = createEngineClient({ baseUrl: env.engineUrl });
+const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
 
 const app = createApp({ frontendUrl: env.frontendUrl });

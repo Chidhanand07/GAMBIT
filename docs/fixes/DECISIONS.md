@@ -25,6 +25,17 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-008](#f-008) | The server decides results; one finalizer; `games.result` = `white` / `black` / `draw` | 1 | S3 (+G1) |
 | [F-009](#f-009) | No draw-offer or abort events: the UI has neither | 1 | S3 |
 | [F-010](#f-010) | Pre-PR review of PR 1: what was fixed, what was deferred | 1 | S1, S2, S3 |
+| [F-011](#f-011) | Next.js pinned to 14.2.35; `/login` gets the Suspense boundary the patch line requires | 2 | NEXT-CVE |
+| [F-012](#f-012) | Route-handler identity: `requireUser()` on `auth.getUser()`; which routes stay public | 2 | S5 |
+| [F-013](#f-013) | Route input validation with zod; `.or()` filters only from UUIDs; two username rules | 2 | S7 |
+| [F-014](#f-014) | Response DTOs are allow-lists; invite token never leaves the server in a game response | 2 | S8 |
+| [F-015](#f-015) | Engine endpoints require `X-Engine-Key`; reviews only for existing, completed games | 2 | ENG-AUTH |
+| [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
+| [F-017](#f-017) | Profiles: column privileges + owner policies; no client INSERT; dead server action removed | 3 | S11 |
+| [F-018](#f-018) | Invite tokens move to `game_invites` (service-role only), expand → deploy → contract | 3 | INV-TOKEN |
+| [F-019](#f-019) | Drop `matchmaking_queue`; a migration-time guard that every public table has RLS | 3 | MATCHMAKING-QUEUE |
+| [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
+| [F-021](#f-021) | New Supabase key names with legacy fallbacks; JS client pinned to the last Node 20 line; `supabase-py` 2.34.1 | 3 | SUPABASE-KEYS |
 
 ---
 
@@ -372,3 +383,460 @@ instead of one file per ADR under `docs/refactor/adr/`.
     tightening the schema risks rejecting values current clients send, so it needs its own pass.
   - A rejected `resign` shows nothing in the UI; a `make_move` can be acked `internal_error`
     after it was applied if finalization throws (the page ignores acks today). Low impact.
+
+## F-011
+
+**Next.js 14.0.3 → 14.2.35 (exact pin), and the one thing the upgrade broke (NEXT-CVE).**
+
+- **Context.** 14.0.3 is exposed to CVE-2025-29927 (middleware authorization bypass, fixed in
+  14.2.25) and CVE-2025-55184 / CVE-2025-67779 (RSC denial of service, fixed in 14.2.35). The
+  brief limits this phase to the 14.2.x line.
+- **Options.** (a) `^14.2.35` range; (b) exact `14.2.35`.
+- **Decision.** (b) for `next`; `@next/eslint-plugin-next` moves to `^14.2.35`. The repository
+  has no `eslint-config-next` (the flat config uses the plugin directly), so there was nothing
+  else to bump.
+- **Why exact.** The version *is* the fix. A range could resolve lower from a stale lockfile or a
+  mirror, and a guard test (`__tests__/security/nextVersion.test.ts`) asserts both the installed
+  version and the declared one.
+- **What the patch upgrade broke.** `next build` failed prerendering `/login`:
+  "useSearchParams() should be wrapped in a suspense boundary" (enforced since 14.1). Jest and
+  `tsc` do not catch this; it was found by running a production build. `app/login/page.tsx` now
+  renders its form inside `<Suspense>`. Nothing else needed changing: the full build completes
+  and the test, type and lint gates are unchanged.
+- **Not done.** NX-01 says 14.x must not ship after this stopgap; the move to 15.5 / 16.4 is
+  out of scope here and stays at the top of the next phase. `typescript.ignoreBuildErrors` and
+  `eslint.ignoreDuringBuilds` are still set in `next.config.js` (S12, not a listed item). CI does
+  not run `next build`, which is why this break was invisible to the test suite.
+
+## F-012
+
+**Next.js route handlers identify the caller with `supabase.auth.getUser()` (S5).**
+
+- **Context.** `lib/server/identity.ts` base64-decoded the access token in the
+  `sb-<ref>-auth-token` cookie, read `sub` and `exp`, and never checked the signature. The
+  handlers then queried with the service-role client (which bypasses RLS). A hand-made cookie
+  with someone else's id acted as that user on every route. `/api/games/[id]` used
+  `getSession()`, which also only reads the cookie.
+- **Options.**
+  1. Verification: (a) verify the JWT locally with the JWT secret; (b) `getClaims()` (local
+     verification against the JWKS, falling back to a network call for HS256 projects);
+     (c) `getUser()` (Supabase Auth checks signature, expiry and revocation).
+  2. `@supabase/ssr`: (a) stay on 0.1.0 with the `get/set/remove` cookie API; (b) upgrade to
+     current and use `getAll/setAll`.
+  3. Cookie encoding after the upgrade: (a) the new default (`base64url`); (b) `raw`.
+  4. Routes that used to answer signed-out callers with an empty 200 (`friends/pending`,
+     `friends/status`, `games/active`, `friends`): (a) keep the soft answer; (b) 401.
+  5. Public-profile routes (`profile/[username]`, `/games`, `/stats`), which had no check at
+     all: (a) leave public; (b) require a signed-in caller.
+- **Decision.** 1c, 2b, 3b, 4b, 5b.
+  - `requireUser()` → `{ ok: true, userId } | { ok: false, response: 401 }`, built on
+    `createSessionClient(cookies()).auth.getUser()`. Any error, missing user or thrown lookup is
+    "not signed in" (fail closed). The old decoders and `getSessionUser` are deleted.
+  - Every handler under `app/api/**` calls `requireUser()` before creating the service-role
+    client, except four that are public on purpose, each marked with a comment:
+    `auth/login` and `auth/signup` (they create the session/account), `leaderboard` (usernames
+    and ratings, identical for every caller), `maverick-move` (the offline "play the computer"
+    page works signed out and touches no user data).
+  - `@supabase/ssr` 0.1.0 → 0.12.7. Its peer dependency forced `@supabase/supabase-js` in the
+    frontend to ^2.119 here rather than in PR 3 (logged; the server and engine upgrades stay in PR 3).
+  - Every identity-reading route exports `dynamic = 'force-dynamic'` (NX-11).
+- **Why.**
+  - *`getUser()`*: it is what the brief specifies, works for HS256 and asymmetric projects alike,
+    and honours sign-out/revocation. Cost: one Auth round trip per API request, where there was
+    none. `getClaims()` removes that cost once the project is on asymmetric signing keys; that
+    switch is a one-line change in `getVerifiedUserId` and is listed for the next phase.
+  - *`raw` cookie encoding*: `middleware.ts` parses the session cookie itself for its optimistic
+    redirect, and existing browsers hold cookies in the old raw format. `base64url` would have
+    logged everyone out and made the middleware redirect every protected page to `/login`.
+    `raw` keeps both working with no migration (backwards-compatible rollout).
+  - *401 instead of soft answers*: every caller already handles a non-OK response
+    (`res.ok ? … : fallback`), so the UI is unchanged, and "unauthenticated → 401" becomes
+    uniform and testable.
+  - *Profile routes need a session*: `/profile`, `/challenge` and `/leaderboard` are behind the
+    login wall in `middleware.ts`, so no signed-out page reads them. Leaving them open would let
+    anyone enumerate users through a service-role query with no session at all.
+- **Found while verifying (would not have been caught by Jest).** A production `next build`
+  showed that a `try/catch` around `cookies()` swallowed Next's "dynamic server usage" signal,
+  so GET handlers such as `/api/notifications` were candidates for prerendering: a 401 baked in
+  at build time and served to everyone. `cookies()` is now called outside the `try`, the routes
+  are `force-dynamic`, and a test asserts the signal propagates.
+- **Not changed.** `middleware.ts` still makes its redirect decision from the unverified cookie.
+  That is allowed as an optimistic check (NX-09) and is no longer the last line of defence, since
+  every route handler verifies. `/api/debug/session` still exists in production (S12, not a
+  listed item); it now answers only its own signed-in caller. `lib/supabase/middleware.ts`
+  (unused `updateSession`) still uses the deprecated cookie API.
+
+## F-013
+
+**Every route param, query value and body is parsed with zod; filter strings take UUIDs only (S7).**
+
+- **Context.** `GET /api/friends?userId=…` put the raw query value into a PostgREST `.or()`
+  filter string (`requester_id.eq.<value>,addressee_id.eq.<value>`). A value containing `,`
+  or `(` rewrote the filter, and the query ran with the service-role key. Elsewhere `limit` /
+  `offset` went through `Number()` unchecked (NaN reached `.range()`), a `null` JSON body threw,
+  and the signup route applied no username rule at all.
+- **Options.**
+  1. Where filter strings are built: (a) keep them next to each query and validate the inputs
+     at each route; (b) one module of builders that itself refuses non-UUIDs.
+  2. Usernames: (a) one strict regex everywhere; (b) a strict rule for *new* names and a wider,
+     still safe one for *lookups*.
+  3. Invalid route params: (a) always 400; (b) 400 for ids on mutating friend routes, 404 for
+     "which resource" params (`games/[id]`, `profile/[username]`).
+- **Decision.** 1b, 2b, 3b.
+  - `lib/server/filters.ts`: `participantFilter`, `eitherSideFilter`, `betweenUsersFilter`. Each
+    validates its arguments with `z.string().uuid()` and throws otherwise. No other code
+    interpolates into a filter string.
+  - `lib/server/validation.ts`: the schemas plus `parseInput` / `parseJsonBody`, which return
+    the data or a ready 400. The rejected input is never echoed back.
+  - Applied in every route: UUID params, enum `action` / `field`, integer `limit` (1–50, capped)
+    and `offset` (0–100 000), bounded strings for bodies, a time-control pattern with a
+    1–180 minute range for private games.
+- **Why.**
+  - *Builders that refuse*: validation at the route protects today's callers; a builder that
+    cannot produce an unsafe string protects the next caller too (and the verified user id is
+    checked as well, at no cost).
+  - *Two username rules*: new names follow the rule the signup form already shows
+    (`[A-Za-z0-9_]{3,20}`), now enforced on the server. Lookups go through parameterised
+    `.eq('username', …)`, so they cannot inject; a single strict rule there would make any
+    older account whose name contains `.` or `-` unreachable. The lookup rule
+    (`[A-Za-z0-9_.-]{1,40}`) only keeps out separators and oversized values.
+  - *404 for resource params*: a malformed game id or username names nothing, so "not found" is
+    the accurate answer and matches what the pages already handle.
+- **Behaviour changes.** A private game with a time control outside 1–180 minutes (or not of
+  the form `10`, `5+3` or a preset id) is refused with 400. Signup with a username outside the
+  form's rule is refused by the server too. `?limit=abc` is a 400 instead of an empty page.
+- **Not changed.** `PATCH /api/profile/me` still nulls fields that are omitted (F18).
+
+## F-014
+
+**Game and profile responses are allow-listed DTOs (S8).**
+
+- **Context.** `GET /api/games/[id]` returned the whole `games` row (`select *`) to anyone,
+  signed in or not, including `invite_token` and `invite_expires_at`. The Express
+  `GET /api/games/join/:token`, `POST /api/games/join/:token` and the `game_start` socket
+  broadcast also sent the whole row. `GET /api/profile/[username]` returned every profile
+  column of another user (`sex`, `is_public`, Glicko deviation/volatility).
+- **Options.** (a) delete the secret keys from the row before responding (deny-list);
+  (b) select only the needed columns; (c) build the response from an allow-list of keys.
+- **Decision.** (c).
+  - Frontend `lib/server/dto.ts`: `toGameDto` (game columns + a public summary of the embedded
+    players) and `toPublicProfileDto`. Used by `GET` and `PATCH /api/games/[id]` and
+    `GET /api/profile/[username]`. `GET /api/games/[id]` requires a signed-in caller (S5).
+  - Server `src/domain/gameDto.js`: `toPublicGame`, exposed through the private-game service
+    and used by both invite endpoints and by `socialService.announceGameStart`.
+- **Why.**
+  - *Allow-list over deny-list*: a deny-list protects only against the columns someone
+    remembered. PR 3 moves the token to its own table; until then, and for any column added
+    later, an allow-list fails safe.
+  - *Not "select fewer columns"*: the live database has drifted from the migrations before
+    (`clock_deadline`, `peak_*` are read by the code but created by no migration here).
+    Selecting a column that does not exist is a 400 from PostgREST for every request, whereas
+    picking keys from whatever `*` returns cannot break a page.
+- **Audit of the other routes** (what each returns):
+  - `games/active`: a fixed column list, no token. `games/private/create`: `{ token, game_id }`
+    to the creator, which is the point of the route.
+  - `profile/me`, `notifications`: the caller's own rows. `profile/[username]/games`, `/stats`,
+    `leaderboard`, `friends*`: fixed column lists or computed values, no secret columns.
+  - Socket `match_found` still spreads the inserted `games` row (its invite columns are null
+    for matchmaking games) and the opponent's queue entry including `socketId` (G12, not a
+    listed item; logged for the next phase).
+- **Behaviour change.** None for the UI: the keys kept are the ones the game, result, review,
+  join and profile pages read (checked with `grep` over `features/` and `app/`).
+
+## F-015
+
+**Every engine endpoint except `GET /health` requires a shared secret (ENG-AUTH).**
+
+- **Context.** The FastAPI engine was open to the internet: anyone who knew the Render URL could
+  run Stockfish analyses (CPU), ask for computer moves, and POST `/analyse-game` with any
+  `game_id`, which **writes** accuracy and move classifications into that `games` row with the
+  service-role key.
+- **Options.**
+  1. Caller authentication: (a) network allow-list; (b) a shared secret header; (c) per-caller
+     signed tokens.
+  2. No secret configured: (a) run open (as today); (b) refuse.
+  3. `/analyse-game` target check: (a) trust the caller now that it is authenticated;
+     (b) also verify the game exists and is completed.
+  4. Callers without a secret: (a) send the request and let the engine refuse it; (b) do not
+     send it.
+- **Decision.** 1b, 2b, 3b, 4b.
+  - `chess-engine/auth.py`: `require_engine_key`, a FastAPI dependency comparing `X-Engine-Key`
+    with `ENGINE_SHARED_SECRET` using `hmac.compare_digest`. No secret → 503 and an error log;
+    wrong or missing key → 401. `main.py` attaches it to every router except health, and a test
+    walks `app.routes` so a new route cannot be added unprotected without failing.
+  - `/docs`, `/redoc` and `/openapi.json` are switched off.
+  - `/analyse-game`: `game_id` must be a UUID; `services/review.game_review_status` looks the game
+    up first (404 unknown, 409 not completed, 503 if the database is unconfigured or the lookup
+    fails); the write itself also filters on `status = 'completed'`.
+  - Callers: the game server's `engineClient` (validate / analyse / analyze) and the Next.js
+    `/api/maverick-move` proxy send the header. Both read `ENGINE_SHARED_SECRET` from server-side
+    env only; neither sends a request when it is unset (the server rejects the call, the proxy
+    answers 503). The frontend proxy also adopts `GAMBIT_ENGINE_URL` with `ENGINE_URL` as fallback.
+- **Why.**
+  - *Shared secret*: Render, Railway and Vercel have no shared private network or stable egress
+    IPs on the plans in use, so an allow-list is not available; per-caller tokens add key
+    management for two callers that are both ours. One secret, compared in constant time, is the
+    smallest thing that closes the hole.
+  - *Refuse without a secret*: "unset means open" is exactly the state being fixed.
+  - *Still check the game*: authentication says who is calling, not that the request makes
+    sense. The game server only asks for a review after it has completed the game, so the check
+    costs one indexed lookup and removes "overwrite the review of any game" even for a caller
+    that holds the secret.
+- **Deploy consequence (see the report's manual steps).** Set the same `ENGINE_SHARED_SECRET` on
+  Render, Railway and Vercel **before or together with** this deploy. An engine deployed without
+  it answers 503 to everything except `/health`; a game server without it skips analysis and
+  post-game review (moves and results are unaffected, they no longer use the engine).
+- **Not changed.** `/validate-move` and `engineClient.validateMove` still exist but nothing calls
+  them since F-007 (dead code, listed for removal). `scripts/test-deployment.sh` only probes
+  `/health`, which stays public.
+
+## F-016
+
+**`GET /health` returns its Stockfish instance to the pool (G18).**
+
+- **Context.** `/health` called `get_stockfish_instance()` and never released it. Render probes
+  `/health` continuously, so after `STOCKFISH_POOL_SIZE` probes the pool was empty and every
+  analysis answered 503 (after a 10 s wait) until the process restarted.
+- **Decision.** The handler uses the pool's context manager (`with seams.get_engine(1) as sf`),
+  which puts the instance back on exit, including on an exception.
+- **Why the context manager and not an explicit release.** It is the pool's own acquire/release
+  pairing, so there is no path that forgets the second half.
+- **Test.** `tests/test_health_pool.py` runs against the *real* pool functions (filled with fake
+  engines), not the acquire/release doubles the other tests patch in: it probes `/health` five
+  times the pool size and then runs an analysis successfully. The old code fails it.
+
+## F-017
+
+**`profiles`: users can change four cosmetic columns of their own row and nothing else (S11).**
+
+- **Context.** RLS decides which *rows* a role may touch, not which *columns*. The
+  `profiles_update` policy (`USING (auth.uid() = id)`) therefore let any signed-in user update
+  every column of their own row with the public API key: `rating_rapid`, `wins`,
+  `games_played`, … The `profiles_insert` policy was `WITH CHECK (true)`: anyone, signed in or
+  not, could insert a profile row for any id.
+- **Options.**
+  1. Protect ratings with: (a) a trigger that rejects changes to rating columns; (b) column
+     privileges; (c) move ratings to a separate table.
+  2. `INSERT` for `authenticated`: (a) grant it on the non-rating columns; (b) grant nothing.
+  3. Revoke only `INSERT, UPDATE` (the brief's wording), or also `DELETE` / `TRUNCATE`.
+- **Decision.** 1b, 2b, and revoke everything but `SELECT`.
+  - `REVOKE ALL … FROM PUBLIC, anon, authenticated`; `GRANT SELECT` to both API roles;
+    `GRANT UPDATE (display_name, bio, country, avatar_url)` to `authenticated`;
+    `GRANT ALL` to `service_role`.
+  - `profiles_insert`: `TO authenticated WITH CHECK ((select auth.uid()) = id)`.
+    `profiles_update`: `TO authenticated`, the same predicate on `USING` and `WITH CHECK`.
+- **Why.**
+  - *Column privileges*: this is the mechanism Postgres has for exactly this, it is enforced
+    before any policy or trigger runs, and it fails loudly (`42501`) rather than silently.
+    SEC-04 asks for it by name. A separate ratings table is the cleaner long-term shape but a
+    much larger change (every reader), so it is left for later.
+  - *Which columns*: derived from the code. `PATCH /api/profile/me` is the only profile edit
+    path and writes exactly `display_name`, `bio`, `country`, `avatar_url`. `sex` and
+    `is_public` exist in the schema but no code edits them, so they are not granted.
+  - *No INSERT grant*: every profile insert in the app goes through the service role (signup,
+    the OAuth callback, the auto-create in `GET /api/profile/me`); `grep` finds no client-side
+    `.from('profiles').insert`. The corrected policy stays in place as the second line of
+    defence if a grant is ever added back.
+  - *DELETE / TRUNCATE too*: no client path uses them, and `TRUNCATE` is not subject to RLS at
+    all. Least privilege costs nothing here.
+- **Unaffected.** The game server (ratings, statistics) and the Next.js routes use the
+  service-role / secret key, which bypasses RLS and keeps full privileges. Reading profiles is
+  unchanged.
+- **Also removed: `frontend/app/actions/auth.ts`.** A `'use server'` action,
+  `createProfile({ userId, username, email })`, that inserted a profile for **any caller-supplied
+  user id** with the service-role key and no authentication. Nothing imports it, so Next.js
+  does not expose it today and it could not have worked (it writes an `email` column that does
+  not exist). It was found while listing every writer of `profiles` for this item; leaving a
+  ready-made, unauthenticated service-role insert one import away from being live is the kind of
+  thing this phase exists to remove.
+- **Deviation from SEC-04, on purpose.** SEC-04 has two halves: revoke table-level `UPDATE` on
+  `profiles` and re-grant cosmetic columns (done here), and write ratings and results only
+  through a `security definer` function. The second half is not done: the game server still
+  writes them directly with the secret key. Moving those writes into a database function
+  changes the rating path of every finished game and is not needed to close S11 (clients can
+  no longer write the columns either way), so it is left for the next phase.
+- **Tests.** `supabase/tests/01_profiles_rls.test.sql` (31 assertions, as `authenticated`, `anon`
+  and `service_role`): rating/statistics updates raise `42501` and the row is checked unchanged;
+  display fields update; another user's row is affected 0 times; inserts are refused; the policy
+  definitions and the exact set of updatable columns are asserted. Run against the old schema,
+  22 of the 31 fail.
+
+## F-018
+
+**Invite tokens live in `public.game_invites`, not on `public.games` (INV-TOKEN).**
+
+- **Context.** `games` has the policy "Games are viewable by everyone" (`USING (true)`), and it
+  carried `invite_token` and `invite_expires_at`. With nothing but the public API key anyone
+  could `select invite_token from games where status = 'waiting'` and join other people's
+  private games. S8 stopped the *application* from returning the token; the *database* still
+  handed it out.
+- **Options.**
+  1. (a) column privileges on `games` (revoke `SELECT (invite_token)`); (b) a narrower `SELECT`
+     policy on `games`; (c) move the token to its own table.
+  2. Rollout: (a) one migration that adds the table and drops the columns; (b) expand →
+     deploy → contract in two files.
+  3. Invites created by the *old* code between "expand" and the new deploy: (a) accept that
+     they are lost; (b) mirror them with a trigger until "contract".
+- **Decision.** 1c, 2b, 3b.
+  - **(a) `20261112100100_game_invites_expand.sql`**: `game_invites(game_id pk → games on delete
+    cascade, token unique not null, expires_at, created_at)`, RLS enabled with **no policies**,
+    `REVOKE ALL` from `PUBLIC, anon, authenticated`, backfill from `games`, and a trigger that
+    mirrors `games.invite_token` writes into the new table.
+  - **Code**: the game server (`gameInvitesRepository`, `privateGameService`) and the Next.js
+    `POST /api/games/private/create` insert the game without any token column and store the
+    invite separately; a lookup goes token → `game_invites` → `games` by id. If the invite
+    cannot be stored the game row is deleted again.
+  - **(b) `20261112100300_game_invites_contract.sql`**: one more backfill, drop the trigger, the
+    function, the index and both columns.
+- **Why.**
+  - *Own table*: column-level `SELECT` revokes break `select *` for the API roles (PostgREST
+    answers 401/403 for the whole request), and every existing reader of `games` uses `*`. A
+    row policy cannot hide a column. A separate table with RLS and no policies is invisible to
+    the API roles by construction, which is also what the brief specifies.
+  - *Two steps*: dropping the columns in the same migration would break the running server (it
+    filters `games` by `invite_token`) for as long as the deploy takes, and makes the migration
+    impossible to roll back without data loss.
+  - *Mirror trigger*: invites are valid for 48 hours. Without it, an invite created in the
+    minutes between applying (a) and the new server going live would be a dead link.
+- **Deploy order (also in the report).**
+  1. Apply `20261112100000`, `…100100` (expand) and `…100200`.
+  2. Deploy the game server and the frontend from this PR.
+  3. Apply `…100300` (contract).
+  `supabase db push` applies every pending file at once, so do not use it for this release
+  unless step 2 is already done; apply the files individually (SQL editor or `psql -f`) and then
+  record them with `supabase migration repair --status applied <version>`.
+- **Rollback.** Before (b): redeploy the old code; the columns are still there and the trigger
+  kept them authoritative for anything the old code wrote, but invites created by the *new*
+  code exist only in `game_invites`, so those links stop working (they can be copied back with
+  one `UPDATE … FROM game_invites`). After (b): re-add the two columns and copy the tokens back
+  from `game_invites` before redeploying old code.
+- **Behaviour.** None visible. The creator still gets the token once, from the create route;
+  the join page still resolves it through the game server. The server no longer logs the token
+  when an invite has expired.
+- **Tests.** `supabase/tests/02_game_invites.test.sql` (13 assertions): `anon` and `authenticated`
+  get `42501` on any access to `game_invites`; a `games` row has no token columns;
+  `service_role` reads the invite; one invite per game; cascade on delete.
+
+## F-019
+
+**`public.matchmaking_queue` is dropped; a guard fails the migration if any public table lacks RLS (MATCHMAKING-QUEUE).**
+
+- **Context.** The initial schema created `matchmaking_queue` and never enabled RLS on it. With
+  Supabase's default grants that means the public API key could read and write it freely.
+  Matchmaking has always run in the game server's memory; `grep -rn matchmaking_queue` over the
+  whole repository finds only the `CREATE TABLE` line.
+- **Options.** (a) enable RLS and leave the table; (b) drop it. For the "all tables have RLS"
+  check: (a) a pgTAP test only; (b) a check inside a migration; (c) both.
+- **Decision.** Drop the table (`DROP TABLE IF EXISTS`), and (c): the migration ends with a `DO`
+  block that raises, naming the tables, if any ordinary or partitioned table in `public` has
+  RLS disabled; `supabase/tests/00_schema_guards.test.sql` asserts the same thing.
+- **Why.** Dead, unprotected, API-reachable tables should not exist. The in-migration guard
+  catches drift on the *real* database at the moment the migration is applied (the live schema
+  has diverged from these files before), which a CI test against a freshly built database
+  cannot. The pgTAP test keeps the property true for every future migration.
+- **Operational note.** If the live database has some other table in `public` without RLS, this
+  migration stops with `Row level security is not enabled on: …`. That is intended: enable RLS
+  on it (or drop it) and re-run. Nothing has been changed at that point, because the migration
+  runs in one transaction.
+
+## F-020
+
+**A "Database (Supabase)" CI job; `supabase/config.toml`; one existing migration file renamed.**
+
+- **Context.** There was no automated check of the database at all (TEST-04), no
+  `supabase/config.toml` (so the CLI could not start a local stack), and two migration files
+  shared the version prefix `00005` (`00005_fix_rating_precision.sql`, `00005_schema_fixes.sql`).
+- **Decision.**
+  - `.github/workflows/tests.yml` gains a job that runs `supabase start`, `supabase db reset`
+    and `supabase test db` (pgTAP) on every pull request and on pushes to `main` / `preprod`.
+  - `supabase/config.toml` with only `project_id`; everything else is the CLI's default.
+  - `00005_schema_fixes.sql` is renamed to `00006_schema_fixes.sql`. **Its content is unchanged**
+    (`git` records a pure rename).
+- **Why the rename, given "never edit an existing migration".** The Supabase CLI keys applied
+  migrations by the numeric prefix. Two files with the same prefix cannot both be recorded, so
+  `supabase db reset` cannot build the database from these files, and the new CI job could not
+  run. The rename keeps the original order (`00005_fix_rating_precision` then the schema fixes),
+  changes no SQL, and is the one-time reconciliation SEC-08 itself asks for. It is the smallest
+  change that makes the listed CI job possible, so it is logged here rather than left out.
+- **What the owner must do because of it.** Nothing if the remote project has no migration
+  history (the old files say "run this in the SQL editor", which suggests it does not). If
+  `supabase migration list` does show `00005` as applied remotely, run
+  `supabase migration repair --status applied 00006` once so the renamed file is not re-run.
+- **What was and was not run.** The pgTAP tests have **not** been executed with pgTAP on this
+  machine: there is no Docker or Supabase CLI here, and downloading pgTAP was not permitted.
+  What *was* run locally, on a throwaway Postgres 17 cluster with hand-made stand-ins for the
+  Supabase roles, `auth.uid()` and the default grants:
+  - every migration, old and new, applied in order from an empty database;
+  - an invite created between "expand" and "contract" ends up in `game_invites`;
+  - the three test files, through a small local stand-in for the pgTAP functions they call:
+    8 + 31 + 13 assertions pass on the migrated schema, and 5 + 22 fail on the old one (the
+    third file cannot even start there, the table does not exist).
+  The first real pgTAP run is this PR's "Database (Supabase)" check. If it fails on something
+  the stand-in could not model (the real `auth.users` columns, the exact text pgTAP expects),
+  that is the place to look.
+
+## F-021
+
+**Publishable / secret keys under their documented names, with the legacy names as fallbacks (SUPABASE-KEYS).**
+
+- **Context.** Supabase is deprecating the `anon` and `service_role` JWT keys by the end of 2026
+  in favour of `sb_publishable_…` and `sb_secret_…` keys
+  ([API keys guide](https://supabase.com/docs/guides/api/api-keys)). The app read only the legacy
+  variable names, under three different spellings.
+- **Decision: variable names.** New name first, legacy names as fallbacks; when both are set the
+  new one wins.
+
+  | Service | New (canonical) | Fallbacks |
+  |---|---|---|
+  | Frontend, browser + server | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+  | Frontend, server only | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SERVICE_KEY` |
+  | Game server | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+  | Engine | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY` |
+
+  The names are the ones Supabase's guide recommends. Each service keeps its *own* historical
+  fallback order, so a deployment that has two legacy names set resolves exactly as before.
+- **Decision: keeping the secret key out of the browser.**
+  - The secret key is read in one `server-only` module (`frontend/lib/server/env.ts`); the public
+    key in `frontend/lib/supabase/publicEnv.ts`, which **throws** if the value starts with
+    `sb_secret_` (a secret pasted into a public variable is refused, not shipped).
+  - `createAdminClient()` throws when no secret key is configured, instead of building a client
+    that fails later.
+  - A test scans the source: no file outside `lib/server`, `app/api` and `app/auth/callback`
+    mentions a secret variable, every `lib/server` module is marked `server-only`, and no
+    `NEXT_PUBLIC_*SECRET*` / `*SERVICE*` name exists. A production build with new-style keys was
+    checked by hand: the publishable key is inlined into client chunks, the secret key appears
+    nowhere under `.next/static`.
+- **Decision: client library versions.**
+  - **`@supabase/supabase-js` `~2.109.0` in the frontend and the game server**, and
+    **`@supabase/ssr` `0.12.0`** in the frontend. This *revises PR 2*, which had taken
+    `@supabase/ssr` 0.12.7 and with it `supabase-js` 2.119.
+  - **`supabase` (Python) 2.0.2 → 2.34.1** in the engine, with `httpx` 0.24.1 → 0.27.2 and an
+    explicit `websockets==15.0.1`.
+- **Why those versions.**
+  - *Why not the newest `supabase-js`*: every release from 2.110 on declares `engines.node >= 22`
+    (checked on the registry), and 2.119 prints a deprecation warning on Node 20 at every cold
+    start. CI runs Node 20, the server's Dockerfile says Node 18, and the brief says not to
+    upgrade Node. 2.109.0 is the last release that supports Node 20, and `@supabase/ssr` 0.12.0
+    is the newest `ssr` release whose peer range (`^2.108.0`) accepts it. The game server's
+    lockfile already resolved to 2.103.3, so this is a small step for it.
+  - *Do the new keys need a newer JS client at all?* Supabase's guide states no minimum version.
+    The pinned line was released in 2026, long after the new keys shipped, so I did not look
+    for the oldest version that would work.
+  - *Why the engine really had to move*: `supabase==2.0.2` validates the key against a JWT-shaped
+    regular expression and raises `Invalid API key` for `sb_secret_…` (reproduced locally).
+    2.34.1 has no such check and accepts both formats. It needs `httpx >= 0.26`; 0.27.2 is the
+    newest that FastAPI 0.104's test client still works with. `websockets` is pinned because
+    the realtime client imports `websockets.asyncio` (≥ 13) without requiring it: an upgrade in
+    place kept 12.0 and failed on import, while a fresh install passed. All 191 engine tests
+    pass on a fresh install and on an upgraded one.
+- **What I could not verify.** No real `sb_publishable_…` / `sb_secret_…` key was available, so
+  nothing here has talked to Supabase with one. What is verified is the plumbing (which variable
+  wins, that the clients are constructed with it, that the Python client accepts the format, and
+  that the secret stays out of the bundle).
+- **Known follow-ups.**
+  - Node: when the runtimes move to Node 22+, lift the `~2.109.0` pin (and `@supabase/ssr`).
+  - `auth.getUser(token)` on the game server and `getUser()` in the route handlers work the same
+    with either key type. Moving to `getClaims()` after enabling asymmetric JWT signing keys
+    would remove an Auth round trip per request (SEC-05); not done here.
+  - The Supabase *Realtime* presence channel in the browser uses the public key; with a
+    publishable key, unauthenticated connections are limited to 24 hours by Supabase.

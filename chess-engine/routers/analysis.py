@@ -1,16 +1,26 @@
 """Engine analysis endpoints: POST /analyse-game, /analyze, /classify-move."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from seams import EngineSeams
 from services import analysis as analysis_service
+from services import review as review_service
 
 CLASSIFY_DEPTH = 14
 
+# Why a review cannot be queued -> (HTTP status, detail).
+REVIEW_REFUSALS = {
+    review_service.REVIEW_UNAVAILABLE: (503, "Game lookup unavailable"),
+    review_service.REVIEW_GAME_NOT_FOUND: (404, "Game not found"),
+    review_service.REVIEW_GAME_NOT_COMPLETED: (409, "Game is not completed"),
+}
+
 
 class GameAnalysisReq(BaseModel):
-    game_id: str
+    game_id: UUID
     pgn: str
     time_control: str
 
@@ -36,7 +46,13 @@ def build_router(seams: EngineSeams) -> APIRouter:
             raise HTTPException(status_code=503, detail="Engine unavailable")
         seams.release_stockfish_instance(sf_check)
 
-        bg_tasks.add_task(seams.run_full_game_analysis, req.game_id, req.pgn)
+        # The review is written to the games row: only for a game that exists and is over.
+        game_id = str(req.game_id)
+        refusal = REVIEW_REFUSALS.get(review_service.game_review_status(seams, game_id))
+        if refusal:
+            raise HTTPException(status_code=refusal[0], detail=refusal[1])
+
+        bg_tasks.add_task(seams.run_full_game_analysis, game_id, req.pgn)
         return {"status": "Analysis queued"}
 
     @router.post("/analyze")

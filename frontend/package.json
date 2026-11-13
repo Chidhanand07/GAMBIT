@@ -15,24 +15,25 @@
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"features/**/*.{ts,tsx}\" \"types/**/*.ts\" \"lib/chess/**/*.ts\" \"lib/server/**/*.ts\" \"lib/api/**/*.ts\" \"lib/socket/**/*.ts\""
   },
   "dependencies": {
-    "@supabase/ssr": "^0.1.0",
-    "@supabase/supabase-js": "^2.38.4",
+    "@supabase/ssr": "0.12.0",
+    "@supabase/supabase-js": "~2.109.0",
     "chess.js": "^1.0.0-beta.6",
     "clsx": "^2.0.0",
     "framer-motion": "^10.16.5",
     "lucide-react": "^0.292.0",
-    "next": "14.0.3",
+    "next": "14.2.35",
     "qrcode.react": "^3.1.0",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^2.10.3",
     "server-only": "^0.0.1",
     "socket.io-client": "^4.7.2",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@next/eslint-plugin-next": "^14.0.3",
+    "@next/eslint-plugin-next": "^14.2.35",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

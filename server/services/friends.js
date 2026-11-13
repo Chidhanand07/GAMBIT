@@ -7,6 +7,11 @@ const { supabase } = require('../supabase');
 // Loaded after ../supabase, as the original lazy require did.
 const gameStore = require('../lib/gameStore');
 const { createGamesRepository } = require('../src/repositories/gamesRepository');
+const { createGameInvitesRepository } = require('../src/repositories/gameInvitesRepository');
 const { createPrivateGameService } = require('../src/services/privateGameService');
 
-module.exports = createPrivateGameService({ gamesRepo: createGamesRepository(supabase), gameStore });
+module.exports = createPrivateGameService({
+    gamesRepo: createGamesRepository(supabase),
+    invitesRepo: createGameInvitesRepository(supabase),
+    gameStore,
+});

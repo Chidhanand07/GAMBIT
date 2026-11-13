@@ -1,17 +1,22 @@
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { findExistingFriendship, insertFriendRequest } from '@/lib/server/friendships';
-import { getUserId } from '@/lib/server/identity';
+import { requireUser } from '@/lib/server/identity';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
+
+// Per-user data: never prerendered or cached (NX-11).
+export const dynamic = 'force-dynamic';
 
 // POST /api/friends/request — body { addressee_username }
 export async function POST(req: NextRequest) {
-    const meId = getUserId(cookies());
-    if (!meId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
+    const meId = auth.userId;
 
-    const { addressee_username } = await req.json();
-    if (!addressee_username) return NextResponse.json({ error: 'addressee_username required' }, { status: 400 });
+    const body = await parseJsonBody(req, schemas.friendRequest, 'addressee_username required');
+    if (!body.ok) return body.response;
+    const { addressee_username } = body.data;
 
     const admin = createAdminClient();
 

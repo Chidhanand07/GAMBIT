@@ -27,11 +27,14 @@ const TOKEN = expect.stringMatching(/^[A-Za-z0-9_-]{10}$/);
 const BY_TOKEN_SELECT = '*,white:profiles!white_id(username,avatar_url),black:profiles!black_id(username,avatar_url)';
 
 /**
- * Queue the three `games` results createPrivateGame + joinPrivateGame need:
- * insert → row, select-by-token → row, update → joined row.
+ * Queue what createPrivateGame + joinPrivateGame read back [INV-TOKEN]:
+ *   games:        insert → row, select-by-id → row, update → joined row
+ *   game_invites: insert → ok,  select-by-token → { game_id, expires_at }
+ * The games row never carries the token; the invite is its own row.
  */
 function queuePrivateGameFlow(gameId) {
     let row;
+    let invite;
     supabase.queue(
         'games',
         (call) => {
@@ -41,9 +44,17 @@ function queuePrivateGameFlow(gameId) {
         () => ({ data: row, error: null }),
         (call) => ({ data: { ...row, ...supabase.op(call, 'update')[0] }, error: null }),
     );
+    supabase.queue(
+        'game_invites',
+        (call) => {
+            invite = supabase.op(call, 'insert')[0];
+            return { data: null, error: null };
+        },
+        () => ({ data: { game_id: invite.game_id, expires_at: invite.expires_at }, error: null }),
+    );
 }
 
-/** Assert the exact create → lookup → join DB sequence. */
+/** Assert the exact create → store invite → look up by token → load game → join DB sequence. */
 function expectPrivateGameOps({ gameId, host, hostColor, joiner, timeControl, isRated }) {
     const white = hostColor === 'white' ? host : joiner;
     const black = hostColor === 'white' ? joiner : host;
@@ -52,23 +63,28 @@ function expectPrivateGameOps({ gameId, host, hostColor, joiner, timeControl, is
     expect(calls[0]).toEqual([
         [
             'insert',
+            // No invite_token / invite_expires_at on the games row any more.
             {
                 white_id: hostColor === 'white' ? host : null,
                 black_id: hostColor === 'black' ? host : null,
                 time_control: timeControl,
                 status: 'waiting',
-                invite_token: TOKEN,
-                invite_expires_at: ISO_DATE,
                 is_rated: isRated,
             },
         ],
         ['select'],
         ['single'],
     ]);
-    const token = calls[0][0][1].invite_token;
+
+    const invites = opsFor('game_invites');
+    expect(invites).toHaveLength(2);
+    expect(invites[0]).toEqual([['insert', { game_id: gameId, token: TOKEN, expires_at: ISO_DATE }]]);
+    const token = invites[0][0][1].token;
+    expect(invites[1]).toEqual([['select', 'game_id, expires_at'], ['eq', 'token', token], ['maybeSingle']]);
+
     expect(calls[1].map((op) => (op[0] === 'select' ? ['select', compact(op[1])] : op))).toEqual([
         ['select', BY_TOKEN_SELECT],
-        ['eq', 'invite_token', token],
+        ['eq', 'id', gameId],
         ['maybeSingle'],
     ]);
     expect(calls[2]).toEqual([

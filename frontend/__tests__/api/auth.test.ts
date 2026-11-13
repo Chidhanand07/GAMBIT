@@ -47,7 +47,8 @@ describe('POST /api/auth/login', () => {
     test('success → 200 and the session cookies Supabase sets land on the response', async () => {
         db.auth.signInWithPassword.mockImplementation(async () => {
             const cookies = (supabaseSsrMock.createServerClient.mock.calls.at(-1) as any)[2].cookies
-            cookies.set('sb-testref-auth-token', 'session-value', { path: '/' })
+            // @supabase/ssr ≥ 0.4 hands every cookie to setAll (was: one `set` call per cookie).
+            cookies.setAll([{ name: 'sb-testref-auth-token', value: 'session-value', options: { path: '/' } }])
             return { data: { session: { access_token: 't' } }, error: null } as any
         })
         const res = await login(req('/api/auth/login', { method: 'POST', body: { email: 'a@b.c', password: 'pw' } }))

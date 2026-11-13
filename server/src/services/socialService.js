@@ -9,6 +9,7 @@
  * game is created from the *stored* terms. Nothing in an accept payload can
  * choose the players, the time control, the rated flag or the colours.
  */
+const { toPublicGame } = require('../domain/gameDto');
 const { userRoom, gameRoom } = require('./emitter');
 
 /**
@@ -194,10 +195,11 @@ function createSocialService({ random = () => Math.random(), ...rest }) {
 
         /**
          * Tell everyone waiting in the game room that a private game started.
+         * Only the public view of the row is broadcast (never the invite token).
          * @param {{ id: string }} game
          */
         announceGameStart(game) {
-            deps.emitter.toRoom(gameRoom(game.id), 'game_start', game);
+            deps.emitter.toRoom(gameRoom(game.id), 'game_start', toPublicGame(game));
         },
 
         /** @param {RequestPayload} data */

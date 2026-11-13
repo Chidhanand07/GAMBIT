@@ -23,6 +23,13 @@ BOOK_CLASSES = ("Best", "Excellent", "Good")
 CRITICAL_CLASSES = ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]
 NO_MOVES_ACCURACY = 100.0
 
+# Outcomes of `game_review_status`.
+COMPLETED_STATUS = "completed"
+REVIEW_OK = "ok"
+REVIEW_GAME_NOT_FOUND = "not_found"
+REVIEW_GAME_NOT_COMPLETED = "not_completed"
+REVIEW_UNAVAILABLE = "unavailable"
+
 
 def _score_ply(sf: Any, board: chess.Board, move: chess.Move, ply: int) -> dict:
     """Analysis fields of one move entry (everything after move_number / ply)."""
@@ -93,11 +100,34 @@ def _review_game(sf: Any, game: chess.pgn.Game) -> dict:
     }
 
 
+def game_review_status(seams: EngineSeams, game_id: str) -> str:
+    """
+    Whether a review may be written for `game_id`: one of the REVIEW_* values.
+
+    A review is only ever stored for a game that exists and is completed. If
+    the database is not configured or the lookup fails, the answer is
+    REVIEW_UNAVAILABLE (fail closed), never "go ahead".
+    """
+    db = seams.supabase
+    if not db:
+        return REVIEW_UNAVAILABLE
+    try:
+        result = db.table("games").select("id, status").eq("id", game_id).limit(1).execute()
+    except Exception as e:
+        print("Failed to look up game before analysis:", e)
+        return REVIEW_UNAVAILABLE
+    rows = getattr(result, "data", None) or []
+    if not rows:
+        return REVIEW_GAME_NOT_FOUND
+    return REVIEW_OK if rows[0].get("status") == COMPLETED_STATUS else REVIEW_GAME_NOT_COMPLETED
+
+
 def _save_review(seams: EngineSeams, game_id: str, update: dict) -> None:
     db = seams.supabase
     if db:
         try:
-            db.table("games").update(update).eq("id", game_id).execute()
+            # The status filter repeats the pre-check: a review never lands on an unfinished game.
+            db.table("games").update(update).eq("id", game_id).eq("status", COMPLETED_STATUS).execute()
             # Note: the eval graph is derived client-side from each move entry's
             # `eval_white`, so no separate `eval_graph` column is required.
         except Exception as e:

@@ -10,9 +10,10 @@ ADR 0301), so tests that monkeypatch `main.get_engine`, `main.supabase`,
 
 import sys
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from supabase import Client, create_client
 
+from auth import require_engine_key
 from config import SUPABASE_KEY, SUPABASE_URL
 from engine import get_engine, get_stockfish_instance, release_stockfish_instance
 from routers import analysis, computer, health, moves
@@ -42,8 +43,13 @@ def run_full_game_analysis(game_id: str, pgn: str) -> None:
     review.run_full_game_analysis(game_id, pgn, _seams)
 
 
-app = FastAPI(title="Gambit Engine")
+# No /docs, /redoc or /openapi.json: the engine is a private backend (ENG-AUTH).
+app = FastAPI(title="Gambit Engine", docs_url=None, redoc_url=None, openapi_url=None)
+
+# /health is the only public route (platform health checks). Everything else
+# requires the shared secret; a new router must be added to PROTECTED_ROUTERS.
 app.include_router(health.build_router(_seams))
-app.include_router(moves.router)
-app.include_router(analysis.build_router(_seams))
-app.include_router(computer.router)
+
+PROTECTED_ROUTERS = (moves.router, analysis.build_router(_seams), computer.router)
+for _router in PROTECTED_ROUTERS:
+    app.include_router(_router, dependencies=[Depends(require_engine_key)])

@@ -45,8 +45,6 @@ export interface Game {
     white_move_classifications?: MoveClassification[] | null;
     black_move_classifications?: MoveClassification[] | null;
     critical_moments?: unknown;
-    invite_token?: string | null;
-    invite_expires_at?: string | null;
     is_rated: boolean | null;
     spectator_count?: number | null;
     started_at?: string | null;

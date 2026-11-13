@@ -49,25 +49,55 @@ function engineUrl() {
 /**
  * @typedef {object} Env
  * @property {() => string} engineUrl chess-engine base URL (`GAMBIT_ENGINE_URL`, fallback `ENGINE_URL`).
+ * @property {() => string | undefined} engineSharedSecret sent to the engine as `X-Engine-Key`
+ *   (`ENGINE_SHARED_SECRET`); without it the engine client refuses to call the engine.
  * @property {() => string | undefined} frontendUrl extra CORS origin (`FRONTEND_URL`).
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
  * @property {() => string} redisUrl `REDIS_URL`, default local Redis.
  * @property {() => string | undefined} supabaseUrl `SUPABASE_URL`.
- * @property {() => string | undefined} supabaseServiceKey
- *   `SUPABASE_SERVICE_KEY`, falling back to `SUPABASE_SERVICE_ROLE_KEY`.
+ * @property {() => string | undefined} supabaseServiceKey the secret (RLS-bypassing) key:
+ *   `SUPABASE_SECRET_KEY` (canonical; Supabase's new `sb_secret_…` key), falling back to the
+ *   legacy `SUPABASE_SERVICE_KEY`, then `SUPABASE_SERVICE_ROLE_KEY`.
  * @property {() => string} supabaseServiceKeySource name of the variable the key came from.
  */
+
+/**
+ * `ENGINE_SHARED_SECRET`. The value is never logged.
+ * @returns {string | undefined}
+ */
+function engineSharedSecret() {
+    const secret = process.env.ENGINE_SHARED_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+        warnOnce(
+            'engine-secret-missing',
+            '[config] ENGINE_SHARED_SECRET is not set; analysis and game review are disabled.',
+        );
+    }
+    return secret;
+}
+
+/** Variables the secret Supabase key is read from, in order of preference (SEC-05). */
+const SECRET_KEY_NAMES = Object.freeze(['SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_SERVICE_ROLE_KEY']);
+
+/**
+ * Name of the variable the secret key comes from. When none is set this is the
+ * last (oldest) name, as before; `supabaseServiceKey()` is then undefined.
+ * @returns {string}
+ */
+function supabaseSecretKeySource() {
+    return SECRET_KEY_NAMES.find((name) => Boolean(process.env[name])) ?? SECRET_KEY_NAMES[SECRET_KEY_NAMES.length - 1];
+}
 
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
     engineUrl,
+    engineSharedSecret,
     frontendUrl: () => process.env.FRONTEND_URL,
     port: () => process.env.PORT || DEFAULT_PORT,
     redisUrl: () => process.env.REDIS_URL || DEFAULT_REDIS_URL,
     supabaseUrl: () => process.env.SUPABASE_URL,
-    supabaseServiceKey: () => process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
-    supabaseServiceKeySource: () =>
-        process.env.SUPABASE_SERVICE_KEY ? 'SUPABASE_SERVICE_KEY' : 'SUPABASE_SERVICE_ROLE_KEY',
+    supabaseServiceKey: () => process.env[supabaseSecretKeySource()],
+    supabaseServiceKeySource: supabaseSecretKeySource,
 });
 
 module.exports = env;

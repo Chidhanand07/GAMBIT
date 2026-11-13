@@ -6,11 +6,13 @@ const env = require('../../src/config/env');
 const KEYS = [
     'GAMBIT_ENGINE_URL',
     'ENGINE_URL',
+    'ENGINE_SHARED_SECRET',
     'NODE_ENV',
     'FRONTEND_URL',
     'PORT',
     'REDIS_URL',
     'SUPABASE_URL',
+    'SUPABASE_SECRET_KEY',
     'SUPABASE_SERVICE_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
 ];
@@ -59,10 +61,21 @@ test('empty strings fall back to the defaults (|| semantics)', () => {
     expect(env.port()).toBe(3001);
 });
 
-test('service key prefers SUPABASE_SERVICE_KEY over SUPABASE_SERVICE_ROLE_KEY', () => {
+test('secret key: SUPABASE_SECRET_KEY, then SUPABASE_SERVICE_KEY, then SUPABASE_SERVICE_ROLE_KEY [SUPABASE-KEYS]', () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'role';
     expect(env.supabaseServiceKey()).toBe('role');
     expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_ROLE_KEY');
+    process.env.SUPABASE_SERVICE_KEY = 'service';
+    expect(env.supabaseServiceKey()).toBe('service');
+    expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_KEY');
+    // The new key name wins over both legacy names.
+    process.env.SUPABASE_SECRET_KEY = 'sb_secret_new';
+    expect(env.supabaseServiceKey()).toBe('sb_secret_new');
+    expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SECRET_KEY');
+});
+
+test('an empty SUPABASE_SECRET_KEY falls through to the legacy names', () => {
+    process.env.SUPABASE_SECRET_KEY = '';
     process.env.SUPABASE_SERVICE_KEY = 'service';
     expect(env.supabaseServiceKey()).toBe('service');
     expect(env.supabaseServiceKeySource()).toBe('SUPABASE_SERVICE_KEY');
@@ -107,6 +120,33 @@ describe('engine URL [G5]', () => {
         process.env.NODE_ENV = 'test';
         expect(env.engineUrl()).toBe('http://localhost:8001');
         expect(warn).not.toHaveBeenCalled();
+    });
+});
+
+describe('engine shared secret [ENG-AUTH]', () => {
+    let env;
+    let warn;
+    beforeEach(() => {
+        jest.isolateModules(() => {
+            env = require('../../src/config/env');
+        });
+        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    test('reads ENGINE_SHARED_SECRET at call time', () => {
+        expect(env.engineSharedSecret()).toBeUndefined();
+        process.env.ENGINE_SHARED_SECRET = 's3cret';
+        expect(env.engineSharedSecret()).toBe('s3cret');
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    test('warns once in production when it is missing, and never logs a value', () => {
+        process.env.NODE_ENV = 'production';
+        env.engineSharedSecret();
+        env.engineSharedSecret();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/ENGINE_SHARED_SECRET is not set/);
     });
 });
 

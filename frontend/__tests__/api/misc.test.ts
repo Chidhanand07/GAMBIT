@@ -81,8 +81,50 @@ describe('POST /api/maverick-move', () => {
         )
         expect((await json(await post({ fen, difficulty: 'hard' }))).body).toEqual({ uci: 'e2e4', san: 'e4', difficulty: 'hard' })
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-        expect(url).toMatch(/\/computer-move$/)
+        expect(url).toBe('http://engine.test/computer-move')
         expect(JSON.parse(init.body as string)).toEqual({ fen, difficulty: 'hard' })
+    })
+
+    describe('engine key and URL [ENG-AUTH]', () => {
+        const saved = { ...process.env }
+        afterEach(() => {
+            process.env = { ...saved }
+        })
+        const okEngine = () => jest.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+
+        test('sends the shared secret as X-Engine-Key', async () => {
+            const fetchMock = okEngine()
+            await post({ fen })
+            const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+            expect(headers['X-Engine-Key']).toBe('test-engine-secret')
+        })
+
+        test.each([[undefined], ['']])('without ENGINE_SHARED_SECRET (%p) → 503 and the engine is not called', async (value) => {
+            const fetchMock = okEngine()
+            if (value === undefined) delete process.env.ENGINE_SHARED_SECRET
+            else process.env.ENGINE_SHARED_SECRET = value
+            expect(await json(await post({ fen }))).toEqual({ status: 503, body: { error: 'Engine not configured' } })
+            expect(fetchMock).not.toHaveBeenCalled()
+        })
+
+        test('the secret never appears in a response, even when the engine is unreachable', async () => {
+            jest.spyOn(global, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'))
+            const res = await post({ fen })
+            expect(await res.text()).not.toContain('test-engine-secret')
+        })
+
+        test('GAMBIT_ENGINE_URL is the canonical name; ENGINE_URL still works as a fallback', async () => {
+            const fetchMock = okEngine()
+            process.env.GAMBIT_ENGINE_URL = 'http://canonical.test'
+            process.env.ENGINE_URL = 'http://legacy.test'
+            await post({ fen })
+            delete process.env.GAMBIT_ENGINE_URL
+            await post({ fen })
+            expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+                'http://canonical.test/computer-move',
+                'http://legacy.test/computer-move',
+            ])
+        })
     })
 
     test('an unknown difficulty becomes medium', async () => {
