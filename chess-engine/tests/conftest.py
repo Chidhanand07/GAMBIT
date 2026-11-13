@@ -1,7 +1,9 @@
 """
 Shared fixtures for the engine tests.
 
-No test may touch a real Stockfish binary: an autouse fixture replaces every
+No test may touch a real Stockfish binary (except
+tests/test_perspective_real_stockfish.py, which runs only where one is
+installed and imports the real package itself): an autouse fixture replaces every
 place the code acquires an engine with a controllable fake. By default the fake
 reports "engine unavailable" (None); tests that need an engine use the
 `stockfish` fixture to switch in a FakeStockfish.
@@ -23,13 +25,28 @@ _stockfish_stub.Stockfish = MagicMock
 sys.modules.setdefault("stockfish", _stockfish_stub)
 
 
+def package_sign(board):
+    """
+    The `stockfish` package turns the engine's side-to-move scores into WHITE's
+    view: `compare = 1 if "w" in fen_position else -1` (stockfish/models.py,
+    get_evaluation lines 499/512; get_top_moves line 546).
+    """
+    return 1 if board.turn == chess.WHITE else -1
+
+
 class FakeStockfish:
     """
     Minimal stand-in for the `stockfish` package's Stockfish object.
 
-    - best move: `best(board)` → chess.Move, default first legal move
-    - evaluations: `evaluate(board)` → {'type': 'cp'|'mate', 'value': int}
-      from the side-to-move's perspective, default 0
+    The callbacks answer what the Stockfish BINARY prints (UCI: from the side
+    to move's point of view); the fake then converts them exactly like the
+    package does, so `get_evaluation()` / `get_top_moves()` report from
+    WHITE's point of view, as the real package does.
+
+    - best move: `best(board)` -> chess.Move, default first legal move
+    - evaluation: `evaluate(board)` -> {'type': 'cp'|'mate', 'value': int}
+      for the side to move, default 0 (mate 0 == the side to move is mated)
+    - top line: `top_cp` (int, {'Mate': k}, or a callable of the board) for the side to move
     """
 
     def __init__(self, best=None, evaluate=None, top_cp=0):
@@ -46,7 +63,8 @@ class FakeStockfish:
         self.board = chess.Board(fen)
 
     def get_evaluation(self):
-        return self._evaluate(self.board)
+        uci = self._evaluate(self.board)
+        return {"type": uci["type"], "value": uci["value"] * package_sign(self.board)}
 
     def get_best_move(self):
         mv = self._best(self.board)
@@ -56,10 +74,67 @@ class FakeStockfish:
         mv = self._best(self.board)
         if mv is None:
             return []
+        sign = package_sign(self.board)
         top_cp = self._top_cp(self.board) if callable(self._top_cp) else self._top_cp
         if isinstance(top_cp, dict):  # {'Mate': k}
-            return [{"Move": mv.uci(), "Centipawn": None, "Mate": top_cp["Mate"]}][:n]
-        return [{"Move": mv.uci(), "Centipawn": top_cp, "Mate": None}][:n]
+            return [{"Move": mv.uci(), "Centipawn": None, "Mate": top_cp["Mate"] * sign}][:n]
+        return [{"Move": mv.uci(), "Centipawn": top_cp * sign, "Mate": None}][:n]
+
+
+PIECE_CP = {chess.PAWN: 100, chess.KNIGHT: 300, chess.BISHOP: 300, chess.ROOK: 500, chess.QUEEN: 900}
+
+
+def material_for_side_to_move(board):
+    """Static material balance in centipawns for the side to move."""
+    pieces = board.piece_map().values()
+    return sum(PIECE_CP.get(p.piece_type, 0) * (1 if p.color == board.turn else -1) for p in pieces)
+
+
+SEARCH_MATE = 1_000_000  # internal mate score of the fake search
+
+
+def negamax(board, depth):
+    """Material negamax for the side to move: (score, best move); SEARCH_MATE-ish when mating."""
+    if board.is_checkmate():
+        return -SEARCH_MATE, None
+    if depth == 0 or not any(board.legal_moves):
+        return material_for_side_to_move(board), None
+    best, best_score = None, None
+    for mv in board.legal_moves:
+        board.push(mv)
+        score = -negamax(board, depth - 1)[0]
+        board.pop()
+        if best_score is None or score > best_score:
+            best, best_score = mv, score
+    return best_score, best
+
+
+def _uci_report(score):
+    """A search score as the binary prints it: {'type': 'mate', 'value': +-1} or centipawns."""
+    if abs(score) >= SEARCH_MATE // 2:
+        return {"type": "mate", "value": 1 if score > 0 else -1}
+    return {"type": "cp", "value": score}
+
+
+def material_engine(depth=0):
+    """
+    A tiny but consistent engine over material. `get_evaluation()` searches
+    `depth` plies and the top line `depth + 1`, so the top line's score equals
+    the best evaluation one move later (what a real engine approximates).
+    Reports like the Stockfish binary (side to move; "mate 0" once the side to
+    move is mated), wrapped in FakeStockfish's package conversion.
+    """
+
+    def evaluate(board):
+        if board.is_checkmate():
+            return {"type": "mate", "value": 0}
+        return _uci_report(negamax(board, depth)[0])
+
+    def top(board):
+        report = _uci_report(negamax(board, depth + 1)[0])
+        return {"Mate": report["value"]} if report["type"] == "mate" else report["value"]
+
+    return FakeStockfish(best=lambda b: negamax(b, depth + 1)[1], evaluate=evaluate, top_cp=top)
 
 
 class EngineSwitch:

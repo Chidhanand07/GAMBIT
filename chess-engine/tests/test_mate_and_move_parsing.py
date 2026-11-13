@@ -93,7 +93,11 @@ def test_only_the_first_line_counts():
 
 
 def mate_sf(best_uci, mate, after):
-    """Top line is a forced mate (`mate`, White's point of view); `after` is the eval once the move is played."""
+    """
+    Top line is a forced mate in `mate` for the side to move (as the Stockfish binary
+    prints it; FakeStockfish converts to White's view like the package); `after` is
+    the binary's eval once the move is played (side to move then).
+    """
     return FakeStockfish(best=lambda b: chess.Move.from_uci(best_uci), top_cp={"Mate": mate}, evaluate=lambda b: after)
 
 
@@ -116,9 +120,10 @@ def test_missing_a_forced_mate_costs_the_mate():
 
 
 def test_black_to_move_with_a_mate_for_black_on_the_top_line():
-    # Black has a forced mate (top line Mate -2) but plays ...Ke7; afterwards Black is -80.
+    # Black to move mates in 2 (the binary prints "mate 2"; the package reports Mate -2)
+    # but plays ...Ke7; afterwards White (to move) is +80, so Black is -80.
     fen = "4k2r/8/8/8/8/8/5PPP/6K1 b k - 0 1"
-    sf = mate_sf("h8h3", -2, {"type": "cp", "value": 80})
+    sf = mate_sf("h8h3", 2, {"type": "cp", "value": 80})
     cp_loss, cls, _eb, ea, ebest, *_ = analyze_move_cp(sf, fen, "e8e7", chess.BLACK)
     assert (ebest, ea) == (MATE_CP, -80)
     assert cp_loss == MATE_CP + 80
@@ -126,7 +131,7 @@ def test_black_to_move_with_a_mate_for_black_on_the_top_line():
 
 
 def test_the_best_defence_when_being_mated_is_not_a_blunder():
-    # White is getting mated whatever it plays (top line: Black mates in 3).
+    # White is getting mated whatever it plays (top line: White to move is mated in 3).
     sf = mate_sf("e1d2", -3, {"type": "mate", "value": 2})
     cp_loss, cls, _eb, ea, ebest, *_ = analyze_move_cp(sf, BACK_RANK, "e1d2", chess.WHITE)
     assert (ebest, ea, cp_loss) == (-MATE_CP, -MATE_CP, 0)  # was ebest == 0 -> cp_loss 10000, "Blunder"

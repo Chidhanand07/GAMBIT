@@ -24,6 +24,7 @@ import torch
 
 from engine import get_engine
 from model import encode_board, legal_move_mask
+from services.perspective import MATE_CP, evaluation_for, for_color, line_white_score
 from style_engine import _device, _load_model
 
 BLUNDER_CP = 300  # medium: style move must stay within this loss, else engine best
@@ -84,20 +85,15 @@ def _temperature_sample(ranked, temperature: float) -> chess.Move:
     return moves[int(np.random.choice(len(moves), p=adj))]
 
 
-def _cp_from_topmove(tm) -> int:
-    """Centipawn score (side-to-move perspective) from a Stockfish top-move dict."""
-    if tm.get("Centipawn") is not None:
-        return tm["Centipawn"]
-    if tm.get("Mate") is not None:
-        return 10000 if tm["Mate"] > 0 else -10000
-    return 0
-
-
 def _analyze(fen: str, candidates, depth: int):
     """
     Run Stockfish on the position: return the engine's best move, the position's
     eval (mover's perspective), whether there's a forced mate, and each candidate
     move's cp_loss vs best. Returns None if Stockfish is unavailable.
+
+    Every score is turned into the MOVER's view (services/perspective.py): the
+    `stockfish` package reports White's, so MAVERICK as Black used to prefer
+    the move that was best for White.
     """
     with get_engine(depth) as sf:
         if sf is None:
@@ -106,21 +102,18 @@ def _analyze(fen: str, candidates, depth: int):
         top = sf.get_top_moves(1)
         if not top:
             return None
+        board = chess.Board(fen)
+        mover = board.turn
         best_uci = top[0]["Move"]
         is_mate = top[0].get("Mate") is not None
-        best_cp = _cp_from_topmove(top[0])
+        best_cp = for_color(line_white_score(top[0]), mover)
 
-        board = chess.Board(fen)
         losses = {}
         for mv in candidates:
             b = board.copy()
             b.push(mv)
             sf.set_fen_position(b.fen())
-            ev = sf.get_evaluation()
-            cp_after = ev["value"]
-            if ev["type"] == "mate":
-                cp_after = 10000 if cp_after > 0 else -10000
-            cp_after = -cp_after  # opponent to move after our move -> flip to our view
+            cp_after = evaluation_for(sf.get_evaluation(), b, mover)
             losses[mv.uci()] = max(0, best_cp - cp_after)
         return {"best_uci": best_uci, "best_cp": best_cp, "is_mate": is_mate, "losses": losses}
 
@@ -152,13 +145,13 @@ def _supervised_move(fen: str, ranked, style_max_loss: int, depth: int) -> chess
     # Otherwise keep style: best-preference model move within the loss budget.
     losses = info["losses"]
     for mv, _ in ranked[:TOPK]:
-        if losses.get(mv.uci(), 10_000) <= style_max_loss:
+        if losses.get(mv.uci(), MATE_CP) <= style_max_loss:
             return mv
 
     # No acceptable style move -> engine's best over all legal moves.
     if best_move is not None:
         return best_move
-    return min(candidates, key=lambda m: losses.get(m.uci(), 10_000))
+    return min(candidates, key=lambda m: losses.get(m.uci(), MATE_CP))
 
 
 def _medium_move(fen: str, ranked) -> chess.Move:

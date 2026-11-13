@@ -95,7 +95,7 @@ def test_black_perspective_is_normalised():
     fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
     # Engine says side to move (black) is -30 with best e7e5; after black's best,
     # white-to-move eval is +30. From black's own view that's exactly best → 0 loss.
-    sf = sf_with("e7e5", -30, {"type": "cp", "value": -30})
+    sf = sf_with("e7e5", -30, {"type": "cp", "value": 30})
     cp_loss, cls, *_ = analyze_move_cp(sf, fen, "e7e5", chess.BLACK)
     assert cp_loss == 0
     assert cls == "Great move"

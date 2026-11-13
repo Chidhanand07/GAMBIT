@@ -13,6 +13,7 @@ import chess.pgn
 
 from seams import EngineSeams
 from services.analysis import analyze_move_cp
+from services.perspective import for_color
 
 REVIEW_DEPTH = 18
 # Book: early, sound moves are opening theory rather than "found" moves.
@@ -58,8 +59,9 @@ def _score_ply(sf: Any, board: chess.Board, move: chess.Move, ply: int) -> dict:
     )
     if ply < BOOK_MAX_PLY and classification in BOOK_CLASSES and cp_loss <= BOOK_MAX_LOSS:
         classification = "Book"
-    # White-perspective eval after this move, for the eval graph.
-    eval_white = ea if player_color == chess.WHITE else -ea
+    # The eval graph is WHITE's view (positive: White better), whoever moved;
+    # frontend EvalGraph.tsx draws +eval_white above the middle line.
+    eval_white = for_color(ea, player_color)
     return {
         "move": played_uci,
         "san": board.san(move),
