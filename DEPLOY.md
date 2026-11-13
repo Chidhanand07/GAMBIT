@@ -55,37 +55,83 @@ Alternatively, add a **Redis add-on** directly in Railway (simpler but costs ~$5
 
 ## 3. Chess Engine → Render
 
-### 3a. Install Stockfish on Render
-Render supports custom apt packages. In your service settings → **Environment** → add:
-```
-STOCKFISH_PATH=/usr/bin/stockfish
-```
-And in **Build Command**:
+The engine is deployed as a **Docker** service. `chess-engine/Dockerfile` is the one
+definition of its runtime: Python 3.11, the Python dependencies and Stockfish
+(`apt-get install stockfish`). The root `render.yaml` only points Render at that file;
+there is no build or start command to keep in sync, and nothing to install by hand.
+
+### 3a. Create the service
+**Blueprint (recommended):** [render.com](https://render.com) → New → Blueprint → connect the
+repo. Render reads the root `render.yaml` and creates `gambit-engine`.
+
+**By hand:** New Web Service → connect the repo → **Language: Docker** →
+**Dockerfile Path** `./chess-engine/Dockerfile` → **Docker Build Context Directory**
+`./chess-engine` → **Health Check Path** `/health`. Leave the build and start commands empty.
+
+To run the same image locally:
 ```bash
-apt-get install -y stockfish && pip install -r requirements.txt
+docker build -t gambit-engine chess-engine
+docker run --rm -p 8001:8001 --env-file chess-engine/.env gambit-engine
 ```
 
-### 3b. Create Web Service
-1. [render.com](https://render.com) → New Web Service → connect your repo
-2. **Root Directory**: `chess-engine`
-3. **Runtime**: Python 3
-4. **Build Command**: `apt-get install -y stockfish && pip install -r requirements.txt`
-5. **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+### 3b. Stockfish and `STOCKFISH_PATH`
+`STOCKFISH_PATH` is the path of the Stockfish binary the engine starts.
+
+| Where | Value |
+|-------|-------|
+| Docker / Render | **Do not set it.** The Dockerfile installs Stockfish and sets `STOCKFISH_PATH=/usr/games/stockfish` (where Debian puts it; that directory is not on `PATH`). The image build fails if the binary is missing. |
+| macOS without Docker | unset: `brew install stockfish` puts `stockfish` on `PATH`, which is the default. |
+| Debian/Ubuntu without Docker | `apt-get install stockfish`, then `STOCKFISH_PATH=/usr/games/stockfish`. |
+
+If `GET /health` answers `"engine": "Engine unavailable"`, the binary was not found at that path.
 
 ### 3c. Environment Variables
 | Key | Value |
 |-----|-------|
 | `SUPABASE_URL` | your Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`); legacy `SUPABASE_SERVICE_KEY` still read |
-| `STOCKFISH_PATH` | `/usr/bin/stockfish` |
 | `STOCKFISH_POOL_SIZE` | `2` (free tier) or `4` (paid) |
 | `ENGINE_SHARED_SECRET` | a long random string (`openssl rand -hex 32`). **Required**: until it is set every endpoint except `GET /health` answers 503. Use the same value on Railway and Vercel. |
-| `PYTHON_VERSION` | `3.11.0` |
+| `MAVERICK_MODEL_URL` | optional, see 3e. Leave empty while `style_model.pt` ships in the image. |
+| `MAVERICK_MODEL_SHA256` | required whenever `MAVERICK_MODEL_URL` is set, see 3e. |
+| `STYLE_MODEL_PATH` | optional; where the weights file is read from / downloaded to (default `style_model.pt` in the app directory). |
+| `STOCKFISH_PATH` | not set on Render, see 3b. |
+
+`PORT` is assigned by Render; the container listens on it (8001 when it is unset).
 
 ### 3d. Get the URL
 After deploy, copy the URL e.g. `https://gambit-engine.onrender.com` — needed for the server's `GAMBIT_ENGINE_URL`.
 
 > **Note**: Render free tier spins down after 15 min of inactivity. Upgrade to Starter ($7/mo) to keep it always-on.
+
+### 3e. The MAVERICK style model (`style_model.pt`)
+The computer opponent's "plays like me" network is the file `chess-engine/style_model.pt`
+(about 26 MB). It is **tracked in git**, so the Docker image contains it and nothing has to
+be uploaded: leave `MAVERICK_MODEL_URL` and `MAVERICK_MODEL_SHA256` empty.
+
+The download is the fallback for an image that does not contain the file (for example if the
+weights are later taken out of git, or to roll out new weights without a commit):
+
+1. Compute the checksum of the exact file you are going to host:
+   ```bash
+   shasum -a 256 style_model.pt        # Linux: sha256sum style_model.pt
+   ```
+2. Upload the file somewhere that serves it over **https** at a stable, direct URL (a
+   `curl -L <url> -o check.pt` must give back the same bytes): a GitHub Release asset of this
+   repository, a public Supabase Storage bucket, Cloudflare R2 / S3, or a Hugging Face model
+   repository (`…/resolve/main/style_model.pt`). The URL must work without credentials; do not
+   put a token in it.
+3. On Render set `MAVERICK_MODEL_URL` to that URL and `MAVERICK_MODEL_SHA256` to the 64 hex
+   characters from step 1, then redeploy.
+
+At startup the engine downloads the file only if it is not already on disk (or if the file on
+disk does not match the checksum), verifies the SHA-256 and only then loads it. Render's disk
+is ephemeral, so this happens again after every deploy or restart. If the URL is set without
+a checksum, the download fails, or the checksum does not match (the file is deleted), the
+style model is **unavailable**: the engine still starts, `GET /style-move/health` answers
+`{"model_loaded": false}`, `POST /style-move` answers 503, and `POST /computer-move` keeps
+working with Stockfish's move instead of the style move. The reason is in the service log
+(`style model unavailable (checksum_mismatch)` and similar).
 
 ---
 
@@ -178,7 +224,12 @@ Any time you change env vars in Vercel → **Deployments → Redeploy** the late
 Make sure `FRONTEND_URL` in Railway exactly matches your Vercel URL (with `https://`, no trailing slash).
 
 ### "Engine unavailable" on analysis
-Render free tier spun down. Wait 30s for cold start, or upgrade to Starter plan.
+Render free tier spun down. Wait 30s for cold start, or upgrade to Starter plan. If it stays
+that way, Stockfish was not found: see section 3b (`STOCKFISH_PATH`).
+
+### The computer opponent plays, but not "like me"
+`GET /style-move/health` (with the `X-Engine-Key` header) answers `{"model_loaded": false}`:
+the style model is unavailable and MAVERICK is playing Stockfish's moves. See section 3e.
 
 ### Profile not created after signup
 Check Supabase SQL Editor → `profiles` table. If empty after signup, verify `SUPABASE_SECRET_KEY` (or the legacy `SUPABASE_SERVICE_ROLE_KEY`) is set correctly in Vercel env vars.

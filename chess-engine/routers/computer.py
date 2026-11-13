@@ -28,9 +28,12 @@ def style_move_health():
 @router.post("/style-move")
 def style_move(req: StyleMoveReq):
     parse_fen(req.fen)
+    # This endpoint is the style model and nothing else: without it there is no answer.
+    if not style_model_loaded():
+        raise HTTPException(status_code=503, detail="Style model unavailable")
     result = get_style_move(req.fen, top_k=req.top_k)
     if result is None:
-        raise HTTPException(status_code=422, detail="Style model not loaded or no legal moves in position.")
+        raise HTTPException(status_code=422, detail="No legal moves in position.")
     return result
 
 

@@ -25,3 +25,8 @@ POOL_SIZE: int = int(os.environ.get("STOCKFISH_POOL_SIZE", "4"))
 
 # MAVERICK style policy weights.
 MODEL_PATH: str = os.environ.get("STYLE_MODEL_PATH", "style_model.pt")
+# Fallback when MODEL_PATH does not exist: download the weights from this https URL
+# and accept them only if their SHA-256 equals MODEL_SHA256 (required with the URL).
+# With MODEL_SHA256 set, a file already at MODEL_PATH must match it too.
+MODEL_URL: str = os.environ.get("MAVERICK_MODEL_URL", "")
+MODEL_SHA256: str = os.environ.get("MAVERICK_MODEL_SHA256", "")
