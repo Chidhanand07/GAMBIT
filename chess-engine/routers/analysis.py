@@ -3,14 +3,16 @@
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from config import MAX_ANALYSIS_DEPTH, MIN_ANALYSIS_DEPTH
 from routers.fen import parse_fen, parse_legal_move
 from seams import EngineSeams
 from services import analysis as analysis_service
 from services import review as review_service
 
 CLASSIFY_DEPTH = 14
+DEFAULT_ANALYSIS_DEPTH = 18
 
 # Why a review cannot be queued -> (HTTP status, detail).
 REVIEW_REFUSALS = {
@@ -33,7 +35,8 @@ class MoveClassifyReq(BaseModel):
 
 class AnalyzeReq(BaseModel):
     fen: str
-    depth: int = 18
+    # Bounded (ENG-DEPTH-BOUND): outside [MIN, MAX] FastAPI answers 422 before an engine is taken.
+    depth: int = Field(default=DEFAULT_ANALYSIS_DEPTH, ge=MIN_ANALYSIS_DEPTH, le=MAX_ANALYSIS_DEPTH)
 
 
 def build_router(seams: EngineSeams) -> APIRouter:
