@@ -1625,3 +1625,100 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Owner action.** Set `CORS_ORIGINS` on Railway before deploying (the production URL and any
   custom domain). Previews need `CORS_PREVIEW_ORIGIN_REGEX`; without it previews cannot reach
   the game server (they could before, as could everyone else's).
+
+## F-047
+
+**One FEN check at the HTTP boundary of the engine, answering 400 (G19).**
+
+- **Context.** Six engine endpoints take a FEN; an unparseable one gave 500 (`/classify-move`,
+  `/analyze`), 200 `{ valid: false }` (`/validate-move`) or 400 (the rest).
+- **Options.** (1) a pydantic validator on the field (422); (2) per-endpoint try/except; (3) one
+  helper `routers/fen.py::parse_fen` raising 400.
+- **Decision.** (3), called first in every handler, before an engine is taken from the pool, so
+  a bad request is 400 even when Stockfish is down and never holds a pool slot.
+- **Why.** `/valid-moves` and `/computer-move` already answered 400 "Invalid FEN" and callers
+  rely on it; 422 would be a second convention. `/validate-move` changing from 200 to 400 is
+  safe: nothing calls it. "Valid" means python-chess can parse it; position legality (e.g. no
+  kings) is not enforced, as in `/valid-moves`.
+- **Test changed.** `test_validate_move_never_500s_on_bad_input` (garbage FEN → 200) split into
+  "bad move on a valid FEN is still 200 `valid: false`" and "bad FEN is 400".
+
+## F-048
+
+**A mate on the top line scores ±10000 (White's perspective); moves are parsed as UCI first, then SAN (G20).**
+
+- **Context.** `get_top_moves()` returns `Centipawn: None, Mate: N` for a forced mate, which the
+  code scored as 0. The notation of the played move was guessed from its length (4–5
+  characters = UCI), so `Nbd7`, `exd5`, `O-O-O` were misread and classified "Mistake".
+- **Decision.** `top_line_cp`: `+MATE_CP` for `Mate > 0`, `-MATE_CP` for `Mate < 0` (the existing
+  constant). `parse_played_move`: `parse_uci`, else `parse_san`; null moves are rejected.
+- **Why.** The stockfish package reports top lines from White's side (checked in its source and
+  against a real binary). No string is both a legal UCI move and a different legal SAN move.
+- **Found while doing this, NOT fixed (outside the listed items):** `get_evaluation()` is also
+  White-perspective, but `_eval_after_for_mover` always negates; with the real binary every
+  White move in a review is mis-scored (e.g. 1.e4, the engine's own choice, "Inaccuracy",
+  cp loss 89). `computer_engine.py` makes the same assumption when MAVERICK plays Black. The
+  test fake encodes the same wrong assumption, so the suite cannot see it. Listed for the last
+  phase with priority (see the report).
+
+## F-049
+
+**A game without moves is never reviewed; a side without moves has no accuracy (G21).**
+
+- **Context.** python-chess parses non-PGN text into an empty game; the average accuracy of no
+  moves was 100, so 100/100 was written.
+- **Decision.** `parse_game_with_moves` returns None for empty/non-PGN/headers-only/illegal-first
+  -move input; the background review then writes nothing (`no_moves`), and `POST /analyse-game`
+  refuses such a PGN with 422 before queueing. A side that made no move gets `null` accuracy
+  (the column is nullable and the web app already renders null). A partly parseable PGN is
+  reviewed up to the bad token.
+- **Why.** Fail closed in two layers: the endpoint can tell the caller; the task can only log.
+
+## F-050
+
+**Render builds the engine's Dockerfile, which is the only place Stockfish is installed; the MAVERICK weights stay in git with a checksum-verified download as fallback (ENGINE-BUILD).**
+
+- **Context.** Three descriptions disagreed: the Dockerfile installed no Stockfish; the root
+  `render.yaml` ran `apt-get install` in a native Python build with
+  `STOCKFISH_PATH=/usr/bin/stockfish`; `chess-engine/render.yaml` installed nothing.
+  `style_model.pt` (26 MB, tracked) was loaded at import; a corrupt file crashed the process.
+- **Decision (build).** `chess-engine/render.yaml` deleted; the root blueprint is
+  `runtime: docker` with `dockerfilePath: ./chess-engine/Dockerfile`, `dockerContext:
+  ./chess-engine`, `healthCheckPath: /health`. The Dockerfile installs Debian's `stockfish`, sets
+  `STOCKFISH_PATH=/usr/games/stockfish` and fails the build if the binary is missing.
+- **Decision (model).** The tracked file keeps working. Optional `MAVERICK_MODEL_URL` +
+  mandatory `MAVERICK_MODEL_SHA256`: https only, downloaded to a temporary name and renamed only
+  after the SHA-256 matches, capped at 512 MB, one attempt per process; `torch.load(...,
+  weights_only=True)`. Unavailable → `/style-move` 503, `/computer-move` keeps its Stockfish
+  fallback.
+- **Why.** An image is reproducible everywhere and Render's native build cannot `apt-get`.
+  A checkpoint is a pickle: an unverified download would be remote code execution.
+- **Not verified.** No Docker on this machine (image never built); no Render deploy; no real
+  download.
+
+## F-051
+
+**One pure helper decides post-sign-in redirects: a same-origin path with exactly one leading `/` (S6).**
+
+- **Context.** `/auth/callback?next=` (and the login and exchange pages' `redirect`/`next`)
+  followed any URL.
+- **Decision.** `frontend/lib/safeRedirect.ts` (not `server-only`, so client pages can use it):
+  the value must start with one `/`, contain no backslash or control character, and still be a
+  single-slash same-origin path after URL resolution (`/.//evil` resolves to `//evil` and is
+  refused); otherwise `/lobby`. Used by the callback route and both pages.
+- **Why one module.** Two copies of a security rule drift.
+
+## F-052
+
+**No console output from browser code; ESLint enforces it (S14).**
+
+- **Decision.** All console calls removed from client code (signup flow, exchange page, invite
+  helper, private-game hook, socket connection). `no-console: error` everywhere, with an
+  explicit override allowing only `console.error`/`console.warn` in server-only paths
+  (`lib/server/**`, `app/api/**`, route handlers, `proxy.ts`), and `off` for tests, scripts and
+  config. A source-scan test asserts the same.
+- **Why delete rather than replace.** The web app has no error tracker yet (NX-17/SEC-12 open);
+  every removed call sat next to a message already shown to the user.
+- *S6, S14 (and G22) were implemented on a side branch by a helper agent and cherry-picked; the
+  two files that branch could not touch were cleaned here, which removed its temporary lint
+  exemption.*
