@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
+import { formatTimeControl } from '@/lib/chess/timeControl';
+import { onRejected } from '@/lib/socket/ack';
 import type { JoinQueuePayload } from '@/types/socket';
 import type { LobbyProfile, TcMinutes } from '../types';
 
@@ -13,14 +15,20 @@ interface MatchmakingOptions {
     getTcMinutes: () => TcMinutes;
     /** Called when the server starts a game for this user (e.g. a friend joined the invite). */
     onGameStart: () => void;
+    /** Called when the server paired us but could not create the game (we are out of the queue). */
+    onMatchFailed?: (reason: string) => void;
 }
 
-/**
- * Queue state, the search timer and the match_found / game_start / connect
- * listeners. Unmounting removes the listeners but does NOT emit leave_queue.
- */
-export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameStart }: MatchmakingOptions) {
-    const [searching, setSearching] = useState(false);
+/** Ack callback for join_queue: a refused join ends the search and says why (ACKS). */
+function queueRefusal(setSearching: (value: boolean) => void, onMatchFailed?: (reason: string) => void) {
+    return onRejected((code) => {
+        setSearching(false);
+        onMatchFailed?.(code);
+    });
+}
+
+/** Seconds spent searching; resets to 0 when the search stops. */
+function useSearchTimer(searching: boolean): number {
     const [searchTime, setSearchTime] = useState(0);
 
     useEffect(() => {
@@ -33,6 +41,24 @@ export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameSt
         return () => clearInterval(interval);
     }, [searching]);
 
+    return searchTime;
+}
+
+/**
+ * Queue state, the search timer and the match_found / match_failed / game_start / connect
+ * listeners. Unmounting removes the listeners but does NOT emit leave_queue.
+ */
+export function useMatchmaking({
+    socket,
+    router,
+    profile,
+    getTcMinutes,
+    onGameStart,
+    onMatchFailed,
+}: MatchmakingOptions) {
+    const [searching, setSearching] = useState(false);
+    const searchTime = useSearchTimer(searching);
+
     useEffect(() => {
         if (!socket) return;
 
@@ -41,38 +67,45 @@ export function useMatchmaking({ socket, router, profile, getTcMinutes, onGameSt
             router.push(`/game/${data.id ?? data.game_id}`);
         };
 
+        // The pairing fell through on the server: stop "searching" and say so.
+        const onMatchFailure = (data: { reason: string }) => {
+            setSearching(false);
+            onMatchFailed?.(data.reason);
+        };
+
         const onGameStarted = (data: { id: string }) => {
             onGameStart();
             router.push(`/game/${data.id}`);
         };
 
-        // Re-queue after a reconnect. NOTE: a different payload shape from Play Online
-        // ({ id } only, minutes without "+inc", is_rated: true) — preserved as-is.
+        // Re-queue after a reconnect, for the same time control (base and increment) as before.
         const onConnect = () => {
             if (!profile || !searching) return;
             const { mins, inc } = getTcMinutes();
             socket.emit('join_queue', {
                 user: { id: profile.id },
-                time_control: String(mins),
+                time_control: formatTimeControl({ minutes: mins, incrementSeconds: inc }),
                 increment: inc,
                 is_rated: true,
             });
         };
 
         socket.on('match_found', onMatchFound);
+        socket.on('match_failed', onMatchFailure);
         socket.on('game_start', onGameStarted);
         socket.on('connect', onConnect);
 
         return () => {
             socket.off('match_found', onMatchFound);
+            socket.off('match_failed', onMatchFailure);
             socket.off('game_start', onGameStarted);
             socket.off('connect', onConnect);
         };
-    }, [socket, router, profile, searching, getTcMinutes, onGameStart]);
+    }, [socket, router, profile, searching, getTcMinutes, onGameStart, onMatchFailed]);
 
     const joinQueue = (payload: JoinQueuePayload) => {
-        socket?.emit('join_queue', payload);
         setSearching(true);
+        socket?.emit('join_queue', payload, queueRefusal(setSearching, onMatchFailed));
     };
 
     const cancelSearch = () => {

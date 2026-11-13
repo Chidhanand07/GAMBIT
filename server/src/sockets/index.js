@@ -56,6 +56,7 @@ function clientOf(socket) {
  * @property {Parameters<typeof registerChatHandlers>[1]['chatService']} chatService
  * @property {import('./handlers/social').SocialHandlerService} socialService
  * @property {(token: string) => Promise<string | null>} verifyToken access token → user id (null when invalid)
+ * @property {(token: string) => number} tokenDeadline when a socket opened with the token must be closed
  */
 
 /**
@@ -65,7 +66,7 @@ function clientOf(socket) {
  * @param {SocketDeps} deps
  */
 function registerSocketHandlers(io, deps) {
-    io.use(createHandshakeAuth({ verifyToken: deps.verifyToken }));
+    io.use(createHandshakeAuth({ verifyToken: deps.verifyToken, tokenDeadline: deps.tokenDeadline }));
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
         const client = clientOf(socket);

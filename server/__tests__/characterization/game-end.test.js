@@ -346,14 +346,17 @@ describe('finalization details', () => {
         expect(JSON.parse(reviewCalls()[0][1].body).time_control).toBe('10');
     });
 
-    test('clocks are written from Redis as-is (time since lastMoveAt is not deducted)', async () => {
+    test('the final clocks include the time used since the last move [G11]', async () => {
         const { game, white } = await ctx.seatedGame({ whiteClockMs: 50000, lastMoveAt: Date.now() - 20000 });
         dbFinishAnswers();
         const ended = once(white, 'game_end');
         white.emit('resign', { game_id: game.id });
         await ended;
         await waitFor(() => finishUpdates().length === 1, 500, 'db update');
-        expect(finishUpdates()[0][0][1].white_clock_ms).toBe(50000);
+        // 50 s on the clock, 20 s into the move when White resigned (was written as 50000).
+        const written = finishUpdates()[0][0][1].white_clock_ms;
+        expect(written).toBeLessThanOrEqual(30000);
+        expect(written).toBeGreaterThan(28000);
     });
 
     test('no moves → no review request; rating still processed', async () => {

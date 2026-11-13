@@ -47,6 +47,24 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
 | [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
 | [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
+| [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
+| [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
+| [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
+| [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
+| [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
+| [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
+| [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
+| [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
+| [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
+| [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
+| [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
+| [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
+| [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
+| [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
+| [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
+| [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
+| [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
+| [F-044](#f-044) | Stale-game detection reads the last move from `moves`, lazily; a failed read keeps the game | M2 | G22 |
 
 ---
 
@@ -1048,3 +1066,536 @@ instead of one file per ADR under `docs/refactor/adr/`.
   needed: server secrets are read at call time, not at build time. Without this step nothing
   in CI would notice a change that breaks the production build, which is the point of NX-14.
 - **Cost.** About half a minute of CI time (the build takes ~10 s locally with Turbopack).
+
+## F-027
+
+**One time-control model for the game server and the web app: `shared/time-control.json`, canonical `"M+S"`, one set of category thresholds (TIME-CONTROL: G4, F7, F9).**
+
+- **Context.** A time control was a free string parsed with `parseInt` in five places.
+  - *G4*: `join_queue` carries `time_control: "10"` plus a separate `increment`; the clock only
+    read an increment written inside the string, so the increment was silently dropped, and
+    the queue paired players on the string alone ("10" with any increment).
+  - *F7*: three different minute → category tables: game page `<3 / <10 / ≥30`, profile and
+    stats `≤2 / ≤5 / ≤15`, server rating pools `≤2 / ≤5 / ≤60`. The lobby's "Classical 30 min"
+    card started games the server rated as *rapid*.
+  - *F9*: the private-game dialog sent the option id (`"rapid"`, `"daily"`) as the time
+    control; `parseInt("rapid")` is `NaN`, so every such game was played as 10 minutes.
+  - `"-5"` produced a negative clock, `"0"` meant 10 minutes in some helpers and 0 in others.
+- **Decision: the model.** A time control is `{ minutes, incrementSeconds }`, written
+  `"M+S"` (always with the increment: `"10+0"`). Limits: 1–1440 minutes, 0–180 seconds.
+  Categories by base minutes: **bullet ≤ 2, blitz ≤ 5, rapid ≤ 29, classical ≥ 30.**
+  - Two entry points on each side. `parseTimeControl` is strict and is used for anything a
+    client sends: an invalid value is refused (`invalid_payload` / 400), never defaulted.
+    `timeControlOf` is for values the server stored itself: an old or unreadable row still
+    gets a playable clock (the default, 10+0).
+  - New games store the canonical text. Old rows (`"10"`) keep working: both forms parse.
+- **Why these thresholds.** They are the smallest change that makes every surface agree with
+  the lobby's own cards (1 → bullet, 3 → blitz, 10 → rapid, 30 → classical). Bullet and blitz
+  are exactly what the server already used for ratings, so those pools are untouched. What
+  changes: on the server, 30–60 minute games now count for the *classical* rating instead of
+  rapid (which is what the lobby has always called them); on the profile, 16–29 minutes is
+  rapid instead of classical; on the game page, 6–9 minutes shows the rapid rating instead of
+  blitz. Past games are not re-rated; only which column the next game updates changes.
+  Categories ignore the increment on purpose: weighting it (as Lichess does) would move
+  existing presets between pools, which is a product decision, not a bug fix.
+- **Decision: "defined once" across two deploy roots.** The game server is built from
+  `server/` (Railway) and the web app from `frontend/` (Vercel); neither can import a file
+  above its own directory, and there is no workspace package. So:
+  - `shared/time-control.json` is the only file to edit: limits, default, thresholds, lobby
+    presets, and a list of contract `cases` (valid and invalid inputs with expected results);
+  - `node scripts/sync-shared.js` copies it to `server/src/domain/timeControl.data.json` and
+    `frontend/lib/chess/timeControl.data.json` (`--check` fails when a copy is stale);
+  - each side has a small module that implements the rules over that data, and each side's
+    test suite (a) asserts its copy is byte-identical to the shared file and (b) runs the same
+    contract cases (TEST-08). A change on one side that the other does not follow fails CI.
+  - Options not taken: a workspace package (changes both hosts' build roots and install
+    steps); importing across directories (breaks the Docker build context and the Turbopack
+    root set in F-024).
+- **Where the canonical form is produced.**
+  - Server: `matchmakingService` (queue entries carry `"M+S"` and the increment; pairing
+    compares both), `privateGameService` (rematch, challenge and invite games), and the socket
+    schemas, which range-check `time_control` (and `join_queue`'s separate increment) through
+    `services/timeControlRules.js`. That file exists because entry adapters may not import
+    `domain/` directly (dependency-cruiser rule `entry-adapters-call-services-only`).
+  - Web: the lobby sends `"M+S"` for presets and custom; the private-game dialog sends the
+    option's real time control; `POST /api/games/private/create` canonicalises and
+    range-checks. It still accepts a preset *name* and maps it to the preset's time control,
+    so a tab opened before the deploy keeps working (backwards-compatible rollout).
+- **Display.** The UI printed the stored string followed by " min". `displayTimeControl`
+  prints `"10 min"` or `"5+3"` for both old and canonical values.
+- **F8, touched only where required (brief rule 6).** The lobby's reconnect re-queue sent only
+  the minutes (`"12"` for a custom 12+5), which now would pair the player in a different pool
+  than the one they asked for. It sends the canonical value. The other F8 quirks (`{ id }`-only
+  user, forced `is_rated: true`, no `leave_queue` on unmount) are left for the last phase.
+- **Behaviour changes users can see.** Increments chosen in the lobby actually apply. Players
+  are only paired with someone who chose the same increment. A "Classical" (30 min) game
+  updates the classical rating. Private "Rapid" / "Classical" / "Bullet" / "Daily" games are
+  played at that speed, not at 10 minutes. "Daily" is a 1440-minute clock, as its card always
+  implied; there is still no per-move correspondence mode.
+- **Not verified.** No browser run; the queue was exercised through the socket tests only.
+
+## F-028
+
+**Clocks are stored in one column pair, `white_clock_ms` / `black_clock_ms`, written with every move; the legacy pair is left in place, unused (G2).**
+
+- **Context.** `games` has two pairs of clock columns. The disconnect snapshot wrote
+  `white_time_ms` / `black_time_ms`; the restore after a server restart read
+  `white_clock_ms` / `black_clock_ms`, which were written only when a game ended. So a game
+  restored mid-play always came back with full starting clocks.
+- **Decision.**
+  - Canonical pair: `white_clock_ms` / `black_clock_ms` (the pair in the initial schema, and
+    the one the finalizer and the restore already used).
+  - The server writes that pair in three places: with every move (together with the FEN),
+    at a disconnect, and when the game ends. It never reads or writes `*_time_ms`.
+  - The web DTO no longer exposes `*_time_ms`.
+- **Why write the clocks with every move.** "Read and written consistently" is only useful if
+  the row is current. The move already updates the `games` row (the FEN), so this adds two
+  integers to an existing statement, not a new query.
+- **Why the legacy columns are not dropped here.** No migration is needed to *fix* G2, and
+  dropping columns the previous release still writes would turn its (fire-and-forget)
+  disconnect snapshot into a logged error during a rollback. They are dead weight, not a
+  hazard. Dropping them is a one-line migration for a later release, once this one is the
+  oldest version that can run; it is listed in the report's remaining issues.
+- **Behaviour change.** A game restored after a server restart resumes with the clocks of
+  its last move instead of full clocks.
+- **Tests.** The characterization case "writes white_time_ms/black_time_ms (BUG pinned)" now
+  asserts the canonical pair; a move's row update includes both clocks; a round-trip test on
+  `gameStateFromRow`; the DTO test asserts the legacy pair is not exposed.
+
+## F-029
+
+**Timeouts and abandonment end games through the single finalizer (G3).**
+
+- **Context.** After S3 there were still two ways to finish a game. Moves and resignations
+  went through `gameFinalizer`. The clock had its own `finalizeExpiredGame`, which wrote only
+  `status`, `winner_id`, `ended_at` and `final_fen` (no `result`, no clocks), never triggered
+  the game review, did not store the reason in Redis, did not clear the session links, and
+  sent a `game_end` payload with two extra fields on flag fall and none on abandonment.
+- **Decision.**
+  - `gameFinalizer.endGameIf(gameId, decide)`: `decide(game)` runs on the state read inside the
+    per-game lock, in the same atomic active → completed transition, and returns a verdict or
+    null. `endGame(gameId, verdict)` is `endGameIf(gameId, () => verdict)`.
+  - `clockService` no longer finalizes anything. A tick broadcasts the clock and, when its
+    pure `clockVerdict` says the game is over, calls `finalizer.endGameIf` with that same
+    function, so the verdict is re-taken on fresh state (the guarantee F-010 added: a move or
+    a reconnect that lands first wins).
+  - `REASON.TIME` and `REASON.ABANDONMENT` join the other reasons in `domain/adjudication`.
+  - The composition root builds one finalizer and gives it to both the game service and the
+    clock. The legacy facade `services/clock.js` only owns the interval now;
+    `finalizeExpiredGame` is deleted.
+- **Why a function and not a verdict.** The clock's verdict depends on the time and on state
+  that changes every move. Passing the verdict would reintroduce the stale-read race; passing
+  the decision keeps one transition and one place that knows how a game ends (SOLID-01).
+- **Behaviour changes.**
+  - Games that end on time or by abandonment now have `result` and both clock columns in the
+    database, get a game review, and show their real reason ("Time", "Abandonment") when a
+    player re-joins later (it was "Game over").
+  - The `game_end` payload is the same five fields for every ending. The `is_rated` and
+    `time_control` extras on flag fall are gone; nothing in the web app read them.
+  - A rating failure after a clock ending is logged as `[clock] game <id> error: …`.
+
+## F-030
+
+**One view of the clocks; a disconnect charges elapsed time once, and a reconnect never starts a clock that was not running (G8, G9).**
+
+- **Context.** Clock state is `whiteClockMs` / `blackClockMs` (time left as of `lastMoveAt`)
+  plus `lastMoveAt` (null before the first move). Three functions read it differently:
+  `clocksAt`, the ticker's `tickerSnapshot`, and an inline special case in the state sync.
+  - *G9*: on disconnect the service stored the already charged clocks but kept `lastMoveAt`;
+    the ticker then subtracted `now - lastMoveAt` again in every `clock_sync`, so the
+    disconnected side's clock visibly kept falling, twice as fast as it had run.
+  - *G8*: on reconnect the service set `lastMoveAt = now` unconditionally. For a game with no
+    move yet that *started* White's clock.
+- **Options for G9** (the brief names both): (a) store the charged time and reset
+  `lastMoveAt`; (b) store the raw time and keep `lastMoveAt`, subtracting the absence later.
+- **Decision.** (a), with the rule in one place, `domain/clock.js`:
+  - `isClockRunning(state)`: a move has been made **and** nobody is disconnected.
+  - `clocksAt(state, now)`: the only view of the clocks. It charges the side to move only
+    while the clock is running; otherwise the stored values are the answer. The ticker, the
+    state sync and the snapshot all call it. `tickerSnapshot` is deleted.
+  - `freezeClocks(state, now)` (disconnect): charged clocks, `lastMoveAt = now` if the clock
+    had started, else null.
+  - `resumeClocks(state, now)` (reconnect): `lastMoveAt = now` if the clock had started, else
+    null.
+- **Why (a).** With (b) every reader has to know about the absence, and the value in the
+  database (written at disconnect, F-028) would not be the real remaining time. With (a) the
+  stored clocks are always true as of `lastMoveAt`, and "frozen" is a single predicate.
+- **Behaviour changes.**
+  - While a player is disconnected both clocks stand still for everyone; the time away is not
+    charged to either side (that part is unchanged, it is the 20 s grace period).
+  - `game_state_sync.clockActive` is false while a player is disconnected (it was true). The
+    web client uses it to decide whether to count down locally.
+  - Reconnecting before the first move leaves both clocks full and stopped.
+- **Tests.** Pure tests for the four functions, including the 3 s + 10 s away + 2 s case; the
+  characterization cases "clock_sync subtracts the elapsed time AGAIN (pinned)" and
+  "lastMoveAt is reset to now … starts white's clock before the first move (pinned)" now
+  assert the correct behaviour.
+
+## F-031
+
+**A side that never makes its first move gets the game aborted, unrated, after 30 seconds (FIRST-MOVE).**
+
+- **Context.** A game with no move had no running clock, and the ticker skipped it, so a
+  player who was paired and walked away left the opponent in a game that never ended.
+- **Decision.**
+  - `FIRST_MOVE_TIMEOUT_MS = 30000` in `domain/clockVerdict.js`. White has 30 s from the moment
+    the game becomes active; once White has moved, Black has 30 s from that move. After both
+    sides have moved the rule no longer applies.
+  - The game state gains `startedAt` (set when the game is created, or when it is restored
+    from the database after a restart, which gives a fresh 30 s).
+  - The verdict is `{ winner: null, reason: 'Aborted', aborted: true }`. The finalizer stores
+    Redis `status: 'completed', result: 'aborted'`, writes the row with `status = 'aborted'`
+    (a status the schema has always listed) and no result or winner, and does **not** rate or
+    review the game. `game_end` carries `result: 'Aborted'`.
+  - Time-based endings are now one pure, ordered table in the domain (`clockVerdict`):
+    abandonment → first-move timeout → flag fall. The clock service only ticks; it walks every
+    active game, started or not, and broadcasts `clock_sync` only once a clock has started.
+- **Why abort instead of a win for the waiting player.** No chess was played. Awarding rating
+  points for it would make "pair and wait" a way to farm rating against people with a bad
+  connection, and "pair and leave" a way to give points away. An abort costs nobody anything.
+- **Why Black's window is 30 s although Black's clock is already running.** After White's
+  first move Black's clock counts down normally. In a 10-minute game a Black player who never
+  shows up would otherwise make White wait 10 minutes for a flag fall. If Black's clock is
+  shorter than 30 s the first-move rule still decides (abort), because it comes first in the
+  table: a game with one move is not a game.
+- **Disconnects.** While a player is disconnected the abandonment rule decides (20 s grace);
+  what happens when that grace expires before both sides have moved is G10.
+- **States created before this release** have no `startedAt` and are simply not subject to the
+  rule; nothing is aborted retroactively at deploy time.
+- **Web client.** `GameOverModal` treats `Aborted` as its own outcome: title "Game aborted",
+  the line "No game was played · not rated", neutral icon. Before, any result that was not a
+  win or a draw rendered as "You Lost". There is no on-board countdown for the 30 s; that is a
+  UI addition for a later phase.
+- **Not verified.** No browser run of the modal.
+
+## F-032
+
+**A disconnect before both sides have moved is adjudicated when the grace period ends, as an abort (G10).**
+
+- **Context.** The ticker only looked at games whose clock had started (`lastMoveAt` set). A
+  player who disconnected before the first move was therefore never adjudicated: the opponent
+  saw "disconnected, 20 s" and then nothing, forever.
+- **What FIRST-MOVE already changed.** The ticker now walks every active game, so the
+  abandonment rule was reached for these games too, and it awarded the opponent a (possibly
+  rated) win for a game in which no move, or one move, had been played.
+- **Decision.** In `domain/clockVerdict`, when the 20 s grace period of a disconnected player
+  runs out: if each side has made at least one move, the opponent wins by Abandonment (as
+  before); otherwise the game is **aborted**: no winner, not rated, not reviewed. The
+  threshold ("one move each") is the same one that ends the first-move rule (F-031).
+- **Why not a win.** For the same reason as F-031: nothing was played, and a rated result for
+  an unplayed game is exploitable in both directions. It also makes the two rules agree: it
+  does not matter whether the absent player's tab was closed (disconnect, 20 s) or merely idle
+  (first-move timeout, 30 s); the game is aborted either way.
+- **Tests.** Pure cases in `domain/clockVerdict.test.js`; a ticker case; the characterization
+  case that pinned "never adjudicated (BUG pinned)" asserts the abort. The existing
+  abandonment tests now use a position with one move each, because that is when the rule
+  awards a win.
+
+## F-033
+
+**A move that arrives after the mover's flag has fallen is refused, and the game ends on time immediately (G7).**
+
+- **Context.** The ticker looks at each game once a second. A move sent after the mover's
+  clock reached zero but before the next tick was accepted: the clock was clamped to 0, the
+  increment was added, and the player went on with fresh time.
+- **Decision.** Inside the per-game lock, after the authorization checks and before the
+  legality check, `moveRecorder` asks whether the mover's remaining time at that instant is
+  ≤ 0 (only for a clock that is running; a game before its first move, or frozen for a
+  disconnect, cannot time out). If so the move is rejected with `time_expired`; the game
+  service then calls `finalizer.endGameIf` with the same `clockVerdict` the ticker uses, so
+  the game ends as "Time" for the opponent right away, through the one finalizer.
+- **Why reject and finalize, not just reject.** Otherwise the outcome would depend on which
+  comes first, the player's next attempt or the tick, and the opponent would wait up to a
+  second for a result that is already decided.
+- **Boundary.** Exactly 0 ms left is too late; 1 ms is in time. The increment is added only
+  after a move is accepted, so it cannot rescue a move that was not.
+- **Client.** The sender gets `move_rejected { reason: 'time_expired' }` and the `game_end`
+  broadcast; no extra state sync is sent because the game is over.
+
+## F-034
+
+**Final clocks are the clocks at the moment the game ended; the other two parts of G11 were already fixed by S3 (G11).**
+
+- **G11 has three parts** (docs/refactor/REPORT.md): (1) the reason was not stored in Redis;
+  (2) the persisted clocks lacked the elapsed deduction; (3) the client's `time_control` /
+  `is_rated` were used when Redis lacked them.
+- **(1) and (3): already fixed** by the high-risk phase (S3, F-008): the finalizer stores
+  `reason` with the finished state, and it takes the time control and the rated flag only
+  from the stored game; no payload reaches it. New tests state both explicitly, and they
+  passed before any change in this commit, which is the evidence.
+- **(2): fixed here.** The stored clocks are "time left as of the last move". When a game
+  ended by resignation, flag fall or abandonment, those values were written to the database
+  as the final clocks, so a player who resigned seven seconds into a move kept those seven
+  seconds, and a player who lost on time was recorded with time left. The finalizer now takes
+  `clocksAt(game, now)` inside the transition and stores that, both in Redis and in the row:
+  the loser of a flag fall has 0.
+- **Frozen and unstarted clocks** are stored as they are (`clocksAt` does not charge them).
+- **`now` is injected** into the finalizer (default `Date.now`), like in the other services.
+
+## F-035
+
+**Chat reads the field the web client sends, bounds it, and is closed once the game is over (G6).**
+
+- **Context.** The client sends `{ game_id, from, text }`. The server persisted
+  `data.message`, so every chat line was stored with a NULL content, and it relayed the whole
+  payload as received. Chat kept working after the game had ended.
+- **Decision.**
+  - Schema: `text` (or an older `message`, read as the text) is trimmed and must be 1–500
+    characters; otherwise `invalid_payload`.
+  - Service: the same `playerRejection` rule moves and resignations use: the caller must be
+    one of the two players of an **active** game. A refusal is an ack with the reason
+    (`not_a_player`, `game_not_active`, `game_not_found`); it used to be silence.
+  - The relayed `chat_message` is a fixed shape: `{ game_id, from?, text, from_user_id }`.
+    `from_user_id` is the verified user. Nothing else a client adds is relayed.
+  - The service takes the verified user id as an argument (the handler has it), so it no
+    longer needs the session registry.
+- **Closed after the game.** The brief asks for it. A finished or aborted game's room is a
+  result screen; a channel that stays open there has no moderation and no end.
+- **Left as is: `from`.** The display name next to a message is still the one the client
+  sends (bounded to 64 characters). Identity is `from_user_id`; deriving the shown name from
+  it is a web-client change (the game page would map the id to the player's username) and is
+  listed for the last phase.
+
+## F-036
+
+**`match_found` is a minimal DTO, a failed game insert is reported with `match_failed`, and a rating of 0 is a rating (G12).**
+
+- **Context.** Three small defects in `matchmakingService.createGame`:
+  1. `match_found.opponent` was the raw queue entry: the opponent's socket id, queue timing,
+     time control and rated flag. The game part was the raw inserted row.
+  2. If the `games` insert failed, both players had already been removed from the queue, got
+     no event, and kept showing "searching" forever.
+  3. `rating: user.rating || 1200` turned a rating of 0 into 1200.
+- **Decision.**
+  1. `opponent` is `pairing.opponentView(entry)`: `{ user_id, username, rating,
+     isProvisional }`. The game part is `toPublicGame(row)`, the allow-list the join endpoints
+     already use (S8).
+  2. On failure (an error result *or* a throw, which is also caught now so one failed pair
+     cannot abort the whole pairing pass) both players receive
+     `match_failed { reason: 'game_creation_failed' }`. They stay out of the queue.
+  3. `??`.
+- **Notify, not re-queue** (the brief allows either). If the database is failing, re-queued
+  pairs would be paired and re-inserted every second, each attempt logging an error and adding
+  load to the thing that is failing. Telling the players is honest and lets each decide; the
+  lobby stops the search and shows a toast ("could not start the game, please search again").
+- **Web client.** `useMatchmaking` listens for `match_failed`; `MatchFoundPayload.opponent` is
+  typed as the four public fields. Nothing in the client read the removed fields.
+
+## F-037
+
+**Upstream failures are reported as errors with a status and a code; the username check fails closed (G14).**
+
+- **Context.**
+  - `POST /api/analysis/engine` returned whatever JSON the engine sent with status 200, also
+    when the engine answered 4xx/5xx. Unreachable engine → 500 with the raw socket error text.
+  - `GET /api/users/check-username` used `.single()`, for which "no row" is itself an error,
+    and read only `data`: any database failure answered `{ available: true }`.
+- **Decision.**
+  - `services/errors.js`: `AppError(code, httpStatus)`, the operational error NODE-07 asks for.
+    Services throw it; `http/respond.js` `sendError` answers `{ error: code }` with that
+    status. Anything else that is thrown is logged and answered with a generic
+    `500 { error: 'internal_error' }`: internal messages (socket errors, parser text, SQL)
+    no longer reach the client.
+  - Analysis: engine 400/404/422 → `400 engine_rejected`; 429/503 → `503 engine_busy`;
+    anything else not OK, unreachable, or an unreadable body → `502 engine_unavailable`.
+    A 401/403 from the engine means *our* shared key was refused, so it is a 502, not passed
+    on as if the caller were unauthorized.
+  - Username: the repository uses `.maybeSingle()`, so an `error` is always a real failure;
+    the service turns an error result or a throw into `503 username_check_unavailable`.
+  - Both routes validate their input with zod first (`http/schemas.js`): a FEN is a string of
+    at most 100 characters, depth an integer 1–30, a username 1–64 characters. Invalid →
+    `400 { error: 'invalid_request' }` before any dependency is called.
+- **Why 503 and not `available: false`.** "Taken" would also be a lie, and it would tell a
+  user to give up a name that may be free. The signup form already treats a non-OK answer as
+  "not checked" (no tick, no cross), and signup itself enforces uniqueness in the database.
+- **Compatibility.** Response *bodies* for failures changed shape (`{ error: <code> }`; they
+  used to be `{ error: <message> }` or the engine's body). The analysis page does not check
+  the status and renders missing fields as 0.0, exactly as it did for an error body before
+  (F14, a low-risk item, untouched). A depth of 0 used to mean "default"; it is now invalid,
+  and the web client always sends 18.
+- **Not done here.** Routes still catch and call `sendError` themselves; a single Express
+  error middleware replaces that with the Express 5 upgrade (M4, EXPRESS-5).
+
+## F-038
+
+**Private games: status checks around the invite link (G15).**
+
+- **Three defects.**
+  1. The creator opening their own invite link and pressing "join" got the waiting row back
+     (correct) and the route then announced `game_start` to the game room (wrong): the
+     creator's browser navigated into a game with no opponent.
+  2. `GET /api/games/join/:token` served the invite page for a game in any status, including
+     finished ones.
+  3. An invite with `expires_at = null` was read as `new Date(null)`, i.e. 1970: "expired".
+- **Decision.**
+  1. `socialService.announceGameStart` announces only a game whose status is `active`. The
+     check is in the one function that emits `game_start`, so every caller gets it.
+  2. `getGameByToken` (what the GET route uses) returns the game only while it is `waiting`.
+     Joining uses `findInvitedGame`, the lookup in any status, so a second player who is too
+     late still gets the specific "Game already started" answer instead of "invalid token".
+  3. `isExpired(null)` is false: an invite without an expiry does not expire. Every invite
+     the code creates has one (48 h); null can only come from a row written by hand or by an
+     older version, and "valid" is the reading that does not break a link someone was given.
+- **Behaviour change.** An old invite link to a game that has started or ended now shows the
+  "invite not found or expired" screen instead of an invite card whose button fails.
+
+## F-039
+
+**The abandonment countdown starts only when all of a player's sockets for that game are gone (MULTI-SOCKET).**
+
+- **Context.** The registry kept one socket per user and "the user's active game". Any socket
+  of a player disconnecting (a second tab closed, an old socket timing out after the new one
+  had connected) froze the clocks and started the 20 s countdown, while the player was still
+  sitting at the board in another tab. Listed as deferred in F-010.
+- **Decision.**
+  - The session registry records sockets per user and, per socket, the games that socket is
+    *at the board of*. A socket is linked to a game when it joins it as a player
+    (`join_game`), or when it resumes the game on connect (it cleared its own disconnect).
+  - `unregister(socketId)` returns `orphanedGames`: the games that socket was linked to in
+    which its user now has no linked socket left. The disconnect handler calls
+    `gameService.handleDisconnect(userId, gameId)` for exactly those.
+  - `handleDisconnect` takes the game id; it no longer looks up "the user's active game".
+- **What counts as "a socket for that game".** A socket that joined the game, not any socket
+  of the user. A lobby tab does not keep a game alive: if the only tab showing the board is
+  closed, the opponent should not wait for a flag fall because another tab happens to be open.
+- **Edge: paired but never arrived.** A player who is matched and closes the tab before the
+  game page has joined has no linked socket, so no countdown starts. The first-move timeout
+  (F-031) aborts that game after 30 s.
+- **Per process.** The registry is in memory; with two server instances a player's tabs can
+  be on different instances. That is addressed in the scaling phase (M4, MULTI-INSTANCE).
+
+## F-040
+
+**Nothing in the session registry outlives its reason (G17).**
+
+- **Context.** `userActiveGame` (user → game) was only cleared by the move/resign finalizer.
+  Games that ended on time or by abandonment, and games joined after they were over, left an
+  entry per player for the life of the process.
+- **What earlier items already fixed.** G3 routes every ending through the finalizer, which
+  calls `sessions.clearGame`. MULTI-SOCKET removes a socket's entries when it disconnects.
+- **What this commit adds.**
+  - `join_game` links a socket only to a game that is `active`; joining a finished game
+    (to see its result) creates no link.
+  - When a player's last socket leaves a game and the game is not there or not active any
+    more (it expired from Redis, or was closed by another writer such as the web app's
+    stale-game cleanup), `handleDisconnect` calls `sessions.forgetGame(userId, gameId)`.
+  - `sessions.stats()` reports the four map sizes; a test plays 1000 join/vanish/disconnect
+    cycles and asserts all four are 0 afterwards.
+- **Why keep the link across a disconnect of a live game.** It is what lets a player who
+  reconnects on any page resume the game and cancel the countdown. It is removed when the
+  game ends, which the countdown guarantees happens within 20 seconds.
+
+## F-041
+
+**A socket lives no longer than the token it was opened with; the client comes back with a fresh one (TOKEN-LIFETIME).**
+
+- **Context.** The handshake verified the access token once (F-004). A socket then stayed
+  authenticated for as long as the TCP connection lived: hours after the token had expired,
+  and after a sign-out elsewhere or a ban.
+- **Decision.**
+  - *Deadline.* `domain/accessToken.socketDeadline(token, now)`: the token's `exp` claim, but
+    never later than one default access-token lifetime (1 h) from now. The token has already
+    been verified by Supabase Auth at that point; reading `exp` from it decides only how long
+    the connection may live, never whether the token is genuine. A token whose `exp` cannot be
+    read gets the 1 h cap, not "forever".
+  - *Server.* The handshake stores the deadline in `socket.data.tokenExpiresAt`. The session
+    handler starts one timer per socket; at the deadline it emits
+    `token_expired { reason: 'token_expired' }` and calls `socket.disconnect(true)`.
+  - *Client.* `lib/socket/connection.ts`: on a disconnect with socket.io's reason
+    `io server disconnect` it calls `socket.connect()`. The handshake `auth` callback runs
+    again and asks Supabase for the session, which by then holds a refreshed token.
+  - *Not an abandonment.* A disconnect the server caused this way must not freeze the clocks
+    and show the opponent a countdown. The session handler therefore waits
+    `TOKEN_RECONNECT_GRACE_MS` (5 s) and starts the countdown only for games the player still
+    has no socket in. The game page re-joins on every connect, so normally nothing is seen
+    except a state re-sync.
+- **Why disconnect instead of re-verifying in place.** A long-lived socket that accepts new
+  tokens needs its own protocol (a refresh event, replay protection, a rule for late
+  refreshes). Closing and re-opening reuses the one verified path that already exists.
+- **Cost.** One reconnect per player per token lifetime (an hour by default).
+- **Not verified.** The server side is tested end to end against the real server with a
+  token that expires after 400 ms. The client half is tested against a fake socket; a real
+  browser session crossing a real token expiry mid-game has not been observed.
+
+## F-042
+
+**Redis errors are errors; the database write of a finished game is retried; a game is announced as over only after Redis has committed it (ERRORS).**
+
+- **Context.** `gameStateRepository` logged and swallowed every Redis error: `getGame` returned
+  null ("no such game") when Redis was down, `setGame` resolved as if it had written, the
+  active-set calls returned `[]` or nothing. A move could be broadcast without being stored.
+  The finalizer treated a database error exactly like "already finalized": no log, no rating,
+  the row stayed `active` (deferred in F-010).
+- **Decision.**
+  - *Store.* Every call rejects when Redis fails (and `getGame` when the stored value is not
+    JSON). Callers already handle a rejection: socket handlers go through `wrap()`, which acks
+    `{ ok: false, error: 'internal_error' }` and logs; the ticker logs per game and tries again
+    next second; HTTP routes answer 500 through `sendError`. A move whose write fails is
+    therefore *not* broadcast: `mutateGame` rejects before `moveRecorder` emits `move_made`.
+  - *Finalizer, order of effects.* 1) the atomic active → completed transition in Redis (if it
+    fails, the call rejects and nobody is told anything), 2) `game_end` to the room, 3) session
+    cleanup, 4) leaving the active set (a failure there is logged; the ticker ignores finished
+    games anyway), 5) the database row, rating and review.
+  - *Database row.* `finishIfActive` is tried up to 3 times with pauses of 200 ms and 800 ms; an
+    error result and a thrown call are both retried; "no row" (already finalized) is not an
+    error and is not retried. If all attempts fail, the error is logged with the game id
+    (`[finalizer] game <id>: result not persisted after 3 attempts: …`) and the game is **not
+    rated**, because the rating is only idempotent together with that row (RATING-ATOMIC, M3).
+- **Why announce before the database.** Redis is the authority for live games (NODE-17). Once
+  it says "completed", no move can be applied any more; holding the players' result screen
+  until Postgres answers would make an outage of the database look like a frozen game.
+- **What is still missing.** A finished game whose row could not be written stays `active` in
+  the database until the web app's stale-game cleanup or a manual fix; an outbox/retry queue
+  is the full answer and is listed for the last phase. The log line names the game id so it
+  can be found.
+
+## F-043
+
+**Client emits that the server can refuse wait for its ack, and a refusal is shown to the player (ACKS).**
+
+- **Context.** Since S15 every game-server handler acks `{ ok: true }` or `{ ok: false, error }`,
+  but the web client never passed an ack callback: a refused resign, a chat message in a
+  finished game, or a queue join with an invalid time control did nothing visible.
+- **Decision.**
+  - `lib/socket/ack.ts`: `onRejected(handler)` builds the ack callback (it fires only on
+    `ok: false`; a missing reason is `internal_error`), and `rejectionMessage(code)` turns a
+    reason into one sentence. Unknown codes get a generic sentence; codes are never shown raw.
+  - Game page: `make_move`, `resign`, `send_message`, `rematch_request`, `rematch_accept` and
+    `rematch_decline` pass the callback; the page shows the message with the existing toast
+    (`notify` is injected into the commands and the board hook). A refused rematch request
+    also resets the button from "sent" to idle. For a refused move the board is already
+    restored by the server's `move_rejected` + state resync (S1); the toast says why.
+  - Lobby: a refused `join_queue` stops the "searching" state and reports the reason through
+    the same callback as `match_failed` (F-036).
+- **Not covered (logged for the last phase).** There are no draw offers (F-009). The
+  challenge page and the challenge banner (`challenge_request` / `_accept` / `_decline`) and the
+  lobby's automatic re-queue after a reconnect still emit without an ack. No timeout is set on
+  acks: if the server never answers, nothing is shown (as before).
+
+## F-044
+
+**Stale-game detection uses the time of the last move, read from `moves` only when needed; a failed read keeps the game (G22).**
+
+- **Context.** `GET /api/games/active` closes an "active" game that is evidently dead. "Has
+  moves" was read from `white_time_ms` / `black_time_ms`, which were only written at a
+  disconnect and are not written at all since F-028, so every active game older than two hours
+  was auto-abandoned, mid-play included.
+- **Options.** (a) infer "has moves" from `white_clock_ms` / `black_clock_ms` being non-null:
+  says a move happened, not when; (b) the newest `moves.created_at`, queried always; (c) the
+  same, queried only when the game started more than 2 h ago.
+- **Decision.** (c). `lib/server/games.ts` `findLastMove(admin, gameId)`; `isStaleActiveGame`
+  is async. Last activity = the newest move, else `started_at`; stale when that is older than
+  the existing 2 h threshold. The `clock_deadline` branch is unchanged. A failed moves read
+  keeps the game (abandonment is irreversible, SEC-09). No migration.
+- **Why.** A game younger than the threshold cannot be stale, so the common path costs no
+  extra query and the worst case one.
+- **Consequences.** A game whose last move is more than 2 h old is now closed by this route
+  (before, in intent, a game with any move was kept forever). The legacy fields are removed
+  from the column list and the `Game` type.
+- **Not verified.** The `moves` query shape is asserted against the mock only; whether
+  `(game_id, created_at)` is indexed in production was not checked. The server's move insert
+  is fire-and-forget (it logs on failure), so a game whose move rows failed to insert can look
+  idle.
+- *Implemented on a side branch by a helper agent (`wip/medium-web`, commit `44cfb7f`) and
+  cherry-picked here; tests updated: three `GET /api/games/active` fixtures now express "has
+  moves" as a `moves` row instead of `*_time_ms`.*

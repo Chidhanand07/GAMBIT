@@ -76,9 +76,14 @@ describe('createQueueEntry', () => {
         });
     });
 
-    test.each([0, null, undefined])('falsy rating %p → 1200 (`||`, not `??`)', (rating) => {
+    test.each([null, undefined])('missing rating %p → 1200', (rating) => {
         const e = createQueueEntry({ user: { id: 'u', username: 'u', rating }, socketId: 's', now: NOW });
         expect(e.rating).toBe(1200);
+    });
+
+    test('a rating of 0 is a rating, not "missing" (`??`, not `||`) [G12]', () => {
+        const e = createQueueEntry({ user: { id: 'u', username: 'u', rating: 0 }, socketId: 's', now: NOW });
+        expect(e.rating).toBe(0);
         expect(e.isProvisional).toBe(true);
     });
 });
@@ -132,6 +137,21 @@ describe('findOpponent', () => {
         const p = entry('p');
         expect(findOpponent(p, [entry('x', { time_control: '3' })], clock)).toBeNull();
         expect(clock).toHaveBeenCalledTimes(1);
+    });
+
+    test('pairs on base AND increment: 3+0 never meets 3+2 [G4]', () => {
+        const p = entry('p', { time_control: '3+0', increment: 0 });
+        const other = entry('x', { time_control: '3+2', increment: 2 });
+        expect(findOpponent(p, [other], fixedClock)).toBeNull();
+        expect(findOpponent(other, [p], fixedClock)).toBeNull();
+    });
+
+    test('the increment is compared even when two entries carry the same time-control text [G4]', () => {
+        const p = entry('p', { time_control: '3', increment: 0 });
+        const other = entry('x', { time_control: '3', increment: 2 });
+        expect(findOpponent(p, [other], fixedClock)).toBeNull();
+        const same = entry('y', { time_control: '3', increment: 0 });
+        expect(findOpponent(p, [other, same], fixedClock)).toBe(same);
     });
 
     test('reads the clock once for the player and once per same-time-control candidate', () => {

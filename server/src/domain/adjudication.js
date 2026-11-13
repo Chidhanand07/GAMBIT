@@ -13,11 +13,15 @@ const REASON = Object.freeze({
     THREEFOLD_REPETITION: 'Threefold repetition',
     FIFTY_MOVE_RULE: 'Fifty-move rule',
     RESIGNATION: 'Resignation',
+    TIME: 'Time',
+    ABANDONMENT: 'Abandonment',
+    ABORTED: 'Aborted',
 });
 
 /**
  * @typedef {'white' | 'black'} Color
- * @typedef {{ winner: Color | null, reason: string }} Verdict `winner` null is a draw
+ * @typedef {{ winner: Color | null, reason: string, aborted?: boolean }} Verdict `winner` null is a draw,
+ *   unless `aborted`: then no game was played and nothing is rated
  * @typedef {Pick<import('chess.js').Chess, 'turn' | 'isCheckmate' | 'isStalemate' | 'isInsufficientMaterial' |
  *   'isThreefoldRepetition' | 'isDrawByFiftyMoves'>} Position
  */

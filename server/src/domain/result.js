@@ -6,13 +6,15 @@
  */
 
 /**
- * 'white' → 'White wins', 'black' → 'Black wins', anything else → 'Draw'.
+ * 'white' → 'White wins', 'black' → 'Black wins', 'aborted' → 'Aborted',
+ * anything else → 'Draw'.
  * @param {unknown} outcome
- * @returns {'White wins' | 'Black wins' | 'Draw'}
+ * @returns {'White wins' | 'Black wins' | 'Aborted' | 'Draw'}
  */
 function resultLabel(outcome) {
     if (outcome === 'white') return 'White wins';
     if (outcome === 'black') return 'Black wins';
+    if (outcome === 'aborted') return 'Aborted';
     return 'Draw';
 }
 
@@ -74,10 +76,12 @@ const OUTCOMES = ['white', 'black', 'draw'];
  * Outcome of a finished `games` row. Rows written since the server decides
  * results carry it in `result`; older decisive rows have `result` null and
  * only `winner_id`, so the winner column is the fallback. No winner → draw.
- * @param {{ result?: unknown, winner_id?: unknown, white_id?: unknown, black_id?: unknown }} row
- * @returns {'white' | 'black' | 'draw'}
+ * An aborted row (`status = 'aborted'`) is its own outcome, not a draw.
+ * @param {{ status?: unknown, result?: unknown, winner_id?: unknown, white_id?: unknown, black_id?: unknown }} row
+ * @returns {'white' | 'black' | 'draw' | 'aborted'}
  */
 function outcomeOfRow(row) {
+    if (row.status === 'aborted') return 'aborted';
     if (OUTCOMES.includes(/** @type {string} */ (row.result))) {
         return /** @type {'white' | 'black' | 'draw'} */ (row.result);
     }

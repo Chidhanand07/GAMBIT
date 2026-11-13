@@ -21,8 +21,6 @@ const GAME_KEYS = [
     'final_fen',
     'white_clock_ms',
     'black_clock_ms',
-    'white_time_ms',
-    'black_time_ms',
     'white_accuracy',
     'black_accuracy',
     'white_move_classifications',

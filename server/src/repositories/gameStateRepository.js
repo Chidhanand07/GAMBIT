@@ -5,8 +5,10 @@
  * `server/lib/gameStore.js`, which is now the singleton facade over this
  * factory (so its per-game lock map stays process-wide).
  *
- * Errors are logged and swallowed exactly as before: reads return null / [],
- * writes resolve anyway. Only `updateGame` throws (unknown game).
+ * A Redis failure is an error (ERRORS): every call rejects when Redis cannot
+ * be read or written. "Could not look" is not "no such game", and a write
+ * that did not happen is not a stored state. Callers decide what a failure
+ * means: socket handlers ack `internal_error`, the ticker logs and moves on.
  */
 
 const GAME_TTL = 86400; // 24 hours
@@ -61,50 +63,33 @@ function createGameLock() {
 }
 
 /**
- * The `active_games` set the clock ticker walks. Errors are logged and swallowed.
+ * The `active_games` set the clock ticker walks.
  * @param {RedisLike} redis
  */
 function createActiveGameSet(redis) {
-    /**
-     * Add a game to the set the clock ticker walks (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function addActiveGame(gameId) {
-        try {
+    return {
+        /**
+         * Add a game to the set the clock ticker walks.
+         * @param {string} gameId
+         * @returns {Promise<void>}
+         */
+        async addActiveGame(gameId) {
             await redis.sadd(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] addActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Remove a game from the active set (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function removeActiveGame(gameId) {
-        try {
+        },
+        /**
+         * Remove a game from the active set.
+         * @param {string} gameId
+         * @returns {Promise<void>}
+         */
+        async removeActiveGame(gameId) {
             await redis.srem(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] removeActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Ids of all active games; [] when Redis fails.
-     * @returns {Promise<string[]>}
-     */
-    async function getActiveGameIds() {
-        try {
-            return await redis.smembers(ACTIVE_SET);
-        } catch (e) {
-            console.error('[gameStore] getActiveGameIds error:', /** @type {Error} */ (e).message);
-            return [];
-        }
-    }
-
-    return { addActiveGame, removeActiveGame, getActiveGameIds };
+        },
+        /**
+         * Ids of all active games.
+         * @returns {Promise<string[]>}
+         */
+        getActiveGameIds: () => redis.smembers(ACTIVE_SET),
+    };
 }
 
 /**
@@ -115,34 +100,26 @@ function createGameStateRepository(redis) {
     const withGameLock = createGameLock();
 
     /**
-     * Read a game's state; null when missing, unreadable or Redis fails.
+     * Read a game's state; null when there is none.
      * @param {string} gameId
      * @returns {Promise<any>}
+     * @throws when Redis cannot be read or the stored value is not JSON
      */
     async function getGame(gameId) {
-        try {
-            const raw = await redis.get(gameKey(gameId));
-            if (!raw) return null;
-            return JSON.parse(raw);
-        } catch (e) {
-            console.error('[gameStore] getGame error:', /** @type {Error} */ (e).message);
-            return null;
-        }
+        const raw = await redis.get(gameKey(gameId));
+        return raw ? JSON.parse(raw) : null;
     }
 
     /**
-     * Store a game's state (24 h TTL); resolves with `game` even if Redis fails.
+     * Store a game's state (24 h TTL).
      * @template T
      * @param {string} gameId
      * @param {T} game
      * @returns {Promise<T>}
+     * @throws when the write fails: the state is NOT stored
      */
     async function setGame(gameId, game) {
-        try {
-            await redis.setex(gameKey(gameId), GAME_TTL, JSON.stringify(game));
-        } catch (e) {
-            console.error('[gameStore] setGame error:', /** @type {Error} */ (e).message);
-        }
+        await redis.setex(gameKey(gameId), GAME_TTL, JSON.stringify(game));
         return game;
     }
 
@@ -187,16 +164,12 @@ function createGameStateRepository(redis) {
     }
 
     /**
-     * Delete a game's state (errors logged).
+     * Delete a game's state.
      * @param {string} gameId
      * @returns {Promise<void>}
      */
     async function deleteGame(gameId) {
-        try {
-            await redis.del(gameKey(gameId));
-        } catch (e) {
-            console.error('[gameStore] deleteGame error:', /** @type {Error} */ (e).message);
-        }
+        await redis.del(gameKey(gameId));
     }
 
     return { getGame, setGame, updateGame, mutateGame, deleteGame, ...createActiveGameSet(redis) };

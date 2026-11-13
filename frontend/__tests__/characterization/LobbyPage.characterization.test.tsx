@@ -66,9 +66,9 @@ describe('mount & static content', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/games/active']])
     })
 
-    test('subscribes only to match_found, game_start and connect (no queue_joined / queue_status handling)', async () => {
+    test('subscribes to match_found, match_failed, game_start and connect (no queue_joined / queue_status handling)', async () => {
         await renderLobby()
-        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_found'])
+        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_failed', 'match_found'])
         expect(socket.emit).not.toHaveBeenCalled()
     })
 
@@ -113,19 +113,20 @@ describe('mount & static content', () => {
 })
 
 describe('Play Online', () => {
-    test('emits join_queue with the FULL profile object as user, minutes as a string, and no is_rated', async () => {
+    test('emits join_queue with the FULL profile object as user, the canonical "M+S" time control, and no is_rated', async () => {
         await renderLobby()
         playOnline()
         expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { ...ME }, time_control: '3', increment: 0 }],
+            // The third argument is the ack callback: a refused join is reported (ACKS).
+            ['join_queue', { user: { ...ME }, time_control: '3+0', increment: 0 }, expect.any(Function)],
         ])
     })
 
-    test('Daily queues with time_control "1440"', async () => {
+    test('Daily queues with time_control "1440+0"', async () => {
         await renderLobby()
         click(screen.getByText('Daily'))
         playOnline()
-        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '1440', increment: 0 }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '1440+0', increment: 0 }])
     })
 
     test('match_found falls back to game_id when id is missing', async () => {
@@ -155,7 +156,7 @@ describe('Play Online', () => {
         socket.emit.mockClear()
         socket.serverSends('connect')
         expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { id: 'me' }, time_control: '3', increment: 0, is_rated: true }],
+            ['join_queue', { user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }],
         ])
     })
 
@@ -187,7 +188,7 @@ describe('custom time control modal', () => {
         click(backdrop)
         expect(screen.queryByText('Custom Time Control')).not.toBeInTheDocument()
         playOnline()
-        expect(socket.emitted('join_queue')[0].time_control).toBe('3')
+        expect(socket.emitted('join_queue')[0].time_control).toBe('3+0')
     })
 
     test('sliders set minutes/increment; confirming queues with "M+I" and increment I', async () => {
@@ -211,7 +212,7 @@ describe('custom time control modal', () => {
         expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '12+5', increment: 5 }])
     })
 
-    test('reconnect re-queue for a custom control sends only the minutes ("12"), not "12+5"', async () => {
+    test('reconnect re-queue for a custom control keeps the increment ("12+5") [TIME-CONTROL]', async () => {
         await renderLobby()
         click(screen.getByText('Custom'))
         const [minutes, increment] = screen.getAllByRole('slider')
@@ -221,7 +222,7 @@ describe('custom time control modal', () => {
         playOnline()
         socket.emit.mockClear()
         socket.serverSends('connect')
-        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12', increment: 5, is_rated: true }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true }])
     })
 })
 
@@ -290,7 +291,7 @@ describe('private game modal', () => {
         expect(call[1]).toEqual({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeControl: 'blitz', color: 'white', isRated: true }),
+            body: JSON.stringify({ timeControl: '3+0', color: 'white', isRated: true }),
         })
     })
 

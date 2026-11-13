@@ -34,10 +34,10 @@ export interface MakeMovePayload {
 
 export interface SendMessagePayload {
     game_id: string;
+    /** Display name shown next to the message; identity is the server's `from_user_id`. */
     from: string;
+    /** 1–500 characters after trimming; stored and relayed by the server. */
     text: string;
-    /** What the server persists as `messages.content`; never sent by the client (known bug). */
-    message?: string;
 }
 
 /** Resign this player's side of the game. The server names the winner. */
@@ -109,22 +109,22 @@ export interface ClientToServerEvents {
 
 // ── server → client ──────────────────────────────────────────────────────────
 
-/** Matchmaking queue entry (server/services/matchmaking.js), sent as `match_found.opponent`. */
-export interface QueueEntry {
+/** What `match_found` tells a player about the opponent: public facts only. */
+export interface MatchOpponent {
     user_id: string;
     username: string;
     rating: number;
     isProvisional: boolean;
-    time_control: TimeControl;
-    increment: number;
-    isRated: boolean;
-    joined_at: number;
-    socketId: string;
 }
 
 export interface MatchFoundPayload extends Game {
     color: PlayerColor;
-    opponent: QueueEntry;
+    opponent: MatchOpponent;
+}
+
+/** The server paired us but could not create the game; we are out of the queue. */
+export interface MatchFailedPayload {
+    reason: 'game_creation_failed';
 }
 
 export interface ClockSyncPayload {
@@ -170,7 +170,7 @@ export interface MoveRejectedPayload {
     reason: 'illegal_move' | 'not_your_turn' | 'not_a_player' | 'game_not_active' | 'game_not_found';
 }
 
-/** The sender's `send_message` payload echoed with the server-verified sender id. */
+/** A chat line relayed to the game room: the validated message plus the server-verified sender id. */
 export interface ChatMessagePayload extends SendMessagePayload {
     from_user_id: string;
 }
@@ -182,15 +182,12 @@ export interface ChatMessagePayload extends SendMessagePayload {
  */
 export interface GameEndBroadcast {
     game_id: string;
-    /** 'White wins' | 'Black wins' | 'Draw'. */
+    /** 'White wins' | 'Black wins' | 'Draw' | 'Aborted' (a side never made its first move). */
     result: string;
-    /** e.g. 'Checkmate', 'Stalemate', 'Resignation', 'Time', 'Abandonment', 'Game over'. */
+    /** e.g. 'Checkmate', 'Stalemate', 'Resignation', 'Time', 'Abandonment', 'Aborted', 'Game over'. */
     reason: string;
     white_id: string;
     black_id: string;
-    /** Only on flag fall. */
-    is_rated?: boolean | null;
-    time_control?: TimeControl;
 }
 
 export interface RatingChange {
@@ -213,6 +210,7 @@ export interface ServerToClientEvents {
     /** Broadcast to every socket. */
     queue_status: (payload: { players_searching: number }) => void;
     match_found: (payload: MatchFoundPayload) => void;
+    match_failed: (payload: MatchFailedPayload) => void;
     /** Emitted by POST /api/games/join/:token with the joined game row. */
     game_start: (payload: Game) => void;
     game_state_sync: (payload: GameStateSyncPayload) => void;

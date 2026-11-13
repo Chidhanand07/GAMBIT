@@ -79,7 +79,7 @@ describe('public endpoints', () => {
     });
 
     test('GET /api/games/join/:token returns the game or 404', async () => {
-        const game = { id: 'g' };
+        const game = { id: 'g', status: 'waiting' }; // only a waiting game is an open invite [G15]
         // INV-TOKEN: the token resolves through game_invites; an unknown token finds no invite.
         supabase.queue('game_invites', { data: { game_id: 'g', expires_at: new Date(Date.now() + 1e6).toISOString() }, error: null });
         supabase.queue('games', { data: game, error: null });
@@ -99,16 +99,16 @@ describe('private games', () => {
 
 describe('engine proxy', () => {
     test('forwards the position to the engine with default depth 18', async () => {
-        const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ json: async () => ({ best_move: 'e2e4' }) });
+        const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => ({ best_move: 'e2e4' }) });
         const res = await request(app).post('/api/analysis/engine').send({ fen: 'F' });
         expect(res.body).toEqual({ best_move: 'e2e4' });
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ fen: 'F', depth: 18 });
     });
 
-    test('engine down → 500', async () => {
+    test('engine down → 502 (an upstream failure, not this server crashing) [G14]', async () => {
         jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
         const res = await request(app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(500);
+        expect(res.status).toBe(502);
     });
 });
 

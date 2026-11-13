@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { classifyTimeControl } from '@/lib/chess/timeControl';
+import { classifyTimeControl, displayTimeControl } from '@/lib/chess/timeControl';
 import type { Profile, ProfileSummary } from '@/types/profile';
 import type { ProfileGameRow } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
@@ -112,7 +112,9 @@ export function GameHistoryRow({ game, profile, striped }: GameHistoryRowProps) 
                 <span className="text-lg" title={tc}>
                     {TC_ICONS[tc] ?? DEFAULT_TC_ICON}
                 </span>
-                <div className="text-[10px] text-text-tertiary">{game.time_control ?? '—'}</div>
+                <div className="text-[10px] text-text-tertiary">
+                    {game.time_control ? displayTimeControl(game.time_control) : '—'}
+                </div>
             </div>
             <Players
                 profileName={profile.display_name || profile.username}

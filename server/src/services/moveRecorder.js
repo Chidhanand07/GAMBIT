@@ -9,7 +9,7 @@
  * The read–decide–write runs under the per-game lock, so the same move sent
  * twice is applied once.
  */
-const { clocksAfterMove } = require('../domain/clock');
+const { activeRemainingMs, clocksAfterMove } = require('../domain/clock');
 const { playMove } = require('../domain/chessRules');
 const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
@@ -44,6 +44,18 @@ function stateAfterMove(game, played, at) {
 }
 
 /**
+ * True when the mover's time ran out before this move arrived. The ticker
+ * only looks once a second, so without this check a move sent in that gap
+ * was accepted with a clock of 0 plus the increment (G7).
+ * @param {any} game
+ * @param {number} at
+ * @returns {boolean}
+ */
+function isFlagDown(game, at) {
+    return Boolean(game.lastMoveAt) && activeRemainingMs({ ...game, activeSide: sideToMove(game) }, at) <= 0;
+}
+
+/**
  * The `move_made` broadcast: server values only, under the field names the
  * frontend already reads.
  * @param {MoveRequest} request
@@ -72,8 +84,9 @@ function moveMadePayload(request, played, state) {
  */
 function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = () => Date.now() }) {
     /**
-     * Fire-and-forget: update the games row FEN and append the move row
-     * (H10: clocks are flushed when the game ends).
+     * Fire-and-forget: update the games row (position and both clocks, in the
+     * canonical clock columns, so the row alone can restore the game: G2) and
+     * append the move row.
      * @param {string} gameId
      * @param {any} state state after the move
      * @param {PlayedMove} played
@@ -82,7 +95,11 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
         const movedColor = sideToColor(state.activeSide === 'w' ? 'b' : 'w');
         const clockMs = movedColor === 'white' ? state.whiteClockMs : state.blackClockMs;
         Promise.all([
-            gamesRepo.updateById(gameId, { fen: played.fen }),
+            gamesRepo.updateById(gameId, {
+                fen: played.fen,
+                white_clock_ms: Math.round(state.whiteClockMs),
+                black_clock_ms: Math.round(state.blackClockMs),
+            }),
             movesRepo.insert({
                 game_id: gameId,
                 move_number: state.moveLog.length,
@@ -110,7 +127,8 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
         /** @type {MoveOutcome | null} */
         let outcome = null;
         await gameStore.mutateGame(request.game_id, (/** @type {any} */ game) => {
-            const reason = moveRejection(game, userId);
+            const at = now();
+            const reason = moveRejection(game, userId) ?? (isFlagDown(game, at) ? REJECTION.TIME_EXPIRED : null);
             if (reason) {
                 outcome = { accepted: false, reason, game };
                 return null;
@@ -120,7 +138,7 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
                 outcome = { accepted: false, reason: REJECTION.ILLEGAL_MOVE, game };
                 return null;
             }
-            const state = stateAfterMove(game, played, now());
+            const state = stateAfterMove(game, played, at);
             outcome = { accepted: true, state, played };
             return state;
         });

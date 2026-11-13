@@ -12,7 +12,7 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame } = require('../../lib/gameStore');
-const { useServer, once, record, sleep, waitFor, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS } = require('./harness');
+const { useServer, once, record, sleep, opsFor, ISO_DATE, START_FEN, TICK_TIMEOUT_MS } = require('./harness');
 
 const ctx = useServer();
 
@@ -74,11 +74,11 @@ describe('join_queue', () => {
         ['3', 1002],
         ['5+3', 1002],
         ['10', 1003],
-        ['60', 1003],
-        ['61', 1004],
+        ['29', 1003],
+        ['30', 1004], // one threshold set for server and web: 30 minutes is classical (F7)
+        ['60', 1004],
         ['90+30', 1004],
-        ['blitz', 1003], // parseInt → NaN → defaults to 10 minutes
-        [undefined, 1003],
+        [undefined, 1003], // no time control → the default 10+0
     ])('time_control %p reads rating %p', async (timeControl, rating) => {
         const s = await ctx.connect('tc');
         supabase.queue('profiles', { data: profile('tc'), error: null });
@@ -87,14 +87,24 @@ describe('join_queue', () => {
         expect(ctx.matchmaking.queue.get('tc').rating).toBe(rating);
     });
 
+    test.each(['blitz', '0', '-5', '1441', '10+181', 'x'])(
+        'time_control %p is rejected: not queued, invalid_payload ack [TIME-CONTROL]',
+        async (timeControl) => {
+            const s = await ctx.connect('tc');
+            const ack = await new Promise((resolve) => s.emit('join_queue', { time_control: timeControl }, resolve));
+            expect(ack).toEqual({ ok: false, error: 'invalid_payload' });
+            expect(ctx.matchmaking.queue.has('tc')).toBe(false);
+        },
+    );
+
     test('missing rating column → 1200; missing games_played → 0 (provisional); is_rated null → true', async () => {
         await queued('q1', { is_rated: null }, { rating_rapid: null, games_played: null });
         expect(ctx.matchmaking.queue.get('q1')).toMatchObject({ rating: 1200, isProvisional: true, isRated: true });
     });
 
-    test('rating 0 in the DB becomes 1200 inside matchmaking (`|| 1200`)', async () => {
+    test('rating 0 in the DB stays 0 inside matchmaking (`??`, not `||`) [G12]', async () => {
         await queued('q1', {}, { rating_rapid: 0 });
-        expect(ctx.matchmaking.queue.get('q1').rating).toBe(1200);
+        expect(ctx.matchmaking.queue.get('q1').rating).toBe(0);
     });
 
     test('the queued player is the verified user: no payload id is needed, and a foreign one is ignored [S2]', async () => {
@@ -189,21 +199,6 @@ describe('pairing', () => {
         return { s1, s2, m1, m2 };
     }
 
-    function entry(id, socketId, rating, extra = {}) {
-        return {
-            user_id: id,
-            username: `${id}-name`,
-            rating,
-            isProvisional: false,
-            time_control: '10',
-            increment: undefined,
-            isRated: true,
-            joined_at: expect.any(Number),
-            socketId,
-            ...extra,
-        };
-    }
-
     test('Math.random() <= 0.5 → the later player is white', async () => {
         const { m1, m2 } = await pairUp(0.5);
         expect(m1).toMatchObject({ white_id: 'p2', black_id: 'p1', color: 'black', opponent: { user_id: 'p2' } });
@@ -217,14 +212,17 @@ describe('pairing', () => {
             created_at: '2026-01-01T00:00:00.000Z',
             white_id: 'p1',
             black_id: 'p2',
-            time_control: '10',
-            increment: undefined,
+            time_control: '10+0',
+            increment: 0,
             status: 'active',
             started_at: ISO_DATE,
         };
-        // NOTE pinned: `opponent` is the raw queue entry, leaking the opponent's socketId.
-        expect(m1).toEqual({ ...row, color: 'white', opponent: entry('p2', s2.id, 1520) });
-        expect(m2).toEqual({ ...row, color: 'black', opponent: entry('p1', s1.id, 1500) });
+        // Was: `opponent` is the raw queue entry, leaking the opponent's socketId (pinned). Now four public fields [G12].
+        const opponent = (id, rating) => ({ user_id: id, username: `${id}-name`, rating, isProvisional: false });
+        expect(m1).toEqual({ ...row, color: 'white', opponent: opponent('p2', 1520) });
+        expect(m2).toEqual({ ...row, color: 'black', opponent: opponent('p1', 1500) });
+        expect(JSON.stringify([m1, m2])).not.toContain(s1.id);
+        expect(JSON.stringify([m1, m2])).not.toContain(s2.id);
         expect(ctx.matchmaking.queue.size).toBe(0);
 
         expect(opsFor('games')).toEqual([
@@ -234,8 +232,8 @@ describe('pairing', () => {
                     {
                         white_id: 'p1',
                         black_id: 'p2',
-                        time_control: '10',
-                        increment: undefined,
+                        time_control: '10+0',
+                        increment: 0,
                         status: 'active',
                         started_at: ISO_DATE,
                     },
@@ -257,19 +255,30 @@ describe('pairing', () => {
             result: null,
             reason: null,
             moveLog: [],
-            timeControl: '10',
+            timeControl: '10+0',
             incrementMs: 0,
             isRated: true,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect([...redis._sets.get('active_games')]).toEqual(['match-1']);
     });
 
-    test('pairs different increments and keeps only p1\'s (BUG pinned: increment lost without "+")', async () => {
-        await pairUp(0.9, { increment: 0, is_rated: false }, { increment: 5, is_rated: true });
-        expect(supabase.op(supabase.callsFor('games')[0], 'insert')[0]).toMatchObject({ increment: 0, time_control: '10' });
-        expect(await getGame('match-1')).toMatchObject({ incrementMs: 0, isRated: false, whiteClockMs: 600000 });
+    test('different increments are never paired; the same increment sent separately is kept [G4]', async () => {
+        const { s: s1 } = await queued('p1', { increment: 0 });
+        const { s: s2 } = await queued('p2', { increment: 5 });
+        const found = [...record(s1, 'match_found'), ...record(s2, 'match_found')];
+        await once(s1, 'queue_status', TICK_TIMEOUT_MS);
+        await once(s1, 'queue_status', TICK_TIMEOUT_MS);
+        expect(found).toEqual([]);
+        expect(ctx.matchmaking.queue.size).toBe(2);
+    });
+
+    test('"10" with a separate increment of 5 on both sides → a 10+5 game (the increment is no longer lost) [G4]', async () => {
+        await pairUp(0.9, { increment: 5, is_rated: false }, { increment: 5, is_rated: true });
+        expect(supabase.op(supabase.callsFor('games')[0], 'insert')[0]).toMatchObject({ increment: 5, time_control: '10+5' });
+        expect(await getGame('match-1')).toMatchObject({ incrementMs: 5000, isRated: false, whiteClockMs: 600000 });
     });
 
     test('"5+3" time control → 5-minute clocks with a 3 s increment in Redis', async () => {
@@ -282,9 +291,15 @@ describe('pairing', () => {
         });
     });
 
-    test('different time_control strings are never paired', async () => {
+    test('"10" and "10+0" are the same time control and are paired [TIME-CONTROL]', async () => {
+        await pairUp(0.9, { time_control: '10' }, { time_control: '10+0' });
+        expect(ctx.matchmaking.queue.size).toBe(0);
+        expect(await getGame('match-1')).toMatchObject({ timeControl: '10+0', incrementMs: 0 });
+    });
+
+    test('different base times are never paired', async () => {
         const { s: s1 } = await queued('p1', { time_control: '10' });
-        const { s: s2 } = await queued('p2', { time_control: '10+0' });
+        const { s: s2 } = await queued('p2', { time_control: '5' });
         const found = [...record(s1, 'match_found'), ...record(s2, 'match_found')];
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
@@ -292,14 +307,18 @@ describe('pairing', () => {
         expect(ctx.matchmaking.queue.size).toBe(2);
     });
 
-    test('games insert failure drops BOTH players from the queue with no event (pinned)', async () => {
+    test('games insert failure: both players get match_failed and leave the queue; nothing is seeded [G12]', async () => {
+        // Was: "drops BOTH players from the queue with no event (pinned)".
         supabase.queue('games', { data: null, error: { message: 'insert failed' } });
         const { s: s1 } = await queued('p1', {}, { rating_rapid: 1500 });
         const found = record(s1, 'match_found');
+        const failed1 = once(s1, 'match_failed', TICK_TIMEOUT_MS);
         const { s: s2 } = await queued('p2', {}, { rating_rapid: 1500 });
         const found2 = record(s2, 'match_found');
-        await waitFor(() => opsFor('games').length === 1, TICK_TIMEOUT_MS, 'games insert');
-        await sleep(50);
+        const failed2 = once(s2, 'match_failed', TICK_TIMEOUT_MS);
+
+        expect(await failed1).toEqual({ reason: 'game_creation_failed' });
+        expect(await failed2).toEqual({ reason: 'game_creation_failed' });
         expect(opsFor('games')).toHaveLength(1);
         expect(found).toEqual([]);
         expect(found2).toEqual([]);

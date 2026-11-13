@@ -34,6 +34,8 @@ const { createNotificationsRepository } = require('./repositories/notificationsR
 const { createPendingRequestsRepository } = require('./repositories/pendingRequestsRepository');
 const { createIoEmitter } = require('./services/emitter');
 const { createReviewService } = require('./services/reviewService');
+const { createClockService } = require('./services/clockService');
+const { createGameFinalizer } = require('./services/gameFinalizer');
 const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
@@ -54,9 +56,6 @@ const io = createSocketServer(server);
 
 const matchmaking = new MatchmakingService(io);
 
-// Start single global clock ticker (replaces all per-game setInterval timers)
-startGlobalClock(io);
-
 const sessions = createSessionRegistry();
 const emitter = createIoEmitter(io);
 const socialService = createSocialService({
@@ -65,19 +64,34 @@ const socialService = createSocialService({
     pendingRequests: createPendingRequestsRepository(redis),
     emitter,
 });
+// One finalizer for every way a game ends: moves and resignations (gameService)
+// and flag falls and abandonment (the clock) share it (G3).
+const reviewService = createReviewService({ engineClient });
+const finalizer = createGameFinalizer({
+    gameStore,
+    gamesRepo,
+    ratingService,
+    reviewService,
+    sessions,
+    emitter,
+});
 const gameService = createGameService({
     gameStore,
     gamesRepo,
     movesRepo: createMovesRepository(supabase),
     ratingService,
-    reviewService: createReviewService({ engineClient }),
+    reviewService,
     sessions,
     emitter,
+    finalizer,
 });
+
+// Start single global clock ticker (replaces all per-game setInterval timers)
+startGlobalClock(createClockService({ gameStore, finalizer, emitter }));
+
 const chatService = createChatService({
     gameStore,
     messagesRepo: createMessagesRepository(supabase),
-    sessions,
     emitter,
 });
 
@@ -100,6 +114,7 @@ registerSocketHandlers(io, {
     chatService,
     socialService,
     verifyToken: tokenVerifier.verify,
+    tokenDeadline: tokenVerifier.deadline,
 });
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */

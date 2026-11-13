@@ -145,7 +145,7 @@ describe('profilesRepository', () => {
     });
 
     test.each([
-        ['findUsernameByUsername', ['bob'], [['select', 'username'], ['eq', 'username', 'bob'], ['single']]],
+        ['findUsernameByUsername', ['bob'], [['select', 'username'], ['eq', 'username', 'bob'], ['maybeSingle']]],
         [
             'findForMatchmaking',
             ['u1'],

@@ -199,6 +199,9 @@ function createSocialService({ random = () => Math.random(), ...rest }) {
          * @param {{ id: string }} game
          */
         announceGameStart(game) {
+            // Only a game that actually started: the creator re-opening their own
+            // invite gets the waiting row back, and that is not a start (G15).
+            if (game.status !== 'active') return;
             deps.emitter.toRoom(gameRoom(game.id), 'game_start', toPublicGame(game));
         },
 

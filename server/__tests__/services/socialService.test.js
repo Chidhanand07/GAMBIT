@@ -238,3 +238,9 @@ test('announceGameStart emits game_start to the game room', () => {
     svc.announceGameStart({ id: 'g1', status: 'active' });
     expect(emitter.sent).toEqual([{ room: 'game_g1', event: 'game_start', args: [{ id: 'g1', status: 'active' }] }]);
 });
+
+test.each(['waiting', 'completed', 'aborted', undefined])('announceGameStart says nothing for a game that is %s: it has not started [G15]', (status) => {
+    const { svc, emitter } = setup();
+    svc.announceGameStart({ id: 'g1', status });
+    expect(emitter.sent).toEqual([]);
+});

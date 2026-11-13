@@ -10,12 +10,14 @@
  * `to_user_id` on an accept is therefore stripped like any unknown key.
  */
 const { z } = require('zod');
+const { isValidTimeControl } = require('../services/timeControlRules');
 
 const MAX_ID_LENGTH = 64;
 const MAX_TIME_CONTROL_LENGTH = 16;
-const MAX_INCREMENT_SECONDS = 180;
 const MAX_NAME_LENGTH = 64;
 const MAX_CHAT_LENGTH = 500;
+/** Stands in for a missing time control when only the separate increment needs checking. */
+const DEFAULT_MINUTES = 10;
 
 /**
  * A user or game id. Production ids are UUIDs; the charset also admits short
@@ -27,9 +29,15 @@ const id = z
     .max(MAX_ID_LENGTH)
     .regex(/^[A-Za-z0-9_-]+$/);
 
-/** "10", "5+3", or a number of minutes. */
-const timeControl = z.union([z.string().min(1).max(MAX_TIME_CONTROL_LENGTH), z.number().finite().nonnegative()]);
-const increment = z.number().finite().min(0).max(MAX_INCREMENT_SECONDS);
+/**
+ * "10", "5+3", or a number of minutes, within the shared model's limits
+ * (domain/timeControl): a bad value is rejected here, not defaulted later.
+ */
+const timeControl = z
+    .union([z.string().min(1).max(MAX_TIME_CONTROL_LENGTH), z.number()])
+    .refine((value) => isValidTimeControl(value));
+/** Seconds; range-checked together with the time control it belongs to (see join_queue). */
+const increment = z.number();
 const square = z.string().regex(/^[a-h][1-8]$/);
 const promotion = z.enum(['q', 'r', 'b', 'n']);
 const color = z.enum(['white', 'black', 'random']);
@@ -41,10 +49,13 @@ const matchTerms = {
 };
 
 const schemas = {
-    join_queue: z.object({
-        ...matchTerms,
-        increment: increment.optional(),
-    }),
+    join_queue: z
+        .object({
+            ...matchTerms,
+            increment: increment.optional(),
+        })
+        // Older clients send "10" plus a separate increment: the pair must be a valid time control.
+        .refine((data) => isValidTimeControl(data.time_control ?? DEFAULT_MINUTES, data.increment)),
     // Older clients send their own id; it is ignored (the actor is the verified user).
     leave_queue: z.unknown(),
     join_game: id,
@@ -58,12 +69,21 @@ const schemas = {
         promotion: promotion.optional(),
     }),
     resign: z.object({ game_id: id }),
-    send_message: z.object({
-        game_id: id,
-        from: name.optional(),
-        text: z.string().max(MAX_CHAT_LENGTH).optional(),
-        message: z.string().max(MAX_CHAT_LENGTH).optional(),
-    }),
+    // The web client sends `text`. An older `message` field is read as the text
+    // too. Either way the result is one trimmed, non-empty, bounded string (G6).
+    send_message: z
+        .object({
+            game_id: id,
+            from: name.optional(),
+            text: z.string().max(MAX_CHAT_LENGTH).optional(),
+            message: z.string().max(MAX_CHAT_LENGTH).optional(),
+        })
+        .transform(({ game_id, from, text, message }) => ({
+            game_id,
+            ...(from === undefined ? {} : { from }),
+            text: (text ?? message ?? '').trim(),
+        }))
+        .refine((data) => data.text.length > 0),
     rematch_request: z.object({
         to_user_id: id,
         from_username: name.optional(),

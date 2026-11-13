@@ -43,7 +43,7 @@ afterEach(() => {
 describe('queue', () => {
     test('joinQueue adds the player and tells their socket', () => {
         mm.joinQueue(user('a', 1500), 'sock-a', '10', 0);
-        expect(mm.queue.get('a')).toMatchObject({ rating: 1500, time_control: '10', isProvisional: false, isRated: true });
+        expect(mm.queue.get('a')).toMatchObject({ rating: 1500, time_control: '10+0', increment: 0, isProvisional: false, isRated: true });
         expect(io.emitted).toContainEqual({ room: 'sock-a', event: 'queue_joined', payload: { position: 1, estimated_wait: 10 } });
     });
 

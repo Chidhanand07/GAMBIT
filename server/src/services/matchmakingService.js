@@ -5,11 +5,16 @@
  * owns the 1 s interval.
  */
 const pairing = require('../domain/matchmaking/pairing');
+const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
-const { ratingField } = require('../domain/timeControl');
+const { DEFAULT_TIME_CONTROL, formatTimeControl, parseTimeControl, ratingField } = require('../domain/timeControl');
 
 const DEFAULT_RATING = 1200;
 const ESTIMATED_WAIT_SECONDS = 10;
+const INVALID_TIME_CONTROL = Object.freeze({ ok: false, error: 'invalid_time_control' });
+const GAME_CREATION_FAILED = Object.freeze({ reason: 'game_creation_failed' });
+/** Above this `random()` value the longer-waiting player gets White. */
+const WHITE_FOR_FIRST_THRESHOLD = 0.5;
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -39,7 +44,19 @@ const ESTIMATED_WAIT_SECONDS = 10;
 function joinQueue({ queue, emitter, now }, { user, socketId, timeControl, increment, isRated = true }) {
     if (queue.has(user.id)) return;
 
-    queue.set(user.id, pairing.createQueueEntry({ user, socketId, timeControl, increment, isRated, now: now() }));
+    // One canonical "M+S" per entry, so pairing compares base and increment (G4).
+    const model = parseTimeControl(timeControl ?? DEFAULT_TIME_CONTROL.minutes, increment) ?? DEFAULT_TIME_CONTROL;
+    queue.set(
+        user.id,
+        pairing.createQueueEntry({
+            user,
+            socketId,
+            timeControl: formatTimeControl(model),
+            increment: model.incrementSeconds,
+            isRated,
+            now: now(),
+        }),
+    );
 
     emitter.toRoom(socketId, 'queue_joined', {
         position: queue.size,
@@ -49,53 +66,82 @@ function joinQueue({ queue, emitter, now }, { user, socketId, timeControl, incre
 
 /**
  * `join_queue`: queue the player with their rating read from the DB (C3: never
- * trust a client-provided rating). Unknown users are ignored.
+ * trust a client-provided rating). Unknown users are ignored; an invalid
+ * time control is refused with a reason.
  * @param {Matchmaker} mm
  * @param {{ user?: { id?: string }, time_control?: unknown, increment?: unknown, is_rated?: boolean }} data
  * @param {string} socketId
+ * @returns {Promise<{ ok: false, error: string } | void>}
  */
 async function requestMatch(mm, data, socketId) {
     if (!data?.user?.id) return;
+    const model = parseTimeControl(data.time_control ?? DEFAULT_TIME_CONTROL.minutes, data.increment);
+    if (!model) return INVALID_TIME_CONTROL;
+    const timeControl = formatTimeControl(model);
     const { data: profile } = await mm.profilesRepo.findForMatchmaking(data.user.id);
     if (!profile) return;
     const verifiedUser = {
         id: profile.id,
         username: profile.username,
-        rating: profile[ratingField(data.time_control)] ?? DEFAULT_RATING,
+        rating: profile[ratingField(timeControl)] ?? DEFAULT_RATING,
         games_played: profile.games_played ?? 0,
     };
     joinQueue(mm, {
         user: verifiedUser,
         socketId,
-        timeControl: data.time_control,
-        increment: data.increment,
+        timeControl,
+        increment: model.incrementSeconds,
         isRated: data.is_rated ?? true,
     });
 }
 
 /**
+ * Insert the `games` row for a pair. A failure (an error result or a throw) is
+ * logged and reported as null.
+ * @param {Matchmaker} mm
+ * @param {QueueEntry} white
+ * @param {QueueEntry} black
+ * @returns {Promise<any | null>} the created row
+ */
+async function insertGame({ gamesRepo }, white, black) {
+    try {
+        const { data, error } = await gamesRepo.insertReturning({
+            white_id: white.user_id,
+            black_id: black.user_id,
+            time_control: white.time_control,
+            increment: white.increment,
+            status: 'active',
+            started_at: new Date().toISOString(),
+        });
+        if (!error && data) return data;
+        console.error('[matchmaking] createGame error:', error?.message);
+    } catch (e) {
+        console.error('[matchmaking] createGame error:', /** @type {Error} */ (e).message);
+    }
+    return null;
+}
+
+/**
  * Create the DB game and Redis state for a pair and notify both sockets.
+ *
+ * If the game cannot be created both players are told (`match_failed`) and
+ * are out of the queue: they used to be dropped without a word, still showing
+ * "searching" (G12). They are not re-queued automatically: with the database
+ * failing that would retry the insert every second for every pair.
  * @param {Matchmaker} mm
  * @param {QueueEntry} p1
  * @param {QueueEntry} p2
  */
-async function createGame({ queue, gamesRepo, gameStore, emitter, random }, p1, p2) {
+async function createGame(mm, p1, p2) {
+    const { queue, gameStore, emitter, random, now } = mm;
     queue.delete(p1.user_id);
     queue.delete(p2.user_id);
 
-    const [white, black] = random() > 0.5 ? [p1, p2] : [p2, p1];
+    const [white, black] = random() > WHITE_FOR_FIRST_THRESHOLD ? [p1, p2] : [p2, p1];
 
-    const { data, error } = await gamesRepo.insertReturning({
-        white_id: white.user_id,
-        black_id: black.user_id,
-        time_control: p1.time_control,
-        increment: p1.increment,
-        status: 'active',
-        started_at: new Date().toISOString(),
-    });
-
-    if (error || !data) {
-        console.error('[matchmaking] createGame error:', error?.message);
+    const data = await insertGame(mm, white, black);
+    if (!data) {
+        for (const player of [p1, p2]) emitter.toRoom(player.socketId, 'match_failed', GAME_CREATION_FAILED);
         return;
     }
 
@@ -108,12 +154,15 @@ async function createGame({ queue, gamesRepo, gameStore, emitter, random }, p1, 
             blackId: black.user_id,
             timeControl: p1.time_control,
             isRated: p1.isRated ?? true,
+            startedAt: now(),
         }),
     );
     await gameStore.addActiveGame(data.id);
 
-    emitter.toRoom(white.socketId, 'match_found', { ...data, color: 'white', opponent: black });
-    emitter.toRoom(black.socketId, 'match_found', { ...data, color: 'black', opponent: white });
+    // The public view of the game, and public facts about the opponent: nothing else.
+    const game = toPublicGame(data);
+    emitter.toRoom(white.socketId, 'match_found', { ...game, color: 'white', opponent: pairing.opponentView(black) });
+    emitter.toRoom(black.socketId, 'match_found', { ...game, color: 'black', opponent: pairing.opponentView(white) });
 }
 
 /**
@@ -164,7 +213,7 @@ function createMatchmakingService({ now = () => Date.now(), random = () => Math.
         queue,
         /** @param {Parameters<typeof joinQueue>[1]} p */
         joinQueue: (p) => joinQueue(mm, p),
-        /** @type {(data: Parameters<typeof requestMatch>[1], socketId: string) => Promise<void>} */
+        /** @type {(data: Parameters<typeof requestMatch>[1], socketId: string) => ReturnType<typeof requestMatch>} */
         requestMatch: (data, socketId) => requestMatch(mm, data, socketId),
         leaveQueue,
         /**

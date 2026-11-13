@@ -41,7 +41,7 @@ describe('useTimeControlSelection', () => {
         const first = result.current.getTcMinutes;
         expect(result.current.selectedTc).toBe('blitz');
         expect(first()).toEqual({ mins: 3, inc: 0 });
-        expect(result.current.playOnlineTimeControl).toBe('3');
+        expect(result.current.playOnlineTimeControl).toBe('3+0');
         rerender();
         expect(result.current.getTcMinutes).toBe(first);
         act(() => result.current.setCustomInc(4));
@@ -92,14 +92,41 @@ describe('useMatchmaking', () => {
         expect(result.current.searchTime).toBe(0);
     });
 
-    test('reconnect while searching re-queues with { id }, minutes only and is_rated: true', () => {
+    test('reconnect while searching re-queues with the same canonical time control, increment included [TIME-CONTROL]', () => {
         const { result } = setup();
         act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '12+5', increment: 5 }));
         fake.emit.mockClear();
         fake.serverSends('connect');
         expect(fake.emitted('join_queue')).toEqual([
-            { user: { id: 'me' }, time_control: '12', increment: 5, is_rated: true },
+            { user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true },
         ]);
+    });
+
+    test('a join_queue the server refuses stops the search and reports why [ACKS]', () => {
+        const onMatchFailed = jest.fn();
+        fake.emit.mockImplementationOnce((_event: string, _payload: unknown, ack?: (res: unknown) => void) => {
+            ack?.({ ok: false, error: 'invalid_time_control' });
+        });
+        const { result } = renderHook(() =>
+            useMatchmaking({ socket, router, profile, getTcMinutes: () => ({ mins: 3, inc: 0 }), onGameStart: jest.fn(), onMatchFailed }),
+        );
+        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3+0', increment: 0 }));
+        expect(result.current.searching).toBe(false);
+        expect(onMatchFailed).toHaveBeenCalledWith('invalid_time_control');
+    });
+
+    test('match_failed stops the search and reports it; nothing navigates [G12]', () => {
+        const onMatchFailed = jest.fn();
+        const { result } = renderHook(() =>
+            useMatchmaking({ socket, router, profile, getTcMinutes: () => ({ mins: 3, inc: 0 }), onGameStart: jest.fn(), onMatchFailed }),
+        );
+        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3+0', increment: 0 }));
+        expect(result.current.searching).toBe(true);
+
+        act(() => fake.serverSends('match_failed', { reason: 'game_creation_failed' }));
+        expect(result.current.searching).toBe(false);
+        expect(onMatchFailed).toHaveBeenCalledWith('game_creation_failed');
+        expect(router.push).not.toHaveBeenCalled();
     });
 
     test('match_found stops searching and navigates (id, else game_id); game_start calls onGameStart', () => {

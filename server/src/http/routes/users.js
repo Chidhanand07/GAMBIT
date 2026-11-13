@@ -2,6 +2,8 @@
 /**
  * Username availability (signup page).
  */
+const { parseOrReject, sendError } = require('../respond');
+const { schemas } = require('../schemas');
 
 /**
  * @param {import('express').Express} app
@@ -9,12 +11,12 @@
  */
 function registerUserRoutes(app, { profileService }) {
     app.get('/api/users/check-username', async (req, res) => {
+        const input = parseOrReject(res, schemas.usernameQuery, req.query);
+        if (!input) return;
         try {
-            const username = /** @type {string | undefined} */ (req.query.u);
-            if (!username) return res.status(400).json({ error: 'Missing username parameter' });
-            res.json({ available: await profileService.isUsernameAvailable(username) });
+            res.json({ available: await profileService.isUsernameAvailable(input.u) });
         } catch (e) {
-            res.status(500).json({ error: /** @type {Error} */ (e).message });
+            sendError(res, 'users/check-username', e);
         }
     });
 }

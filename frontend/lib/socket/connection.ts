@@ -8,6 +8,8 @@ export const UNAUTHORIZED_RETRY_MS = 5_000;
 const RECONNECTION_DELAY_MS = 1_000;
 const RECONNECTION_DELAY_MAX_MS = 8_000;
 const UNAUTHORIZED = 'unauthorized';
+/** socket.io's reason for a disconnect the server initiated. */
+const SERVER_DISCONNECT = 'io server disconnect';
 
 export interface GameSocketOptions {
     url: string;
@@ -35,6 +37,7 @@ async function handshakeAuth(getToken: GameSocketOptions['getToken']): Promise<H
 
 export function createGameSocket({ url, getToken }: GameSocketOptions): GameSocketConnection {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
 
     const socket = io(url, {
         autoConnect: true,
@@ -55,11 +58,18 @@ export function createGameSocket({ url, getToken }: GameSocketOptions): GameSock
             socket.connect();
         }, UNAUTHORIZED_RETRY_MS);
     });
-    socket.on('disconnect', (reason: string) => console.warn('[Socket] Disconnected:', reason));
+    socket.on('disconnect', (reason: string) => {
+        console.warn('[Socket] Disconnected:', reason);
+        // The server ends a connection when its access token expires (it says `token_expired`
+        // first). socket.io never reconnects after a server-side disconnect, so do it here:
+        // the handshake asks for the token again and gets the refreshed one.
+        if (reason === SERVER_DISCONNECT && !closed) socket.connect();
+    });
 
     return {
         socket,
         close: () => {
+            closed = true;
             if (retryTimer) clearTimeout(retryTimer);
             retryTimer = null;
             socket.disconnect();

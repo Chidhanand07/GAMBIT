@@ -4,7 +4,10 @@ const {
     clocksAt,
     nextSide,
     clocksAfterMove,
-    tickerSnapshot,
+    isClockRunning,
+    freezeClocks,
+    resumeClocks,
+    activeRemainingMs,
     isGraceExpired,
 } = require('../../src/domain/clock');
 
@@ -79,29 +82,67 @@ describe('clocksAfterMove', () => {
     });
 });
 
-describe('tickerSnapshot', () => {
-    test('White to move', () => {
-        expect(tickerSnapshot(state(), NOW)).toEqual({ remainingMs: 57000, whiteMs: 57000, blackMs: 50000 });
+describe('isClockRunning', () => {
+    test('running once a move has been made and nobody is disconnected', () => {
+        expect(isClockRunning(state())).toBe(true);
     });
-
-    test('Black to move', () => {
-        expect(tickerSnapshot(state({ activeSide: 'b' }), NOW)).toEqual({
-            remainingMs: 47000,
-            whiteMs: 60000,
-            blackMs: 47000,
-        });
+    test.each([null, undefined])('not started (lastMoveAt %p) → not running', (lastMoveAt) => {
+        expect(isClockRunning(state({ lastMoveAt }))).toBe(false);
     });
-
-    test('unknown side: remaining comes from Black but neither displayed clock changes', () => {
-        expect(tickerSnapshot(state({ activeSide: 'x' }), NOW)).toEqual({
-            remainingMs: 47000,
-            whiteMs: 60000,
-            blackMs: 50000,
-        });
+    test('frozen while a player is disconnected', () => {
+        expect(isClockRunning(state({ disconnectInfo: { userId: 'u', side: 'white', at: NOW } }))).toBe(false);
     });
+});
 
+describe('clocksAt while frozen', () => {
+    test('a disconnected game reports the stored clocks, whatever the time [G9]', () => {
+        const frozen = state({ disconnectInfo: { userId: 'u', side: 'white', at: NOW } });
+        expect(clocksAt(frozen, NOW + 15000)).toEqual({ whiteMs: 60000, blackMs: 50000 });
+    });
+});
+
+describe('activeRemainingMs (the side to move)', () => {
+    test('White to move', () => expect(activeRemainingMs(state(), NOW)).toBe(57000));
+    test('Black to move', () => expect(activeRemainingMs(state({ activeSide: 'b' }), NOW)).toBe(47000));
     test('flagged clock reports zero', () => {
-        expect(tickerSnapshot(state({ lastMoveAt: NOW - 61000 }), NOW).remainingMs).toBe(0);
+        expect(activeRemainingMs(state({ lastMoveAt: NOW - 61000 }), NOW)).toBe(0);
+    });
+    test('a clock that has not started has all its time', () => {
+        expect(activeRemainingMs(state({ lastMoveAt: null }), NOW)).toBe(60000);
+    });
+});
+
+describe('freezeClocks / resumeClocks: a disconnect never costs or gives time twice [G8, G9]', () => {
+    const info = { userId: 'u', side: 'white', at: NOW };
+
+    test('freezing charges the time used so far, once, and restarts the reference point', () => {
+        expect(freezeClocks(state(), NOW)).toEqual({ whiteClockMs: 57000, blackClockMs: 50000, lastMoveAt: NOW });
+    });
+
+    test('no double deduction: during the disconnect the clocks do not move [G9]', () => {
+        const frozen = { ...state(), ...freezeClocks(state(), NOW), disconnectInfo: info };
+        // The old ticker subtracted (now - lastMoveAt) again from the already charged clock.
+        expect(clocksAt(frozen, NOW + 10000)).toEqual({ whiteMs: 57000, blackMs: 50000 });
+        expect(activeRemainingMs(frozen, NOW + 10000)).toBe(57000);
+    });
+
+    test('after a 10 s absence only the time played counts', () => {
+        const frozen = { ...state(), ...freezeClocks(state(), NOW), disconnectInfo: info };
+        const resumed = { ...frozen, ...resumeClocks(frozen, NOW + 10000), disconnectInfo: null };
+        expect(resumed.lastMoveAt).toBe(NOW + 10000);
+        // 3 s before the disconnect + 2 s after the return = 5 s; the 10 s away are not charged.
+        expect(clocksAt(resumed, NOW + 12000)).toEqual({ whiteMs: 55000, blackMs: 50000 });
+    });
+
+    test('before the first move nothing is charged and the clock stays stopped [G8]', () => {
+        const fresh = state({ lastMoveAt: null });
+        expect(freezeClocks(fresh, NOW)).toEqual({ whiteClockMs: 60000, blackClockMs: 50000, lastMoveAt: null });
+        const frozen = { ...fresh, ...freezeClocks(fresh, NOW), disconnectInfo: info };
+        // Reconnecting must not start White's clock: no move has been made.
+        expect(resumeClocks(frozen, NOW + 5000)).toEqual({ lastMoveAt: null });
+        const resumed = { ...frozen, ...resumeClocks(frozen, NOW + 5000), disconnectInfo: null };
+        expect(isClockRunning(resumed)).toBe(false);
+        expect(clocksAt(resumed, NOW + 60000)).toEqual({ whiteMs: 60000, blackMs: 50000 });
     });
 });
 

@@ -84,8 +84,10 @@ describe('_ratingField (server time-control buckets)', () => {
         ['3+2', 'rating_blitz'],
         ['10', 'rating_rapid'],
         ['15+10', 'rating_rapid'],
-        ['30', 'rating_rapid'],
-        ['60', 'rating_rapid'],
+        ['29', 'rating_rapid'],
+        // One threshold set for server and web: 30 minutes is classical (TIME-CONTROL, F7).
+        ['30', 'rating_classical'],
+        ['60', 'rating_classical'],
         ['61', 'rating_classical'],
         ['90+30', 'rating_classical'],
     ])('%s min → %s', (tc, field) => {
