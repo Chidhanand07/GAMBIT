@@ -1599,3 +1599,29 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - *Implemented on a side branch by a helper agent (`wip/medium-web`, commit `44cfb7f`) and
   cherry-picked here; tests updated: three `GET /api/games/active` fixtures now express "has
   moves" as a `moves` row instead of `*_time_ms`.*
+
+## F-045
+
+**One `CORS_ORIGINS` allow-list for Express and the Socket.IO handshake; rejections are a plain 403 (S13).**
+
+- **Context.** Express allowed `localhost`, `FRONTEND_URL` and **any** `*.vercel.app` origin with
+  credentials (anyone can create a Vercel project); a rejected origin produced Express's 500
+  HTML error page with a stack trace outside production. Socket.IO accepted every origin with
+  credentials.
+- **Decision.**
+  - `CORS_ORIGINS`: comma-separated exact origins (`scheme://host[:port]`); a wildcard, a path
+    or a malformed entry stops the server at startup. `FRONTEND_URL` is read only when
+    `CORS_ORIGINS` is unset. In production one of them is required (fail fast); outside
+    production `localhost:3000` / `127.0.0.1:3000` are added.
+  - `CORS_PREVIEW_ORIGIN_REGEX` (optional): this project's Vercel previews. Accepted only if it
+    is anchored, https, ends in `\.vercel\.app$`, compiles, and does **not** match a set of
+    foreign probes (`https://evil.vercel.app`, `https://attacker-gambit.vercel.app`, …).
+  - `services/originPolicy.js` decides; `http/app.js` answers a disallowed browser origin with
+    `403 { error: 'origin_not_allowed' }` before any route, then runs `cors()` with the same
+    policy; Socket.IO's `allowRequest` uses the same `allowsRequest(origin)` and its CORS uses
+    `isAllowed`. A request without an `Origin` header (curl, server-to-server, native clients)
+    is not a browser request and passes, as before.
+  - The policy is rebuilt from the environment per request (cheap), like the old `FRONTEND_URL`.
+- **Owner action.** Set `CORS_ORIGINS` on Railway before deploying (the production URL and any
+  custom domain). Previews need `CORS_PREVIEW_ORIGIN_REGEX`; without it previews cannot reach
+  the game server (they could before, as could everyone else's).

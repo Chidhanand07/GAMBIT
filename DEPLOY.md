@@ -150,7 +150,9 @@ Go to your service → **Variables** tab and add:
 | `SUPABASE_URL` | your Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`); legacy `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` still read |
 | `REDIS_URL` | `rediss://...` from Upstash |
-| `FRONTEND_URL` | `https://your-app.vercel.app` (set after Vercel deploy) |
+| `CORS_ORIGINS` | **Required.** Comma-separated exact browser origins, e.g. `https://your-app.vercel.app,https://your-domain.com` (no wildcards, no trailing slash). The same list guards HTTP CORS and the game socket handshake. |
+| `CORS_PREVIEW_ORIGIN_REGEX` | Optional. Your project's Vercel preview URLs only, e.g. `^https://gambit-[a-z0-9-]+-yourteam\.vercel\.app$`. The server refuses to start if the pattern would match other people's `*.vercel.app` hosts. |
+| `FRONTEND_URL` | Deprecated: read only when `CORS_ORIGINS` is not set. |
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
 | `PORT` | **do not set** — Railway injects this automatically |

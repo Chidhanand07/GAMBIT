@@ -41,6 +41,7 @@ const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
 const { createProfileService } = require('./services/profileService');
 const { createTokenVerifier } = require('./services/tokenVerifier');
+const { createOriginPolicy } = require('./services/originPolicy');
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
@@ -50,9 +51,11 @@ const { registerProcessHandlers } = require('./processHandlers');
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
 
-const app = createApp({ frontendUrl: env.frontendUrl });
+// One allow-list of browser origins for HTTP and the socket handshake (S13); read per request.
+const originPolicy = () => createOriginPolicy({ origins: env.corsOrigins(), previewPattern: env.corsPreviewPattern() });
+const app = createApp({ originPolicy });
 const server = http.createServer(app);
-const io = createSocketServer(server);
+const io = createSocketServer(server, originPolicy);
 
 const matchmaking = new MatchmakingService(io);
 

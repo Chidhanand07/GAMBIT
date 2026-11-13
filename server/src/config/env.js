@@ -13,6 +13,8 @@
  * deprecated fallback so existing deployments keep working (G5; docs/fixes/DECISIONS.md F-002).
  */
 
+const { parseOrigins } = require('./origins');
+
 const DEFAULT_ENGINE_URL = 'http://localhost:8001';
 const DEFAULT_PORT = 3001;
 const DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379';
@@ -51,7 +53,8 @@ function engineUrl() {
  * @property {() => string} engineUrl chess-engine base URL (`GAMBIT_ENGINE_URL`, fallback `ENGINE_URL`).
  * @property {() => string | undefined} engineSharedSecret sent to the engine as `X-Engine-Key`
  *   (`ENGINE_SHARED_SECRET`); without it the engine client refuses to call the engine.
- * @property {() => string | undefined} frontendUrl extra CORS origin (`FRONTEND_URL`).
+ * @property {() => string[]} corsOrigins browser origins allowed by CORS and the socket handshake (S13)
+ * @property {() => string | undefined} corsPreviewPattern `CORS_PREVIEW_ORIGIN_REGEX`: this project's Vercel previews
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
  * @property {() => string} redisUrl `REDIS_URL`, default local Redis.
  * @property {() => string | undefined} supabaseUrl `SUPABASE_URL`.
@@ -88,11 +91,31 @@ function supabaseSecretKeySource() {
     return SECRET_KEY_NAMES.find((name) => Boolean(process.env[name])) ?? SECRET_KEY_NAMES[SECRET_KEY_NAMES.length - 1];
 }
 
+/** Local development origins, allowed only outside production. */
+const LOCAL_ORIGINS = Object.freeze(['http://localhost:3000', 'http://127.0.0.1:3000']);
+
+/**
+ * The browser origins allowed to call this server (NODE-09): `CORS_ORIGINS`
+ * (comma-separated), else the legacy single `FRONTEND_URL`. Outside production
+ * the local development origins are added. Production with neither set is a
+ * configuration error (fail fast, NODE-05).
+ * @returns {string[]}
+ */
+function corsOrigins() {
+    const configured = process.env.CORS_ORIGINS ?? process.env.FRONTEND_URL ?? '';
+    if (process.env.NODE_ENV === 'production') {
+        if (!configured.trim()) throw new Error('[config] CORS_ORIGINS is required in production');
+        return parseOrigins(configured);
+    }
+    return [...parseOrigins(configured), ...LOCAL_ORIGINS];
+}
+
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
     engineUrl,
     engineSharedSecret,
-    frontendUrl: () => process.env.FRONTEND_URL,
+    corsOrigins,
+    corsPreviewPattern: () => process.env.CORS_PREVIEW_ORIGIN_REGEX || undefined,
     port: () => process.env.PORT || DEFAULT_PORT,
     redisUrl: () => process.env.REDIS_URL || DEFAULT_REDIS_URL,
     supabaseUrl: () => process.env.SUPABASE_URL,
