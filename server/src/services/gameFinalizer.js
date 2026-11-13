@@ -14,6 +14,9 @@ const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
 
 const DEFAULT_TIME_CONTROL = '10';
+/** How often the finished row is written before giving up, and the pauses in between. */
+const PERSIST_ATTEMPTS = 3;
+const PERSIST_BACKOFF_MS = Object.freeze([200, 800]);
 
 /**
  * @typedef {import('../domain/adjudication').Verdict} Verdict
@@ -29,6 +32,7 @@ const DEFAULT_TIME_CONTROL = '10';
  * @property {{ clearGame: (gameId: string) => void }} sessions
  * @property {import('./emitter').Emitter} emitter
  * @property {() => number} [now]
+ * @property {(ms: number) => Promise<unknown>} [sleep] waits between database retries (injected in tests)
  */
 
 /**
@@ -52,6 +56,61 @@ function finishedRow(game, outcome) {
 }
 
 /**
+ * Write the finished row, retrying a failed write a bounded number of
+ * times with growing pauses. A result that still cannot be written is
+ * logged with the game id; the game stays finished for the players (Redis
+ * is committed) but is not rated, because the rating must not run without
+ * the row that makes it idempotent.
+ * @param {{ gamesRepo: { finishIfActive: Function }, sleep: (ms: number) => Promise<unknown> }} deps
+ * @param {string} gameId
+ * @param {object} row
+ * @returns {Promise<unknown>} the updated row when this call won the transition; null when the
+ *   game was already finalized or could not be persisted
+ */
+async function writeResult({ gamesRepo, sleep }, gameId, row) {
+    let lastError = '';
+    for (let attempt = 0; attempt < PERSIST_ATTEMPTS; attempt++) {
+        if (attempt > 0) await sleep(PERSIST_BACKOFF_MS[attempt - 1]);
+        try {
+            const { data, error } = await gamesRepo.finishIfActive(gameId, row);
+            if (!error) return data;
+            lastError = error.message;
+        } catch (e) {
+            lastError = /** @type {Error} */ (e).message;
+        }
+    }
+    console.error(`[finalizer] game ${gameId}: result not persisted after ${PERSIST_ATTEMPTS} attempts:`, lastError);
+    return null;
+}
+
+/**
+ * The state after `decide` ends `game`, or null when it does not (or the game
+ * is not an active game with both players). The clocks are the clocks as they
+ * stood at `at`: the side to move is charged for the time used since its last
+ * move (G11).
+ * @param {any} game state read inside the per-game lock
+ * @param {(game: any) => Verdict | null} decide
+ * @param {number} at
+ * @returns {any | null}
+ */
+function finishedState(game, decide, at) {
+    if (!game || game.status !== 'active' || !game.whiteId || !game.blackId) return null;
+    const verdict = decide(game);
+    if (!verdict) return null;
+    /** @type {Outcome} */
+    const outcome = verdict.aborted ? 'aborted' : (verdict.winner ?? 'draw');
+    const { whiteMs, blackMs } = clocksAt(game, at);
+    return {
+        ...game,
+        whiteClockMs: whiteMs,
+        blackClockMs: blackMs,
+        status: 'completed',
+        result: outcome,
+        reason: verdict.reason,
+    };
+}
+
+/**
  * @param {FinalizerDeps} deps
  */
 function createGameFinalizer({
@@ -62,6 +121,7 @@ function createGameFinalizer({
     sessions,
     emitter,
     now = () => Date.now(),
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
     /**
      * Persist the result; if this call won the database transition, start the
@@ -71,7 +131,7 @@ function createGameFinalizer({
      * @param {Outcome} outcome
      */
     async function persist(gameId, game, outcome) {
-        const { data: updated } = await gamesRepo.finishIfActive(gameId, finishedRow(game, outcome));
+        const updated = await writeResult({ gamesRepo, sleep }, gameId, finishedRow(game, outcome));
         // An aborted game was never played: nothing to review, nothing to rate.
         if (!updated || outcome === 'aborted') return;
 
@@ -96,30 +156,15 @@ function createGameFinalizer({
      * @returns {Promise<boolean>} true when this call ended the game
      */
     async function endGameIf(gameId, decide, at = now()) {
-        /** @type {Outcome} */
-        let outcome = 'draw';
-        let reason = '';
-        const finished = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
-            if (!game || game.status !== 'active' || !game.whiteId || !game.blackId) return null;
-            const verdict = decide(game);
-            if (!verdict) return null;
-            outcome = verdict.aborted ? 'aborted' : (verdict.winner ?? 'draw');
-            reason = verdict.reason;
-            // The clocks as they stood when the game ended: the side to move is charged
-            // for the time it had used since the last move (G11).
-            const { whiteMs, blackMs } = clocksAt(game, at);
-            return {
-                ...game,
-                whiteClockMs: whiteMs,
-                blackClockMs: blackMs,
-                status: 'completed',
-                result: outcome,
-                reason,
-            };
-        });
+        const finished = await gameStore.mutateGame(gameId, (/** @type {any} */ game) =>
+            finishedState(game, decide, at),
+        );
         if (!finished) return false;
+        const outcome = /** @type {Outcome} */ (finished.result);
+        const { reason } = finished;
 
-        await gameStore.removeActiveGame(gameId);
+        // From here on the game IS over (the state is committed). Tell the players first;
+        // leaving the ticker's set is housekeeping (the ticker ignores finished games).
         emitter.toRoom(gameRoom(gameId), 'game_end', {
             game_id: gameId,
             result: resultLabel(outcome),
@@ -128,6 +173,14 @@ function createGameFinalizer({
             black_id: finished.blackId,
         });
         sessions.clearGame(gameId);
+        try {
+            await gameStore.removeActiveGame(gameId);
+        } catch (e) {
+            console.error(
+                `[finalizer] game ${gameId}: could not leave the active set:`,
+                /** @type {Error} */ (e).message,
+            );
+        }
         await persist(gameId, finished, outcome);
         return true;
     }

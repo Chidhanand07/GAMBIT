@@ -22,10 +22,13 @@ function setup(game = makeGame({ id: 'g' })) {
     const gamesRepo = { finishIfActive: jest.fn(() => result({ id: game.id })) };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const finalizer = createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter, now: () => NOW });
-    return { finalizer, gameStore, emitter, sessions, gamesRepo, ratingService, reviewService };
+    const sleeps = [];
+    const sleep = async (ms) => void sleeps.push(ms);
+    const finalizer = createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter, now: () => NOW, sleep });
+    return { finalizer, sleeps, gameStore, emitter, sessions, gamesRepo, ratingService, reviewService };
 }
 
+beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
 afterEach(() => jest.restoreAllMocks());
 
 test('a decisive result: Redis, active set, broadcast, session links, DB row, review and rating', async () => {
@@ -289,5 +292,74 @@ describe('finalization uses server state only [G11]', () => {
         await ctx.finalizer.endGame('g', { winner: 'white', reason: 'Checkmate', time_control: '1+0', is_rated: true });
         expect(ctx.ratingService.processGameEnd).toHaveBeenCalledWith('g', 'white-user', 'black-user', 'white', '3+2', false);
         expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledWith('g', expect.anything(), '3+2');
+    });
+});
+
+describe('failures while a game is being finished [ERRORS]', () => {
+    const verdict = { winner: 'white', reason: 'Checkmate' };
+
+    test('if the finished state cannot be written to Redis, nobody is told the game is over', async () => {
+        const ctx = setup();
+        ctx.gameStore.mutateGame.mockRejectedValueOnce(new Error('redis setex failed'));
+        await expect(ctx.finalizer.endGame('g', verdict)).rejects.toThrow('redis setex failed');
+        expect(ctx.emitter.named('game_end')).toEqual([]);
+        expect(ctx.gamesRepo.finishIfActive).not.toHaveBeenCalled();
+        expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
+    });
+
+    test('a database error is retried with backoff, then the game is rated as usual', async () => {
+        const ctx = setup();
+        ctx.gamesRepo.finishIfActive
+            .mockReturnValueOnce(result(null, { message: 'connection reset' }))
+            .mockReturnValueOnce(result(null, { message: 'connection reset' }))
+            .mockReturnValueOnce(result({ id: 'g' }));
+        expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
+
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(3);
+        expect(ctx.sleeps).toEqual([200, 800]);
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
+        expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledTimes(1);
+    });
+
+    test('the retries are bounded; a game that cannot be persisted is logged with its id, and not rated', async () => {
+        const ctx = setup();
+        ctx.gamesRepo.finishIfActive.mockReturnValue(result(null, { message: 'db down' }));
+        expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
+
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(3);
+        expect(console.error).toHaveBeenCalledWith('[finalizer] game g: result not persisted after 3 attempts:', 'db down');
+        expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
+        // The players were told: the game IS over (Redis is committed); only the record is missing.
+        expect(ctx.emitter.named('game_end')).toHaveLength(1);
+    });
+
+    test('a thrown database call is retried like an error result', async () => {
+        const ctx = setup();
+        ctx.gamesRepo.finishIfActive
+            .mockImplementationOnce(() => {
+                throw new Error('fetch failed');
+            })
+            .mockReturnValueOnce(result({ id: 'g' }));
+        expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(2);
+        expect(ctx.ratingService.processGameEnd).toHaveBeenCalledTimes(1);
+    });
+
+    test('"already finalized" (no error, no row) is not an error and is not retried', async () => {
+        const ctx = setup();
+        ctx.gamesRepo.finishIfActive.mockReturnValue(result(null));
+        await ctx.finalizer.endGame('g', verdict);
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(1);
+        expect(ctx.sleeps).toEqual([]);
+        expect(console.error).not.toHaveBeenCalled();
+    });
+
+    test('failing to drop the game from the active set does not hide the result from the players', async () => {
+        const ctx = setup();
+        ctx.gameStore.removeActiveGame.mockRejectedValueOnce(new Error('redis srem failed'));
+        expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
+        expect(ctx.emitter.named('game_end')).toHaveLength(1);
+        expect(console.error).toHaveBeenCalledWith('[finalizer] game g: could not leave the active set:', 'redis srem failed');
+        expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(1);
     });
 });

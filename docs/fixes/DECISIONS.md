@@ -62,6 +62,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
 | [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
 | [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
+| [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
 
 ---
 
@@ -1513,3 +1514,35 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Not verified.** The server side is tested end to end against the real server with a
   token that expires after 400 ms. The client half is tested against a fake socket; a real
   browser session crossing a real token expiry mid-game has not been observed.
+
+## F-042
+
+**Redis errors are errors; the database write of a finished game is retried; a game is announced as over only after Redis has committed it (ERRORS).**
+
+- **Context.** `gameStateRepository` logged and swallowed every Redis error: `getGame` returned
+  null ("no such game") when Redis was down, `setGame` resolved as if it had written, the
+  active-set calls returned `[]` or nothing. A move could be broadcast without being stored.
+  The finalizer treated a database error exactly like "already finalized": no log, no rating,
+  the row stayed `active` (deferred in F-010).
+- **Decision.**
+  - *Store.* Every call rejects when Redis fails (and `getGame` when the stored value is not
+    JSON). Callers already handle a rejection: socket handlers go through `wrap()`, which acks
+    `{ ok: false, error: 'internal_error' }` and logs; the ticker logs per game and tries again
+    next second; HTTP routes answer 500 through `sendError`. A move whose write fails is
+    therefore *not* broadcast: `mutateGame` rejects before `moveRecorder` emits `move_made`.
+  - *Finalizer, order of effects.* 1) the atomic active → completed transition in Redis (if it
+    fails, the call rejects and nobody is told anything), 2) `game_end` to the room, 3) session
+    cleanup, 4) leaving the active set (a failure there is logged; the ticker ignores finished
+    games anyway), 5) the database row, rating and review.
+  - *Database row.* `finishIfActive` is tried up to 3 times with pauses of 200 ms and 800 ms; an
+    error result and a thrown call are both retried; "no row" (already finalized) is not an
+    error and is not retried. If all attempts fail, the error is logged with the game id
+    (`[finalizer] game <id>: result not persisted after 3 attempts: …`) and the game is **not
+    rated**, because the rating is only idempotent together with that row (RATING-ATOMIC, M3).
+- **Why announce before the database.** Redis is the authority for live games (NODE-17). Once
+  it says "completed", no move can be applied any more; holding the players' result screen
+  until Postgres answers would make an outage of the database look like a frozen game.
+- **What is still missing.** A finished game whose row could not be written stays `active` in
+  the database until the web app's stale-game cleanup or a manual fix; an outbox/retry queue
+  is the full answer and is listed for the last phase. The log line names the game id so it
+  can be found.
