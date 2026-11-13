@@ -1,3 +1,4 @@
+import { barLabel } from '../evaluation';
 import type { EngineAnalysis } from '../types';
 
 /** Evaluations beyond ±6 pawns fill the bar. */
@@ -30,7 +31,7 @@ export function EvalBar({ engineData }: { engineData: EngineAnalysis | null }) {
                             padding: '4px 0',
                         }}
                     >
-                        {Math.abs(evalScore).toFixed(1)}
+                        {barLabel(engineData)}
                     </span>
                 )}
             </div>
@@ -44,7 +45,7 @@ export function EvalBar({ engineData }: { engineData: EngineAnalysis | null }) {
                         className="text-[9px] font-mono tabular-nums"
                         style={{ color: '#1C1C1C', writingMode: 'vertical-rl', padding: '4px 0' }}
                     >
-                        +{evalScore.toFixed(1)}
+                        +{barLabel(engineData)}
                     </span>
                 )}
             </div>

@@ -12,6 +12,11 @@ import AnalysisPage from '@/app/analysis/page'
 const ENGINE_URL = 'http://127.0.0.1:3001/api/analysis/engine'
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
+const ENGINE_BODY = {
+    best_move: 'e7e5',
+    evaluation: { type: 'cp', value: 34 },
+    lines: [{ move: 'e7e5', centipawn: 34, mate: null }],
+}
 
 let fetchMock: jest.Mock
 let writeText: jest.Mock
@@ -19,7 +24,8 @@ let alertSpy: jest.SpyInstance
 
 beforeEach(() => {
     delete process.env.NEXT_PUBLIC_SOCKET_URL
-    fetchMock = jest.fn(async () => jsonResponse({ score: 0.34, best_move: 'e7e5', pv: 'e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7' }))
+    // F14: the engine's real body (chess-engine analyse_position), not { score, best_move, pv }.
+    fetchMock = jest.fn(async () => jsonResponse(ENGINE_BODY))
     ;(global as any).fetch = fetchMock
     writeText = jest.fn()
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
@@ -152,7 +158,8 @@ describe('moves and navigation', () => {
 })
 
 describe('engine', () => {
-    test('toggle on: posts {fen, depth: 18} after 500 ms and renders score, best move and 8 pv chips', async () => {
+    // F14 (was: '... renders score, best move and 8 pv chips'): the engine sends no PV, so no chips.
+    test('toggle on: posts {fen, depth: 18} after 500 ms and renders score and best move', async () => {
         jest.useFakeTimers()
         const { container } = render(<AnalysisPage />)
         const toggle = screen.getByText('Stockfish 16').parentElement!.parentElement!.querySelector('button')!
@@ -169,7 +176,7 @@ describe('engine', () => {
         // eval bar label + engine panel score
         expect(screen.getAllByText('+0.3')).toHaveLength(2)
         expect(screen.getByText('e7e5', { selector: 'span.text-accent' })).toBeInTheDocument()
-        expect(screen.getAllByText(/^[a-h][1-8][a-h][1-8]$/, { selector: 'span.font-mono' })).toHaveLength(8)
+        expect(screen.queryAllByText(/^[a-h][1-8][a-h][1-8]$/, { selector: 'span.font-mono' })).toHaveLength(0)
         // new position re-queries
         playE4(container)
         await act(async () => { jest.advanceTimersByTime(500) })
@@ -183,7 +190,7 @@ describe('engine', () => {
 
     test('uses NEXT_PUBLIC_SOCKET_URL when set; negative score renders without plus', async () => {
         process.env.NEXT_PUBLIC_SOCKET_URL = 'http://sock.test'
-        fetchMock.mockImplementation(async () => jsonResponse({ score: -1.26, best_move: 'd2d4' }))
+        fetchMock.mockImplementation(async () => jsonResponse({ best_move: 'd2d4', evaluation: { type: 'cp', value: -126 } }))
         jest.useFakeTimers()
         render(<AnalysisPage />)
         click(screen.getByText('Stockfish 16').parentElement!.parentElement!.querySelector('button')!)
@@ -194,13 +201,47 @@ describe('engine', () => {
         delete process.env.NEXT_PUBLIC_SOCKET_URL
     })
 
-    test('a fetch failure is swallowed and keeps the spinner', async () => {
+    // F14 (was: 'a fetch failure is swallowed and keeps the spinner').
+    test('a fetch failure shows "Engine unavailable" instead of a spinner', async () => {
         fetchMock.mockImplementation(async () => { throw new Error('offline') })
         jest.useFakeTimers()
         render(<AnalysisPage />)
         click(screen.getByText('Stockfish 16').parentElement!.parentElement!.querySelector('button')!)
         await act(async () => { jest.advanceTimersByTime(500) })
-        expect(screen.getByText('Analyzing position…')).toBeInTheDocument()
+        expect(screen.getByText(/Engine unavailable/)).toBeInTheDocument()
+        expect(screen.queryByText('Analyzing position…')).toBeNull()
+    })
+
+    test('F14: an engine error status shows "Engine unavailable", never a 0.0 evaluation', async () => {
+        fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({ error: 'engine_busy' }) }))
+        jest.useFakeTimers()
+        render(<AnalysisPage />)
+        click(screen.getByText('Stockfish 16').parentElement!.parentElement!.querySelector('button')!)
+        await act(async () => { jest.advanceTimersByTime(500) })
+        expect(screen.getByText(/Engine unavailable/)).toBeInTheDocument()
+        expect(screen.queryByText('0.0')).toBeNull()
+        expect(screen.queryByText('+0.0')).toBeNull()
+    })
+
+    test('F14: a mate score is shown as M<n>', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse({ best_move: 'd8h4', evaluation: { type: 'mate', value: -1 } }))
+        jest.useFakeTimers()
+        render(<AnalysisPage />)
+        click(screen.getByText('Stockfish 16').parentElement!.parentElement!.querySelector('button')!)
+        await act(async () => { jest.advanceTimersByTime(500) })
+        expect(screen.getAllByText('-M1').length).toBeGreaterThan(0)
+    })
+})
+
+describe('loading a position (F14)', () => {
+    test('a selection made before loading a position is cleared', () => {
+        const { container } = render(<AnalysisPage />)
+        click(square(container, 'e2'))
+        expect(square(container, 'e4').querySelector('.rounded-full')).not.toBeNull()
+        click(screen.getByRole('button', { name: 'Import' }))
+        click(screen.getByRole('button', { name: 'Sicilian Defense' }))
+        expect(square(container, 'e4').querySelector('.rounded-full')).toBeNull()
+        expect(square(container, 'e2').style.background).not.toBe('rgba(246, 246, 105, 0.6)')
     })
 })
 

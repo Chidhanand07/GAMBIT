@@ -36,7 +36,7 @@ export default function AnalysisPage() {
 
     const resetBoard = () => {
         board.reset();
-        engine.setEngineData(null);
+        engine.clearEngineData();
     };
 
     if (!game)
@@ -85,6 +85,7 @@ export default function AnalysisPage() {
                             enabled={engine.engineEnabled}
                             onToggle={() => engine.setEngineEnabled((v) => !v)}
                             data={engine.engineData}
+                            failed={engine.engineFailed}
                         />
                         <MoveList
                             moveHistory={moveHistory}
