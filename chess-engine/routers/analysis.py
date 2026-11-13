@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from routers.fen import parse_fen
+from routers.fen import parse_fen, parse_legal_move
 from seams import EngineSeams
 from services import analysis as analysis_service
 from services import review as review_service
@@ -75,7 +75,7 @@ def build_router(seams: EngineSeams) -> APIRouter:
 
     @router.post("/classify-move")
     def classify_move(req: MoveClassifyReq):
-        parse_fen(req.fen)
+        parse_legal_move(parse_fen(req.fen), req.move)
         with seams.get_engine(CLASSIFY_DEPTH) as sf:
             if not sf:
                 raise HTTPException(status_code=503, detail="Engine unavailable")

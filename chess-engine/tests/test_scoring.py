@@ -62,10 +62,10 @@ def test_accepts_san_as_well_as_uci():
     assert result[6] == "e2e4"
 
 
-def test_illegal_or_garbage_move_does_not_crash():
-    result = analyze_move_cp(sf_with("e2e4", 30, {"type": "cp", "value": 0}), START, "zz9", chess.WHITE)
-    assert result[1] == "Mistake"
-    assert result[6] is None
+def test_illegal_or_garbage_move_is_refused_not_called_a_mistake():
+    # Was: classified "Mistake" with played_uci None. /classify-move now answers 400 first.
+    with pytest.raises(ValueError):
+        analyze_move_cp(sf_with("e2e4", 30, {"type": "cp", "value": 0}), START, "zz9", chess.WHITE)
 
 
 def test_delivering_checkmate_is_never_a_blunder():

@@ -111,21 +111,21 @@ def analyze_move_cp(sf: Any, board_fen: str, move_played_san: str, player_color:
     board_fen: FEN *before* the move is played
     move_played_san: The move played by human in SAN or UCI
     player_color: chess.WHITE or chess.BLACK
+    Raises ValueError when the move is not legal in `board_fen` (callers validate first).
     """
-    sf.set_fen_position(board_fen)
+    b = chess.Board(board_fen)
+    user_move = parse_played_move(b, move_played_san)
+    if user_move is None:
+        raise ValueError(f"Illegal move {move_played_san!r} in {board_fen}")
 
+    sf.set_fen_position(board_fen)
     # E4: removed sf.get_best_move() — redundant, top_moves[0] has the same info
     top_moves = sf.get_top_moves(2)
     best_move_uci = top_moves[0]["Move"] if top_moves else None
-    b = chess.Board(board_fen)
     eval_before_normalized = evaluation_for(sf.get_evaluation(), b, player_color)
     eval_best_cp = _best_cp_for_mover(top_moves, player_color)
 
     # Eval after user move
-    user_move = parse_played_move(b, move_played_san)
-    if user_move is None:
-        return 0, "Mistake", eval_before_normalized, 0, 0, None, None, 0.0
-
     b.push(user_move)
     sf.set_fen_position(b.fen())
     eval_after_cp = evaluation_for(sf.get_evaluation(), b, player_color)
