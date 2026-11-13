@@ -815,6 +815,28 @@ describe('game-over modal and rematch', () => {
         act(() => { jest.advanceTimersByTime(1) })
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
+
+    test('a second rematch request restarts the 30 s window instead of inheriting the first timer [F3]', async () => {
+        jest.useFakeTimers()
+        await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(20_000) })
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(10_000) }) // the first request's 30 s are up
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(19_999) })
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(1) })
+        expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
+    })
+
+    test('unmounting clears the pending rematch timer [F3]', async () => {
+        jest.useFakeTimers()
+        const { unmount } = await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        unmount()
+        expect(jest.getTimerCount()).toBe(0)
+    })
 })
 
 // ── Board controls ──────────────────────────────────────────────────────────

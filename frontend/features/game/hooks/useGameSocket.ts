@@ -54,13 +54,14 @@ export function useGameSocket(options: Options): void {
 
     useEffect(() => {
         if (!socket || !signedIn) return;
-        const handlers = createGameSocketHandlers(liveHandlerContext(socket, gameId, readLive));
+        const { handlers, dispose } = createGameSocketHandlers(liveHandlerContext(socket, gameId, readLive));
         for (const [event, handler] of handlers) socket.on(event, handler);
         // A socket that is still connecting joins from its `connect` handler instead; emitting
         // here too would be buffered and sent as a second join once it connects.
         if (socket.connected) joinGameRoom(socket, gameId);
         return () => {
             for (const [event, handler] of handlers) socket.off(event, handler);
+            dispose();
         };
     }, [socket, signedIn, gameId]);
 }

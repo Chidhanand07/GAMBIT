@@ -117,11 +117,29 @@ function onGameEnd(ctx: SocketHandlerContext) {
     };
 }
 
-function onRematchRequest(ctx: SocketHandlerContext) {
+/** The pending auto-dismiss of the incoming rematch toast; one at a time (F3). */
+interface RematchExpiry {
+    restart: () => void;
+    cancel: () => void;
+}
+
+function rematchExpiry(ctx: SocketHandlerContext): RematchExpiry {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => clearTimeout(timer);
+    return {
+        cancel,
+        restart: () => {
+            cancel();
+            timer = setTimeout(() => ctx.dispatch({ type: 'rematchExpired' }), REMATCH_TOAST_MS);
+        },
+    };
+}
+
+function onRematchRequest(ctx: SocketHandlerContext, expiry: RematchExpiry) {
     return (data: RematchRequestPayload) => {
         ctx.dispatch({ type: 'rematchReceived', fromUsername: data.from_username as string });
-        // Auto-dismiss after 30 s if not acted on.
-        setTimeout(() => ctx.dispatch({ type: 'rematchExpired' }), REMATCH_TOAST_MS);
+        // Auto-dismiss 30 s after the LATEST request if not acted on.
+        expiry.restart();
     };
 }
 
@@ -145,9 +163,20 @@ function onClockSync(ctx: SocketHandlerContext) {
     };
 }
 
-/** [event, handler] pairs in the legacy `socket.on` order. */
-export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[string, SocketListener]> {
-    const { dispatch } = ctx;
+export interface GameSocketSubscription {
+    /** [event, handler] pairs in the legacy `socket.on` order. */
+    handlers: Array<[string, SocketListener]>;
+    /** Clears the timers the handlers started; call it when the handlers are removed. */
+    dispose: () => void;
+}
+
+export function createGameSocketHandlers(ctx: SocketHandlerContext): GameSocketSubscription {
+    const expiry = rematchExpiry(ctx);
+    return { handlers: handlerList(ctx, expiry), dispose: expiry.cancel };
+}
+
+function handlerList(ctx: SocketHandlerContext, expiry: RematchExpiry): Array<[string, SocketListener]> {
+    const dispatch = (action: GameAction) => ctx.dispatch(action);
     return [
         ['disconnect', () => dispatch({ type: 'connectionChanged', connected: false })],
         [
@@ -169,7 +198,7 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
                 dispatch({ type: 'ratingChanged', side: 'black', change: data.black.change });
             },
         ],
-        ['rematch_request', onRematchRequest(ctx)],
+        ['rematch_request', onRematchRequest(ctx, expiry)],
         ['rematch_ready', (data: GameIdPayload) => ctx.router.push(`/game/${data.game_id}`)],
         ['rematch_declined', () => dispatch({ type: 'rematchStateSet', value: 'declined' })],
         [
