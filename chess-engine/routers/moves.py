@@ -8,6 +8,9 @@ from routers.fen import parse_fen
 
 router = APIRouter()
 
+# The only error a client sees for a move that cannot be parsed.
+INVALID_MOVE = "invalid_move"
+
 
 class MoveReq(BaseModel):
     fen: str
@@ -32,8 +35,10 @@ def validate_move(req: MoveReq):
                 },
             }
         return {"valid": False}
-    except Exception as e:
-        return {"valid": False, "error": str(e)}
+    except ValueError:
+        # An unparsable move (chess.InvalidMoveError is a ValueError). The exception text stays
+        # on the server: it is not part of the API (CodeQL py/stack-trace-exposure).
+        return {"valid": False, "error": INVALID_MOVE}
 
 
 @router.post("/valid-moves")

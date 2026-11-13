@@ -57,6 +57,12 @@ def test_validate_move_never_500s_on_a_bad_move(client, move):
     assert res.json()["valid"] is False
 
 
+def test_validate_move_does_not_expose_exception_text(client):
+    # CodeQL py/stack-trace-exposure: was {"valid": false, "error": "<exception message>"}.
+    res = client.post("/validate-move", json={"fen": START, "move": "nonsense"})
+    assert res.json() == {"valid": False, "error": "invalid_move"}
+
+
 def test_validate_move_bad_fen_is_400(client):
     # G19: was 200 {"valid": false}; an unparseable FEN is now 400 on every FEN endpoint.
     res = client.post("/validate-move", json={"fen": "garbage", "move": "e2e4"})
