@@ -6,6 +6,7 @@
  * adds context to every line. `log.pino` is the underlying instance (pino-http
  * uses it for request logs).
  */
+const os = require('node:os');
 const pino = require('pino');
 const env = require('../config/env');
 
@@ -66,7 +67,8 @@ function adapt(logger) {
 function createLogger({ level = env.logLevel(), destination } = {}) {
     const options = {
         level,
-        base: { service: 'gambit-server' },
+        // hostname and pid tell replicas apart (setting `base` drops pino's defaults).
+        base: { service: 'gambit-server', hostname: os.hostname(), pid: process.pid },
         timestamp: pino.stdTimeFunctions.isoTime,
         redact: { paths: [...REDACT_PATHS], censor: '[REDACTED]' },
     };

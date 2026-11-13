@@ -435,10 +435,10 @@ describe('disconnect and reconnect', () => {
         supabase.queue('profiles', { data: { id: 'queued', username: 'q', rating_rapid: 1500, games_played: 20 }, error: null });
         s.emit('join_queue', { user: { id: 'queued' }, time_control: '10' });
         await once(s, 'queue_joined');
-        expect(matchmaking.queue.has('queued')).toBe(true);
+        expect(await matchmaking.queuedEntry('queued')).not.toBeNull();
         s.disconnect();
         await sleep(50);
-        expect(matchmaking.queue.has('queued')).toBe(false);
+        expect(await matchmaking.queuedEntry('queued')).toBeNull();
     });
 });
 
@@ -448,17 +448,17 @@ describe('matchmaking queue over sockets', () => {
         supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_blitz: 1650, rating_rapid: 1400, games_played: 30 }, error: null });
         s.emit('join_queue', { user: { id: 'p1', rating: 3000 }, time_control: '3+2' });
         await once(s, 'queue_joined');
-        expect(matchmaking.queue.get('p1')).toMatchObject({ rating: 1650, isProvisional: false });
+        expect(await matchmaking.queuedEntry('p1')).toMatchObject({ rating: 1650, isProvisional: false });
         s.emit('leave_queue', 'p1');
         await sleep(30);
-        expect(matchmaking.queue.has('p1')).toBe(false);
+        expect(await matchmaking.queuedEntry('p1')).toBeNull();
     });
 
     test('join_queue for an unknown user is ignored', async () => {
         const s = await connect('ghost');
         s.emit('join_queue', { user: { id: 'ghost' }, time_control: '10' });
         await sleep(80);
-        expect(matchmaking.queue.has('ghost')).toBe(false);
+        expect(await matchmaking.queuedEntry('ghost')).toBeNull();
     });
 
     test('the queued player is the verified user, whatever id the payload claims [S2]', async () => {
@@ -467,7 +467,7 @@ describe('matchmaking queue over sockets', () => {
         s.emit('join_queue', { user: { id: 'victim' }, time_control: '10' });
         await once(s, 'queue_joined');
         expect(supabase.op(supabase.callsFor('profiles')[0], 'eq')).toEqual(['id', 'p1']);
-        expect([...matchmaking.queue.keys()]).toEqual(['p1']);
+        expect(await matchmaking.queuedUserIds()).toEqual(['p1']);
     });
 
     test('leave_queue only removes the caller, not the id in the payload [G13]', async () => {
@@ -478,7 +478,7 @@ describe('matchmaking queue over sockets', () => {
         const attacker = await connect('attacker');
         attacker.emit('leave_queue', 'victim');
         await sleep(50);
-        expect(matchmaking.queue.has('victim')).toBe(true);
+        expect(await matchmaking.queuedEntry('victim')).not.toBeNull();
     });
 });
 

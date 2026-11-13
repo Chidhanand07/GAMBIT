@@ -16,7 +16,7 @@ const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
-const { gameRoom } = require('./emitter');
+const { gameRoom, playerRoom } = require('./emitter');
 const { createGameFinalizer } = require('./gameFinalizer');
 const { createMoveRecorder } = require('./moveRecorder');
 
@@ -96,7 +96,11 @@ async function joinGame(ctx, gameId, client, userId) {
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
     // Only a live game is linked: a link to a finished game would never be cleaned up (G17).
-    if (game.status === 'active' && isParticipant(game, userId)) ctx.sessions.linkSocket(client.id, gameId);
+    if (game.status === 'active' && isParticipant(game, userId)) {
+        ctx.sessions.linkSocket(client.id, gameId);
+        // Visible to every instance: is any socket of this player still at this board?
+        client.join(playerRoom(gameId, userId));
+    }
     sendState(ctx, game, client);
 }
 
@@ -155,6 +159,7 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
     // The socket that resumed the game is at the board, even before it re-joins.
     sessions.linkSocket(client.id, gameId);
     client.join(gameRoom(gameId));
+    client.join(playerRoom(gameId, userId));
     emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
     client.emit('clock_sync', { whiteMs: resumed.whiteClockMs, blackMs: resumed.blackClockMs });
 }

@@ -4,6 +4,7 @@
  * and log lines as the original `server/lib/redis.js`.
  */
 const { log } = require('../observability/log');
+const { defineRedisCommands } = require('./redisCommands');
 // The CommonJS export is the Redis class itself; the cast tells @ts-check so.
 const Redis = /** @type {typeof import('ioredis').default} */ (/** @type {unknown} */ (require('ioredis')));
 
@@ -37,6 +38,8 @@ function createRedisClient(url) {
         maxRetriesPerRequest: MAX_RETRIES_PER_REQUEST,
     });
 
+    // Lua commands the repositories need for cross-instance correctness (MULTI-INSTANCE).
+    defineRedisCommands(redis);
     redis.on('connect', () => log.info('[Redis] Connected'));
     redis.on('error', (err) => log.error('[Redis] Error:', err.message));
 

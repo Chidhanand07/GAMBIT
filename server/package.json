@@ -16,6 +16,7 @@
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"src/**/*.js\""
   },
   "dependencies": {
+    "@socket.io/redis-streams-adapter": "^0.3.1",
     "@supabase/supabase-js": "^2.119.0",
     "axios": "^1.6.2",
     "chess.js": "^1.4.0",

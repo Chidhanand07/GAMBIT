@@ -39,6 +39,8 @@ function deps() {
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
+        // Other instances hold no socket of this player unless a test says so.
+        countPlayerSockets: jest.fn(async () => 0),
         socialService: {
             requestRematch: fn(),
             acceptRematch: fn(),
@@ -76,8 +78,9 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'disconnect',
         ].sort(),
     );
-    // The connection line comes from a child logger bound to the socket and user [OBSERVABILITY].
-    expect(socket.data.log).toBeDefined();
+    // socket.data is serialized by the Redis adapter for connection-state recovery: plain data
+    // only. Was: a pino child logger stored there, which made every disconnect throw [MULTI-INSTANCE].
+    expect(() => structuredClone(socket.data)).not.toThrow();
 });
 
 test('the handshake middleware rejects a connection without a valid token [S2]', async () => {
@@ -251,5 +254,24 @@ describe('a socket closed because its token expired [TOKEN-LIFETIME]', () => {
         await handlers.disconnect();
         await jest.advanceTimersByTimeAsync(4_000_000);
         expect(socket.disconnect).not.toHaveBeenCalled();
+    });
+});
+
+describe('the countdown needs every instance to agree the player is gone [MULTI-INSTANCE]', () => {
+    test('a player socket on another instance keeps the game alive', async () => {
+        const d = { ...deps(), countPlayerSockets: jest.fn(async () => 1) };
+        const { handlers } = connect(d, 'u1');
+        d.sessions.linkSocket('sock-1', 'g');
+        await handlers.disconnect();
+        expect(d.countPlayerSockets).toHaveBeenCalledWith('u1', 'g');
+        expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+    });
+
+    test('no player socket anywhere: the countdown starts', async () => {
+        const d = { ...deps(), countPlayerSockets: jest.fn(async () => 0) };
+        const { handlers } = connect(d, 'u1');
+        d.sessions.linkSocket('sock-1', 'g');
+        await handlers.disconnect();
+        expect(d.gameService.handleDisconnect.mock.calls).toEqual([['u1', 'g']]);
     });
 });

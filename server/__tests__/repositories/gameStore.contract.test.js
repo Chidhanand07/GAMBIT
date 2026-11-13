@@ -69,3 +69,40 @@ describe.each([
         expect(await store.getActiveGameIds()).toEqual(['g2']);
     });
 });
+
+describe('mutateGame is a compare-and-set against Redis, not only an in-process lock [MULTI-INSTANCE]', () => {
+    const { createRedisMock } = require('../helpers/mockRedis');
+    const { createGameStateRepository } = require('../../src/repositories/gameStateRepository');
+
+    test('a write by another instance between our read and our write makes us retry on the new state', async () => {
+        const redis = createRedisMock();
+        const store = createGameStateRepository(redis);
+        const otherInstance = createGameStateRepository(redis);
+        await store.setGame('g', { n: 0 });
+
+        let first = true;
+        const result = await store.mutateGame('g', async (game) => {
+            if (first) {
+                first = false;
+                // Another instance commits while we are deciding.
+                await otherInstance.mutateGame('g', (g) => ({ ...g, n: g.n + 10 }));
+            }
+            return { ...game, n: game.n + 1 };
+        });
+        expect(result).toEqual({ n: 11 });
+        expect(await store.getGame('g')).toEqual({ n: 11 });
+    });
+
+    test('a key that keeps changing is given up on after a bounded number of attempts', async () => {
+        const redis = createRedisMock();
+        const store = createGameStateRepository(redis);
+        const other = createGameStateRepository(redis);
+        await store.setGame('g', { n: 0 });
+        await expect(
+            store.mutateGame('g', async (game) => {
+                await other.setGame('g', { n: Math.random() });
+                return { ...game, n: -1 };
+            }),
+        ).rejects.toThrow('game g: too much contention');
+    });
+});

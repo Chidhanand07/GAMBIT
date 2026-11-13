@@ -168,7 +168,35 @@ function findOpponent(player, candidates, clock) {
     return null;
 }
 
+/**
+ * One pairing pass over a queue snapshot: longest-waiting first, each player
+ * meets the longest-waiting compatible candidate after them, nobody twice.
+ * The pairs come back in the order the pass chose them.
+ * @template {QueueEntry} T
+ * @param {T[]} entries
+ * @param {() => number} clock
+ * @returns {Array<[T, T]>}
+ */
+function planPairs(entries, clock) {
+    const players = sortByLongestWaiting([...entries]);
+    /** @type {Set<string>} */
+    const paired = new Set();
+    /** @type {Array<[T, T]>} */
+    const pairs = [];
+    players.forEach((player, i) => {
+        if (paired.has(player.user_id)) return;
+        const candidates = players.slice(i + 1).filter((p) => !paired.has(p.user_id));
+        const opponent = findOpponent(player, candidates, clock);
+        if (!opponent) return;
+        paired.add(player.user_id);
+        paired.add(opponent.user_id);
+        pairs.push([player, opponent]);
+    });
+    return pairs;
+}
+
 module.exports = {
+    planPairs,
     getSearchRadius,
     isProvisional,
     createQueueEntry,

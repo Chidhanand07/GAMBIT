@@ -137,7 +137,7 @@ function useServer() {
         }
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
         delete process.env.GAMBIT_ENGINE_URL;
         delete process.env.ENGINE_URL;
         delete process.env.FRONTEND_URL;
@@ -145,7 +145,8 @@ function useServer() {
         process.env.ENGINE_SHARED_SECRET = ENGINE_TEST_SECRET;
         supabase.reset();
         redis._reset();
-        ctx.matchmaking.queue.clear();
+        // The queue lives in (mock) Redis now, so the reset above emptied it; re-read the size snapshot.
+        await ctx.matchmaking.queueSize();
         supabase.auth.getUser.mockImplementation(verifyTestToken);
         ctx.fetch = jest.spyOn(global, 'fetch').mockImplementation(defaultEngine);
         jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -200,7 +201,8 @@ function useServer() {
  * @param {{ _strings: Map<string, string> }} redis
  */
 function gameKeys(redis) {
-    return [...redis._strings.keys()].filter((key) => !key.startsWith('ratelimit:'));
+    // Rate-limit counters and the matchmaking queue's keys ({mm}:...) are not game state.
+    return [...redis._strings.keys()].filter((key) => !key.startsWith('ratelimit:') && !key.startsWith('{mm}:'));
 }
 
 module.exports = {

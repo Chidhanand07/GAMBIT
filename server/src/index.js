@@ -45,6 +45,8 @@ const { createOriginPolicy } = require('./services/originPolicy');
 const { createRateLimiter } = require('./services/rateLimiter');
 const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
 const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
+const { createTickLockRepository } = require('./repositories/tickLockRepository');
+const { createSocketAdapter } = require('./clients/socketAdapter');
 const { createHttpRateLimit } = require('./http/rateLimit');
 const { createSocketRateLimit } = require('./sockets/rateLimit');
 const { createReadiness } = require('./services/readiness');
@@ -66,7 +68,9 @@ const gamesRepo = createGamesRepository(supabase);
 const originPolicy = () => createOriginPolicy({ origins: env.corsOrigins(), previewPattern: env.corsPreviewPattern() });
 const app = createApp({ originPolicy });
 const server = http.createServer(app);
-const io = createSocketServer(server, originPolicy);
+// Rooms and broadcasts across instances (NODE-15); off under test and with SOCKET_ADAPTER=none.
+const socketAdapter = env.socketAdapter() === 'redis' ? createSocketAdapter(env.redisUrl()) : null;
+const io = createSocketServer(server, originPolicy, { adapter: socketAdapter?.adapter });
 
 const matchmaking = new MatchmakingService(io);
 
@@ -101,7 +105,7 @@ const gameService = createGameService({
 });
 
 // Start single global clock ticker (replaces all per-game setInterval timers)
-startGlobalClock(createClockService({ gameStore, finalizer, emitter }));
+startGlobalClock(createClockService({ gameStore, finalizer, emitter, tickLocks: createTickLockRepository(redis) }));
 
 const chatService = createChatService({
     gameStore,
@@ -119,7 +123,7 @@ const readiness = createReadiness({
 });
 
 registerRoutes(app, {
-    queueSize: () => matchmaking.queue.size,
+    queueSize: () => matchmaking.searchingCount(),
     readiness,
     profileService: createProfileService({ profilesRepo: createProfilesRepository(supabase) }),
     analysisService: createAnalysisService({ engineClient }),
@@ -155,7 +159,10 @@ function start() {
         notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
         closeSockets: () => io.close(),
         closeHttp: () => new Promise((resolve) => server.close(() => resolve(undefined))),
-        closeRedis: () => redis.quit(),
+        closeRedis: async () => {
+            await socketAdapter?.close();
+            await redis.quit();
+        },
         flushLogs: () => new Promise((resolve) => log.pino.flush(() => resolve(undefined))),
         exit: (code) => process.exit(code),
     });

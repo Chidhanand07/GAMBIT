@@ -118,3 +118,8 @@ describe('the server closed the socket (its token expired) [TOKEN-LIFETIME]', ()
         expect(fake.connect).not.toHaveBeenCalled()
     })
 })
+
+test('WebSocket only: no long-polling fallback, so no sticky sessions are needed [MULTI-INSTANCE]', () => {
+    createGameSocket({ url: 'http://rt.test', getToken: async () => 'tok' })
+    expect(ioMock.mock.calls[0][1].transports).toEqual(['websocket'])
+})

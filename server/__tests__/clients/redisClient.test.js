@@ -7,6 +7,7 @@ jest.mock('ioredis', () =>
     jest.fn().mockImplementation(function FakeRedis(url, options) {
         this.url = url;
         this.options = options;
+        this.defineCommand = jest.fn();
         this.on = jest.fn((event, fn) => {
             handlers[event] = fn;
             return this;
@@ -44,4 +45,9 @@ test('logs connect and error events', () => {
     handlers.error(new Error('boom'));
     expect(logSpy).toHaveBeenCalledWith('[Redis] Connected');
     expect(errSpy).toHaveBeenCalledWith('[Redis] Error:', 'boom');
+});
+
+test('every connection gets the Lua commands the repositories need [MULTI-INSTANCE]', () => {
+    const redis = createRedisClient('redis://h:1');
+    expect(redis.defineCommand).toHaveBeenCalledWith('casSetGame', expect.objectContaining({ numberOfKeys: 1 }));
 });

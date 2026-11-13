@@ -238,3 +238,24 @@ test('a player who disconnects before any move: the game is aborted after the gr
     expect(gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ status: 'aborted', winner_id: null });
     expect(rating.processGameEnd).not.toHaveBeenCalled();
 });
+
+describe('with several instances, one ticks each game per tick [MULTI-INSTANCE]', () => {
+    test('two clock services sharing a tick lock: one clock_sync per game per tick', async () => {
+        const game = makeGame({ lastMoveAt: T - 1500, whiteClockMs: 10000 });
+        const a = setup(game);
+        const held = new Set();
+        const tickLocks = { tryAcquire: jest.fn(async (id) => (held.has(id) ? false : (held.add(id), true))) };
+        const svcA = createClockService({ gameStore: a.gameStore, finalizer: { endGameIf: jest.fn() }, emitter: a.emitter, now: () => T, tickLocks });
+        const svcB = createClockService({ gameStore: a.gameStore, finalizer: { endGameIf: jest.fn() }, emitter: a.emitter, now: () => T, tickLocks });
+        await Promise.all([svcA.tick(), svcB.tick()]);
+        expect(a.emitter.named('clock_sync')).toHaveLength(1);
+        expect(tickLocks.tryAcquire).toHaveBeenCalledWith('game-1', 900);
+    });
+
+    test('without a tick lock (one instance) every tick runs, as before', async () => {
+        const { svc, emitter } = setup(makeGame({ lastMoveAt: T - 1500 }));
+        await svc.tick();
+        await svc.tick();
+        expect(emitter.named('clock_sync')).toHaveLength(2);
+    });
+});

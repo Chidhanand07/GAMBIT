@@ -65,6 +65,21 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
 | [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
 | [F-044](#f-044) | Stale-game detection reads the last move from `moves`, lazily; a failed read keeps the game | M2 | G22 |
+| [F-045](#f-045) | One `CORS_ORIGINS` allow-list for Express and the Socket.IO handshake; rejections are a plain 403 | M3 | S13 |
+| [F-046](#f-046) | Rate limits in shared stores: Redis for the game server, Upstash REST for the web app, a bounded queue in the engine; the limiters fail open | M3 | RATE-LIMITS |
+| [F-047](#f-047) | One FEN check at the HTTP boundary of the engine, answering 400 | M3 | G19 |
+| [F-048](#f-048) | A mate on the top line scores ±10000 (White's perspective); moves are parsed as UCI first, then SAN | M3 | G20 |
+| [F-049](#f-049) | A game without moves is never reviewed; a side without moves has no accuracy | M3 | G21 |
+| [F-050](#f-050) | Render builds the engine's Dockerfile, which is the only place Stockfish is installed; the MAVERICK weights stay in git with a checksum-verified download as fallback | M3 | ENGINE-BUILD |
+| [F-051](#f-051) | One pure helper decides post-sign-in redirects: a same-origin path with exactly one leading `/` | M3 | S6 |
+| [F-052](#f-052) | No console output from browser code; ESLint enforces it | M3 | S14 |
+| [F-053](#f-053) | Ratings and statistics are written once per game, atomically, by `public.apply_game_result`; closes the SEC-04 deviation in F-017 | M3 | RATING-ATOMIC |
+| [F-054](#f-054) | Express 5; one error middleware; routes throw instead of wrapping | M4 | EXPRESS-5 |
+| [F-055](#f-055) | Structured logs with pino; `/livez` and `/readyz` | M4 | OBSERVABILITY |
+| [F-056](#f-056) | Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart | M4 | SHUTDOWN |
+| [F-057](#f-057) | Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list | M4 | SUPPLY-CHAIN |
+| [F-058](#f-058) | Schema drift is checked against the linked Supabase project on a schedule, not on every PR | M4 | SCHEMA-DRIFT |
+| [F-059](#f-059) | The game server can run as several replicas behind one Redis | M4 | MULTI-INSTANCE |
 
 ---
 
@@ -1935,3 +1950,68 @@ instead of one file per ADR under `docs/refactor/adr/`.
   were taken from the CLI v3.1 reference. `supabase link` writes `supabase/.temp/`, which is not
   git-ignored. Run the workflow once by hand after adding the secrets.
 - *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-059
+
+**The game server can run as several replicas behind one Redis (MULTI-INSTANCE).**
+
+Context: every replica kept its own copy of the parts that must be global: the matchmaking
+queue (a `Map`), a per-process lock around each game's read-modify-write, the clock ticker,
+and Socket.IO rooms. Two replicas meant players who never meet, moves applied twice, clocks
+charged twice and broadcasts that reach half the room (NODE-15, NODE-17, TEST-06).
+
+- **Game state: compare-and-set on the stored value, not a lock.** `mutateGame` reads the JSON,
+  runs the pure mutation, then writes with the `casSetGame` Lua script, which writes only if the
+  key still holds exactly the JSON that was read (`''` = absent) and keeps the TTL. On a lost
+  race it re-reads and re-runs the mutation, with a jittered growing pause, at most 10 attempts,
+  then throws; the socket handler's error path (F-042) turns that into an error ack, never a silent drop.
+  Rejected: `WATCH`/`MULTI` (needs a dedicated connection per transaction with ioredis); a
+  Redlock-style lock (correctness would depend on lock expiry and clock assumptions). A version
+  counter was rejected as unnecessary: the whole value is the version and the script compares it
+  in one step.
+- **Clock ticker: one replica per game per tick.** Every replica keeps ticking its active set;
+  before checking a game it takes `SET clocktick:<id> 1 PX 900 NX`. The verdict itself still
+  runs inside `endGameIf`'s compare-and-set, so the lock only saves work; a lock that expires
+  early cannot end a game twice.
+- **Matchmaking queue in Redis.** One sorted set `{mm}:queue` (member user id, score
+  `joined_at`) plus `{mm}:entry:<userId>` JSON with a 2-minute TTL refreshed every second by the
+  instance that queued it (a crashed instance's players lapse). Five Lua scripts: join (no-op if
+  queued), leave (only if the socket id matches), **claimPair** (both or neither, and only if
+  each score still equals the `joined_at` the pass read), prune, unlock (compare-and-delete). A
+  pairing lock `SET NX PX 5000` lets one replica run the pass and broadcast `queue_status`; the
+  claim, not the lock, is what makes pairing correct: tests pass with the lock removed. The
+  pairing rules stay in the pure `planPairs` (SOLID-07) instead of Lua. One sorted set rather
+  than one per time control, because `position` and `players_searching` count the whole queue.
+  `{mm}` is a hash tag so every key is in one Redis Cluster slot.
+- **Socket.IO: `@socket.io/redis-streams-adapter`.** Chosen over the Pub/Sub adapter because it
+  supports connection-state recovery (a client that reconnects within 2 minutes to any replica
+  gets the missed events) and survives a short Redis disconnect (streams are replayed). Cost: one
+  blocking `XREAD` connection per replica. `SOCKET_ADAPTER=none` (the default under test) keeps
+  the in-memory adapter. `socket.data` must hold plain data only: the adapter serializes it for
+  recovery (a stored pino logger made every disconnect throw; found by the two-instance test).
+  The adapter connection closes with `quit` so recovery sessions written during shutdown are not
+  dropped.
+- **WebSocket transport only, server and client.** HTTP long-polling needs every request of a
+  session to reach the same replica (sticky sessions), which Railway does not offer. All
+  supported browsers have WebSocket; a network that blocks it cannot play (accepted). The
+  frontend must be deployed before the server is scaled.
+- **Presence across replicas.** Each player socket joins `player:<gameId>:<userId>`. A disconnect
+  starts the abandonment countdown only if no socket of that player is left in that room on any
+  replica (`fetchSockets`), so a second tab on another replica keeps the game alive.
+- **Pending challenges and rematches** already lived in Redis (high-risk phase).
+- **Proof.** `__tests__/integration/twoInstances.test.js`: two full server instances (game
+  service, finalizer, CAS store, adapter) over one real Redis; White on A, Black on B play Fool's
+  mate: every move reaches both, one `game_end`, the result is written once; the same move sent to
+  both replicas at once is applied once; a resign racing the mating move ends the game once.
+  `multiInstance.test.js` (concurrent moves and finalize on real Redis), `adapter.test.js`
+  (cross-server rooms), `matchmakingTwoInstances.test.js` (31 players, two services, overlapping
+  passes, with and without the lock: nobody paired twice). CI gets a `redis:7-alpine` service and
+  `REDIS_TEST_URL`; without a Redis the real-Redis tests skip with a message.
+- **Not verified:** Redis Cluster; Redis failover and network partitions; Upstash's handling of
+  blocking `XREAD` (supported per its docs, but each call is billed: DEPLOY.md recommends a
+  Railway Redis add-on for two or more replicas); the matchmaking test uses fake emitters, so
+  `match_found` to a socket on another replica relies on the adapter (covered by
+  `adapter.test.js`, not end to end).
+- **Behaviour.** `joinQueue`/`leaveQueue` are async; `/api/matchmaking/status` reads a snapshot
+  that may be up to ~1 s stale on a replica that does not hold the pairing lock.
+- *The matchmaking part was implemented on a side branch by a helper agent and merged here.*

@@ -75,6 +75,7 @@ function engineUrl() {
  *   (`ENGINE_SHARED_SECRET`); without it the engine client refuses to call the engine.
  * @property {() => string[]} corsOrigins browser origins allowed by CORS and the socket handshake (S13)
  * @property {(sink: (message: string) => void) => void} setWarningSink where config warnings are logged
+ * @property {() => string} socketAdapter `SOCKET_ADAPTER`: 'redis' (default) or 'none' (single instance, tests)
  * @property {() => string} logLevel pino level (`LOG_LEVEL`; default info, silent under test)
  * @property {() => string | undefined} corsPreviewPattern `CORS_PREVIEW_ORIGIN_REGEX`: this project's Vercel previews
  * @property {() => string | number} port HTTP port (`PORT`, default 3001).
@@ -138,6 +139,7 @@ const env = Object.freeze({
     engineSharedSecret,
     corsOrigins,
     setWarningSink,
+    socketAdapter: () => process.env.SOCKET_ADAPTER || (process.env.NODE_ENV === 'test' ? 'none' : 'redis'),
     logLevel: () => process.env.LOG_LEVEL || (process.env.NODE_ENV === 'test' ? 'silent' : 'info'),
     corsPreviewPattern: () => process.env.CORS_PREVIEW_ORIGIN_REGEX || undefined,
     port: () => process.env.PORT || DEFAULT_PORT,

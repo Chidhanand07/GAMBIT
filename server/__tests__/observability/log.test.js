@@ -18,8 +18,19 @@ function capture() {
 test('one JSON object per line with level, time, service and message', async () => {
     const { lines, log } = capture();
     log.error('[clock] ticker error:', 'redis down');
-    expect(lines[0]).toMatchObject({ level: 50, service: 'gambit-server', msg: '[clock] ticker error:', detail: 'redis down' });
+    expect(lines[0]).toMatchObject({
+        level: 50,
+        service: 'gambit-server',
+        msg: '[clock] ticker error:',
+        detail: 'redis down',
+    });
     expect(typeof lines[0].time).toBe('string');
+});
+
+test('every line names the replica that wrote it (hostname, pid) [MULTI-INSTANCE]', () => {
+    const { lines, log } = capture();
+    log.info('hello');
+    expect(lines[0]).toMatchObject({ hostname: require('node:os').hostname(), pid: process.pid });
 });
 
 test('child loggers add their context to every line', () => {

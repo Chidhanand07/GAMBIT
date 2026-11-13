@@ -173,7 +173,25 @@ Go to your service → **Variables** tab and add:
 | `FRONTEND_URL` | Deprecated: read only when `CORS_ORIGINS` is not set. |
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
+| `SOCKET_ADAPTER` | Optional. `redis` (default): Socket.IO rooms and broadcasts span every replica through Redis Streams. `none`: in-process only, for a single local instance. |
 | `PORT` | **do not set** — Railway injects this automatically |
+
+### 4b-2. Running more than one replica
+The game server keeps no game state in process memory: games, the matchmaking queue, pending
+challenges and rematches live in Redis; moves and endings are compare-and-set writes; the clock
+ticker takes a per-game Redis lock; Socket.IO rooms span replicas via the Redis Streams adapter.
+A test plays a full game with White and Black on two different instances over one Redis
+(`server/__tests__/integration/twoInstances.test.js`). It is therefore safe to raise Railway's
+replica count, **after** all of the following:
+
+1. `SOCKET_ADAPTER` is unset or `redis` on every replica.
+2. Redis supports Lua (`EVAL`) and Streams (`XADD`/`XREAD BLOCK`). Railway Redis and Redis ≥ 6.2
+   do. Upstash supports both, but every blocking `XREAD` counts as a command: with two or more
+   replicas, a Railway Redis add-on (or a fixed-price Upstash plan) is the cheaper choice.
+3. Clients connect with the WebSocket transport only (the frontend does since this release), so
+   no sticky sessions are needed. Keep the old frontend from talking to a multi-replica server:
+   deploy the frontend first, then scale.
+4. Start with 2 replicas, run the two-replica manual test in section 6, then scale further.
 
 ### 4c. Get the URL
 After deploy → **Settings → Domains** → generate a Railway domain e.g. `https://gambit-server.up.railway.app`
@@ -236,6 +254,11 @@ Any time you change env vars in Vercel → **Deployments → Redeploy** the late
 [ ] /profile/[username] → shows stats, games list, online dot
 [ ] /analysis → engine evaluation works
 [ ] /leaderboard → shows ranked players
+[ ] Two replicas: open two browsers with two accounts until the Railway logs show them on
+    different replicas (pino `socketId`/hostname), then play a game to the end: moves, clocks,
+    chat, resign and rematch reach both sides; one rating change; /readyz is 200 on both
+[ ] Two replicas: restart one replica mid-game → its player reconnects to the other and the game
+    continues (clocks did not run twice)
 ```
 
 ---

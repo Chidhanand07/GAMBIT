@@ -443,31 +443,36 @@ describe('CORS (Express) [S13]', () => {
 });
 
 describe('CORS (Socket.IO handshake) [S13]', () => {
+    // WebSocket only since MULTI-INSTANCE: the handshake is the WebSocket upgrade, so it is driven
+    // with a real client that sends an Origin header (was: a long-polling GET through supertest).
+    const ioClient = require('socket.io-client');
+    const handshake = (origin) =>
+        new Promise((resolve) => {
+            const socket = ioClient(ctx.url, {
+                transports: ['websocket'],
+                forceNew: true,
+                reconnection: false,
+                auth: { token: 'test-token:alice' },
+                ...(origin ? { extraHeaders: { Origin: origin } } : {}),
+            });
+            socket.on('connect', () => (socket.disconnect(), resolve('connected')));
+            socket.on('connect_error', (e) => (socket.disconnect(), resolve(`refused: ${e.message}`)));
+        });
+
     test('an origin that is not on the list is refused by allowRequest', async () => {
         // Was: "every origin is accepted with credentials (permissive fallback, pinned)".
-        const res = await request(ctx.server)
-            .get('/socket.io/?EIO=4&transport=polling')
-            .set('Origin', 'https://evil.example.com');
-        expect(res.status).toBe(403);
-        expect(res.headers['access-control-allow-origin']).toBeUndefined();
-        expect(res.text).not.toMatch(/"sid"/);
+        expect(await handshake('https://evil.example.com')).toMatch(/^refused/);
     });
 
-    test('an allowed origin gets the handshake with credentials', async () => {
-        const res = await request(ctx.server)
-            .get('/socket.io/?EIO=4&transport=polling')
-            .set('Origin', 'http://localhost:3000');
-        expect(res.status).toBe(200);
-        expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
-        expect(res.headers['access-control-allow-credentials']).toBe('true');
-        expect(res.text).toMatch(/^0\{"sid":/);
+    test('an allowed origin connects', async () => {
+        expect(await handshake('http://localhost:3000')).toBe('connected');
     });
 
     test('a client without an Origin header (a native client, the tests) connects', async () => {
-        const res = await request(ctx.server).get('/socket.io/?EIO=4&transport=polling');
-        expect(res.status).toBe(200);
+        expect(await handshake(undefined)).toBe('connected');
     });
 });
+
 
 describe('rate limits (shared in Redis, per client IP) [RATE-LIMITS]', () => {
     test('the 21st analysis request in a minute → 429 with Retry-After; the engine is not called', async () => {

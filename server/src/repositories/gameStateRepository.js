@@ -13,6 +13,13 @@
 
 const GAME_TTL = 86400; // 24 hours
 const ACTIVE_SET = 'active_games';
+/** Re-reads allowed when other instances keep writing the same game. */
+const MAX_CAS_ATTEMPTS = 10;
+/** Base pause between compare-and-set attempts (grows with each attempt, with jitter). */
+const CAS_BACKOFF_MS = 2;
+
+/** @param {number} ms */
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** @param {string} gameId */
 function gameKey(gameId) {
@@ -27,6 +34,7 @@ function gameKey(gameId) {
  * @property {(key: string, member: string) => Promise<unknown>} sadd
  * @property {(key: string, member: string) => Promise<unknown>} srem
  * @property {(key: string) => Promise<string[]>} smembers
+ * @property {(key: string, expected: string, next: string, ttl: number) => Promise<unknown>} casSetGame
  */
 
 /**
@@ -147,8 +155,11 @@ function createGameStateRepository(redis) {
      * read and the write share one lock, two callers can never both act on
      * the same state (a move applied twice, a game finalized twice).
      *
-     * The lock is per process (see createGameLock); a multi-instance deploy
-     * needs a Redis-side transition (NODE-17).
+     * Across instances the write is a compare-and-set in Redis (`casSetGame`,
+     * clients/redisCommands): it only succeeds if the stored state is still the
+     * one `mutate` decided on; otherwise the state is re-read and `mutate` runs
+     * again, at most MAX_CAS_ATTEMPTS times (NODE-17, MULTI-INSTANCE). The
+     * per-process lock stays, so one instance does not race itself.
      * @template T
      * @param {string} gameId
      * @param {(game: any) => T | null | Promise<T | null>} mutate
@@ -156,10 +167,16 @@ function createGameStateRepository(redis) {
      */
     async function mutateGame(gameId, mutate) {
         return withGameLock(gameId, async () => {
-            const next = await mutate(await getGame(gameId));
-            if (!next) return null;
-            await setGame(gameId, next);
-            return next;
+            for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+                const raw = await redis.get(gameKey(gameId));
+                const next = await mutate(raw ? JSON.parse(raw) : null);
+                if (!next) return null;
+                const written = await redis.casSetGame(gameKey(gameId), raw ?? '', JSON.stringify(next), GAME_TTL);
+                if (Number(written) === 1) return next;
+                // Another instance wrote in between: back off a little, then decide again on its state.
+                await pause(CAS_BACKOFF_MS * (attempt + 1) * (1 + Math.random()));
+            }
+            throw new Error(`game ${gameId}: too much contention, gave up after ${MAX_CAS_ATTEMPTS} attempts`);
         });
     }
 

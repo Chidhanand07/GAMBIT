@@ -50,5 +50,11 @@ const gameRoom = (gameId) => `game_${gameId}`;
 
 /** @param {string} userId */
 const userRoom = (userId) => `user_${userId}`;
+/**
+ * The sockets of one player that are at one game's board, on every instance (MULTI-INSTANCE).
+ * @param {string} gameId
+ * @param {string} userId
+ */
+const playerRoom = (gameId, userId) => `player:${gameId}:${userId}`;
 
-module.exports = { createIoEmitter, gameRoom, userRoom };
+module.exports = { createIoEmitter, gameRoom, userRoom, playerRoom };
