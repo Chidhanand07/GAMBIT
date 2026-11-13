@@ -8,6 +8,13 @@ const HTTP_BAD_REQUEST = 400;
 const HTTP_INTERNAL_ERROR = 500;
 const INVALID_REQUEST = Object.freeze({ error: 'invalid_request' });
 const INTERNAL_ERROR = Object.freeze({ error: 'internal_error' });
+const HTTP_PAYLOAD_TOO_LARGE = 413;
+
+/** Errors raised by express.json() before a route runs, by their `type`. */
+const BODY_ERRORS = Object.freeze({
+    'entity.parse.failed': { status: HTTP_BAD_REQUEST, code: 'invalid_request' },
+    'entity.too.large': { status: HTTP_PAYLOAD_TOO_LARGE, code: 'payload_too_large' },
+});
 
 /**
  * Parse `input` with a zod schema. On failure a 400 is sent and null returned.
@@ -32,6 +39,11 @@ function parseOrReject(res, schema, input) {
  * @param {unknown} error
  */
 function sendError(res, route, error) {
+    const bodyError = BODY_ERRORS[/** @type {{ type?: string }} */ (error)?.type ?? ''];
+    if (bodyError) {
+        res.status(bodyError.status).json({ error: bodyError.code });
+        return;
+    }
     if (error instanceof AppError) {
         res.status(error.httpStatus).json({ error: error.code });
         return;

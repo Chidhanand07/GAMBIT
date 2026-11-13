@@ -194,10 +194,11 @@ describe('POST /api/analysis/engine', () => {
         expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
     });
 
-    test('malformed JSON request body → 400 from express.json (HTML error page)', async () => {
+    test('malformed JSON request body → 400 invalid_request JSON (was an HTML error page) [EXPRESS-5]', async () => {
         const res = await request(ctx.app).post('/api/analysis/engine').set('Content-Type', 'application/json').send('{bad');
         expect(res.status).toBe(400);
-        expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
+        expect(res.headers['content-type']).toMatch(/^application\/json/);
+        expect(res.body).toEqual({ error: 'invalid_request' });
         expect(ctx.fetch).not.toHaveBeenCalled();
     });
 });

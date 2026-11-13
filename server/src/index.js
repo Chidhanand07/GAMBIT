@@ -12,7 +12,7 @@
  */
 const http = require('http');
 // Express, cors and socket.io load before dotenv runs, as in the original server.js.
-const { createApp } = require('./http/app');
+const { createApp, attachErrorHandler } = require('./http/app');
 const { createSocketServer, registerSocketHandlers } = require('./sockets');
 require('dotenv').config();
 
@@ -115,6 +115,8 @@ registerRoutes(app, {
     socialService,
     requireUserId: createRequireUserId({ getUser: (token) => supabase.auth.getUser(token) }),
 });
+// After every route: JSON 404 and the one error middleware (Express 5 forwards async errors).
+attachErrorHandler(app);
 
 const getUser = /** @type {import('./services/tokenVerifier').GetUser} */ ((token) => supabase.auth.getUser(token));
 const tokenVerifier = createTokenVerifier({ getUser });

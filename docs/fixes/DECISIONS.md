@@ -1812,3 +1812,24 @@ instead of one file per ADR under `docs/refactor/adr/`.
   exactly for the compare-and-set. If they do not, every rated game would come back `stale`
   and stay unrated after 5 attempts; check one rated game on staging first.
 - *Implemented on a side branch by a helper agent (`wip/medium-3-rating`) and cherry-picked.*
+## F-054
+
+**Express 5; one error middleware; routes throw instead of wrapping (EXPRESS-5).**
+
+- **Context.** NODE-02 asks for Express 5 (Express 4 is in maintenance). Every async route
+  wrapped its body in try/catch because Express 4 did not forward a rejected promise.
+- **Decision.**
+  - `express` `^5.2.0` (resolves 5.3.0, released 2026-10-09).
+  - `http/app.js` `attachErrorHandler(app)`, called after the routes: a JSON
+    `404 { error: 'not_found' }` and one error middleware that calls `sendError` (AppError →
+    its status and code; anything else → logged, generic 500). Express 5 forwards rejected
+    async handlers to it, so the analysis and username routes lost their try/catch.
+  - `express.json({ limit: '16kb' })` (NODE-12); a malformed body → `400 invalid_request` JSON,
+    an oversized one → `413 payload_too_large` JSON (they were Express's HTML error pages).
+  - `x-powered-by` disabled (NODE-09).
+- **Kept on purpose.** The invite routes (`/api/games/join/:token`) still catch and answer 400
+  with the service's message: that is their documented contract (the web app shows the
+  message), not a wrapper. Turning those messages into codes is a client change.
+- **Path syntax.** All routes use plain `:param` segments; nothing uses the patterns Express 5
+  changed (`*`, optional `?`, regex strings), checked by search.
+- **Not verified.** No deploy; Railway runs the same `node server.js`.
