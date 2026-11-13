@@ -180,6 +180,19 @@ describe('mount', () => {
         expect(screen.getByText('No moves yet')).toBeInTheDocument()
     })
 
+    test('spectators see no "You" badge on either strip [F4]', async () => {
+        profile = { ...ME, id: 'spectator-id' }
+        await renderGame()
+        expect(screen.queryByText('You')).not.toBeInTheDocument()
+    })
+
+    test('the "You" badge follows my strip when I flip the board [F4]', async () => {
+        await renderGame()
+        click(screen.getAllByTitle('Flip board')[0])
+        const badge = screen.getByText('You')
+        expect(badge.parentElement).toHaveTextContent('Alice')
+    })
+
     test('black player: board flipped, white on top', async () => {
         profile = { ...ME, id: 'opp' }
         await renderGame()

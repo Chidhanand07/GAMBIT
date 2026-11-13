@@ -100,6 +100,17 @@ describe('deriveGameView', () => {
         expect(v.turnIndicator).toBeNull()
     })
 
+    test('isMe marks only the strip of my own colour; a spectator has none [F4]', () => {
+        const strips = (over: object) => {
+            const v = deriveGameView({ ...state(), ...over }, { turn: () => 'w' }, false)
+            return [v.top.isMe, v.bottom.isMe]
+        }
+        expect(strips({ myColor: 'spectator' })).toEqual([false, false])
+        expect(strips({ myColor: 'white' })).toEqual([false, true])
+        expect(strips({ myColor: 'black', flipped: true })).toEqual([false, true])
+        expect(strips({ myColor: 'white', flipped: true })).toEqual([true, false])
+    })
+
     test('label falls back to username then colour; my turn wins', () => {
         expect(deriveGameView(state(), { turn: () => 'b' }, false).turnIndicator?.label).toBe("bob's turn")
         expect(deriveGameView(createInitialGameState(), { turn: () => 'b' }, false).turnIndicator?.label).toBe("Black's turn")

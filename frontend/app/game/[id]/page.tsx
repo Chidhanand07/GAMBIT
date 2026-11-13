@@ -41,7 +41,7 @@ export default function GamePage(props: { params: Promise<{ id: string }> }) {
                         showOpponentDisconnected={disconnect.opponentDisconnected && !gameOver}
                         disconnectCountdown={disconnect.disconnectCountdown}
                     />
-                    <PlayerStrip {...view.top} isBottom={false} isMe={false} timeControl={gameData?.time_control} />
+                    <PlayerStrip {...view.top} isBottom={false} timeControl={gameData?.time_control} />
                     <Board
                         displayChess={board.displayChess}
                         liveChess={game.liveChess}
@@ -57,7 +57,7 @@ export default function GamePage(props: { params: Promise<{ id: string }> }) {
                         onPromote={(move, piece) => board.commitMove(move.from, move.to, piece)}
                         gameOver={gameOver}
                     />
-                    <PlayerStrip {...view.bottom} isBottom={true} isMe={true} timeControl={gameData?.time_control} />
+                    <PlayerStrip {...view.bottom} isBottom={true} timeControl={gameData?.time_control} />
                     <ActionBar {...controls} isSpectator={myColor === 'spectator'} />
 
                     {gameOver && state.showGameOverModal && (
