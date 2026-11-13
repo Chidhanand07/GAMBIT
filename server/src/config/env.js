@@ -85,6 +85,8 @@ function engineUrl() {
  *   `SUPABASE_SECRET_KEY` (canonical; Supabase's new `sb_secret_…` key), falling back to the
  *   legacy `SUPABASE_SERVICE_KEY`, then `SUPABASE_SERVICE_ROLE_KEY`.
  * @property {() => string} supabaseServiceKeySource name of the variable the key came from.
+ * @property {() => string | undefined} errorWebhookUrl `ERROR_WEBHOOK_URL` (https) for error reports, if set
+ * @property {() => string | undefined} release `RAILWAY_GIT_COMMIT_SHA`, the deployed commit
  */
 
 /**
@@ -133,8 +135,35 @@ function corsOrigins() {
     return [...parseOrigins(configured), ...LOCAL_ORIGINS];
 }
 
+/** Hosts a plain-http webhook may use (local testing only). */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * `ERROR_WEBHOOK_URL`: where error reports are POSTed (SEC-12, ADR F-069). Optional. Must be
+ * https (plain http only for a local host); anything else is ignored with a warning, so a typo
+ * cannot send reports in clear text. The URL is a secret and is never logged.
+ * @returns {string | undefined}
+ */
+function errorWebhookUrl() {
+    const raw = process.env.ERROR_WEBHOOK_URL?.trim();
+    if (!raw) return undefined;
+    let url;
+    try {
+        url = new URL(raw);
+    } catch {
+        warnOnce('error-webhook-invalid', '[config] ERROR_WEBHOOK_URL is not a URL; error reports are off.');
+        return undefined;
+    }
+    if (url.protocol === 'https:' || (url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname))) return raw;
+    warnOnce('error-webhook-insecure', '[config] ERROR_WEBHOOK_URL must be https; error reports are off.');
+    return undefined;
+}
+
 /** @type {Readonly<Env>} */
 const env = Object.freeze({
+    errorWebhookUrl,
+    // The deployed commit (set by Railway), for error reports.
+    release: () => process.env.RAILWAY_GIT_COMMIT_SHA || undefined,
     engineUrl,
     engineSharedSecret,
     corsOrigins,

@@ -25,7 +25,10 @@ finish in about 2 s.
   using `../helpers/mockSupabase.js` and `../helpers/mockRedis.js`.
 - `../../lib/gameStore` to seed or read Redis game state.
 - A `global.fetch` spy (`ctx.fetch`) stands in for the chess engine.
-- `socket.io-client` and `supertest`.
+- `socket.io-client` and `supertest`. HTTP requests go to `request(ctx.server)` (bound to
+  127.0.0.1), never `request(ctx.app)`: supertest's own server listens on the wildcard address
+  and on macOS another process can shadow it on 127.0.0.1 (the 404/429 flakes, ADR F-067).
+  Tests that build their own app use `../helpers/loopback.js`.
 
 Do not import anything else from `server/` (`src/**` internals, private maps).
 Those modules will move during the refactor.

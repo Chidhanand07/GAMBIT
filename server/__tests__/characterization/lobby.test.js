@@ -148,6 +148,49 @@ describe('join_queue', () => {
     });
 });
 
+describe('join_queue acks and the automatic re-queue after a reconnect [ACKS]', () => {
+    const emitAck = (socket, event, payload) => new Promise((resolve) => socket.emit(event, payload, resolve));
+
+    test('a join is acked ok; an unknown profile is refused with a reason (was: acked ok, the client searched forever)', async () => {
+        const s = await ctx.connect('q1');
+        supabase.queue('profiles', { data: profile('q1'), error: null });
+        expect(await emitAck(s, 'join_queue', { time_control: '10' })).toEqual({ ok: true });
+
+        const ghost = await ctx.connect('ghost');
+        expect(await emitAck(ghost, 'join_queue', { time_control: '10' })).toEqual({ ok: false, error: 'profile_not_found' });
+        expect(await ctx.matchmaking.queuedUserIds()).toEqual(['q1']);
+    });
+
+    test('a re-join from a new socket while the server still holds the old one is acked, re-binds the entry, and the match reaches the new socket', async () => {
+        // The client lost its connection and came back before the server noticed the old socket died.
+        const { s: old } = await queued('p1', {}, { rating_rapid: 1500 });
+        const fresh = await ctx.connect('p1');
+        const rejoined = once(fresh, 'queue_joined');
+        supabase.queue('profiles', { data: profile('p1', { rating_rapid: 1500 }), error: null });
+        expect(await emitAck(fresh, 'join_queue', { user: { id: 'p1' }, time_control: '10', is_rated: true })).toEqual({ ok: true });
+        // Was: a silent no-op; the entry kept the dead socket's id, so match_found went nowhere.
+        expect(await rejoined).toEqual({ position: 1, estimated_wait: 10 });
+        expect((await ctx.matchmaking.queuedEntry('p1')).socketId).toBe(fresh.id);
+
+        // The old socket's disconnect, when the server finally sees it, does not dequeue the player.
+        old.disconnect();
+        await sleep(50);
+        expect(await ctx.matchmaking.queuedUserIds()).toEqual(['p1']);
+
+        supabase.queue('games', (call) => ({
+            data: { id: 'match-r', created_at: '2026-01-01T00:00:00.000Z', ...supabase.op(call, 'insert')[0] },
+            error: null,
+        }));
+        const { s: p2 } = await queued('p2', {}, { rating_rapid: 1520 });
+        const [m1, m2] = await Promise.all([
+            once(fresh, 'match_found', TICK_TIMEOUT_MS),
+            once(p2, 'match_found', TICK_TIMEOUT_MS),
+        ]);
+        expect(m1.id).toBe('match-r');
+        expect(m2.id).toBe('match-r');
+    });
+});
+
 describe('leave_queue and queue_status', () => {
     test('leave_queue removes only the caller; another socket cannot remove someone else [G13]', async () => {
         const { s } = await queued('q1');

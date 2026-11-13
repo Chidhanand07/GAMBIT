@@ -106,13 +106,64 @@ test('a connection registers the verified user, joins user_<id>, then resumes th
     expect(socket.emit).toHaveBeenLastCalledWith('rematch_declined');
 });
 
-test('a failing reconnect on connection is logged, not thrown [S15]', async () => {
+/** Replace `log.child` with a recorder: each child keeps its bindings and its error/info calls. */
+function spyOnSocketLoggers() {
+    const children = [];
+    jest.spyOn(log, 'child').mockImplementation((bindings) => {
+        const child = { bindings, error: jest.fn(), warn: jest.fn(), info: jest.fn(), fatal: jest.fn() };
+        child.child = () => child;
+        children.push(child);
+        return child;
+    });
+    return children;
+}
+
+test('a failing reconnect on connection is logged through the socket logger, not thrown [S15]', async () => {
     const d = deps();
     d.gameService.reconnect.mockRejectedValue(new Error('redis down'));
-    const error = jest.spyOn(log, 'error');
+    const children = spyOnSocketLoggers();
     connect(d);
     await flush();
-    expect(error).toHaveBeenCalledWith('[socket] connection failed:', 'redis down');
+    // Was: log.error on the process logger, without socketId/userId [OBSERVABILITY].
+    expect(children).toHaveLength(1);
+    expect(children[0].bindings).toEqual({ socketId: 'sock-1', userId: 'u1' });
+    expect(children[0].error).toHaveBeenCalledWith('[socket] connection failed:', 'redis down');
+    expect(log.error).not.toHaveBeenCalled();
+});
+
+test('a failing event handler is logged through the socket child logger (socketId, userId) [OBSERVABILITY]', async () => {
+    const d = deps();
+    d.gameService.makeMove.mockRejectedValue(new Error('cas exhausted'));
+    d.socialService.declineChallenge.mockRejectedValue({ message: 'redis down' });
+    const children = spyOnSocketLoggers();
+    const { handlers, socket } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.make_move({ game_id: 'g', from: 'e2', to: 'e4' }, ack);
+    await handlers.challenge_decline({ from_user_id: 'u2' }, ack);
+    expect(ack).toHaveBeenCalledWith({ ok: false, error: 'internal_error' });
+    const [child] = children;
+    expect(child.bindings).toEqual({ socketId: 'sock-1', userId: 'u1' });
+    expect(child.info).toHaveBeenCalledWith('client connected');
+    expect(child.error.mock.calls).toEqual([
+        ['[socket] make_move failed:', 'cas exhausted'],
+        ['[socket] challenge_decline failed:', 'redis down'],
+    ]);
+    expect(log.error).not.toHaveBeenCalled();
+    // The logger is not kept on socket.data (it must survive structuredClone) [MULTI-INSTANCE].
+    expect(Object.values(socket.data)).not.toContain(child);
+    expect(() => structuredClone(socket.data)).not.toThrow();
+});
+
+test('a failing disconnect handler is logged through the socket child logger [OBSERVABILITY]', async () => {
+    const d = deps();
+    d.matchmaking.leaveQueueBySocket.mockImplementation(() => {
+        throw new Error('redis down');
+    });
+    const children = spyOnSocketLoggers();
+    const { handlers } = connect(d, 'u1');
+    await handlers.disconnect();
+    expect(children[0].error).toHaveBeenCalledWith('[socket] disconnect failed:', 'redis down');
+    expect(log.error).not.toHaveBeenCalled();
 });
 
 test('validated payloads go to the services; the actor is always the verified user [S2]', async () => {

@@ -40,3 +40,11 @@ MODEL_PATH: str = os.environ.get("STYLE_MODEL_PATH", "style_model.pt")
 # With MODEL_SHA256 set, a file already at MODEL_PATH must match it too.
 MODEL_URL: str = os.environ.get("MAVERICK_MODEL_URL", "")
 MODEL_SHA256: str = os.environ.get("MAVERICK_MODEL_SHA256", "")
+
+# Search depth bounds for POST /analyze (ENG-DEPTH-BOUND, ADR F-063). Outside them the
+# request is a 422 before an engine is taken. The app asks for 18 (analysis page, game
+# server default, post-game review); every extra ply roughly doubles the time an
+# instance is held (one /analyze, measured locally: depth 18 ~6 s, 20 ~13 s, 24 ~80 s), so a
+# caller could otherwise pin the whole pool with a single request.
+MIN_ANALYSIS_DEPTH: int = 1
+MAX_ANALYSIS_DEPTH: int = 20

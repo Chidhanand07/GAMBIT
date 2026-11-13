@@ -19,9 +19,9 @@ const { wrap } = require('../wrap');
 /**
  * @param {import('socket.io').Socket} socket
  * @param {ClientPort} client
- * @param {{ gameService: GameHandlerService }} deps
+ * @param {{ gameService: GameHandlerService, log?: import('../../observability/log').Log }} deps
  */
-function registerGameHandlers(socket, client, { gameService }) {
+function registerGameHandlers(socket, client, { gameService, log }) {
     /** @type {string} */
     const userId = socket.data.userId;
     /** @type {Record<string, (payload: any) => unknown>} */
@@ -32,7 +32,7 @@ function registerGameHandlers(socket, client, { gameService }) {
         resign: (data) => gameService.resign(data, userId),
     };
     for (const [event, handler] of Object.entries(handlers)) {
-        socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler));
+        socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler, log));
     }
 }
 

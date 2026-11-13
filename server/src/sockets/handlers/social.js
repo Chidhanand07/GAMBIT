@@ -21,9 +21,9 @@ const { wrap } = require('../wrap');
 
 /**
  * @param {import('socket.io').Socket} socket
- * @param {{ socialService: SocialHandlerService }} deps
+ * @param {{ socialService: SocialHandlerService, log?: import('../../observability/log').Log }} deps
  */
-function registerSocialHandlers(socket, { socialService }) {
+function registerSocialHandlers(socket, { socialService, log }) {
     /** @type {string} */
     const userId = socket.data.userId;
     /** @type {Record<string, (payload: any) => unknown>} */
@@ -36,7 +36,7 @@ function registerSocialHandlers(socket, { socialService }) {
         challenge_decline: (data) => socialService.declineChallenge({ ...data, to_user_id: userId }),
     };
     for (const [event, handler] of Object.entries(handlers)) {
-        socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler));
+        socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler, log));
     }
 }
 

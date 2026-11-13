@@ -7,6 +7,7 @@
 const { randomUUID } = require('node:crypto');
 const pinoHttp = require('pino-http');
 const { log } = require('../observability/log');
+const { runWithRequestId } = require('../observability/requestContext');
 
 /** Ids we accept from a proxy or client: short, no spaces or control characters. */
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -28,4 +29,17 @@ function createRequestLog() {
     return pinoHttp({ logger: log.pino, genReqId: requestId, quietReqLogger: true });
 }
 
-module.exports = { createRequestLog };
+/**
+ * Run the rest of the request with its id as the current request id, so the engine and
+ * Supabase clients forward it (`X-Request-Id`). Mounted after the body parser: the parser
+ * resumes the chain from a stream event, which would not carry the context.
+ * @param {import('http').IncomingMessage & { id?: unknown }} req
+ * @param {import('http').ServerResponse} _res
+ * @param {() => void} next
+ */
+function bindRequestContext(req, _res, next) {
+    if (req.id === undefined) return next();
+    runWithRequestId(String(req.id), next);
+}
+
+module.exports = { createRequestLog, bindRequestContext };

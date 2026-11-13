@@ -75,10 +75,10 @@ def test_classification_thresholds(cp_loss, expected_class):
     move = legal[0]
     move_uci = move.uci()
 
-    # eval_best_cp (from top_moves, player perspective) = 10
-    # eval_after_cp (negated from stockfish) = 10 - cp_loss
+    # The mock stands in for the `stockfish` package, which reports WHITE's view
+    # (services/perspective.py). White moves: eval_best_cp = 10, eval_after_cp = 10 - cp_loss.
     best_cp = 10
-    after_cp_raw = -(best_cp - cp_loss)  # engine returns opponent's perspective; we negate
+    after_cp_raw = best_cp - cp_loss  # White's view after White's move: no negation
 
     top_moves = [{"Move": "e2e4", "Centipawn": best_cp, "Mate": None}]
     # Force the played move to NOT be best (e2e4) unless testing Great move
@@ -90,7 +90,7 @@ def test_classification_thresholds(cp_loss, expected_class):
     # Second call: eval after move
     sf.get_evaluation.side_effect = [
         {"type": "cp", "value": best_cp},  # eval_before (white's perspective)
-        {"type": "cp", "value": after_cp_raw},  # eval_after from opponent's view
+        {"type": "cp", "value": after_cp_raw},  # eval_after, White's view
     ]
     sf.get_top_moves.return_value = top_moves
 

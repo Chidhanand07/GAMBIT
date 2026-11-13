@@ -3,26 +3,23 @@
 import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
-import { useSocket } from '@/components/SocketProvider';
 import { useProfile } from '@/components/ProfileProvider';
 import { OpponentCard } from '@/features/challenge/components/OpponentCard';
 import { ColorPicker, RatedToggle, TimeControlPicker } from '@/features/challenge/components/ChallengeOptions';
 import { ChallengeStatus } from '@/features/challenge/components/ChallengeStatus';
+import { useChallengeRequest } from '@/features/challenge/hooks/useChallengeRequest';
 import type { ChallengeColor, ChallengeOpponent } from '@/features/challenge/types';
 
 export default function ChallengePage(props: { params: Promise<{ username: string }> }) {
     const params = use(props.params);
     const router = useRouter();
-    const socket = useSocket();
     const { profile: myProfile } = useProfile();
+    const { sending, sent, declined, send } = useChallengeRequest();
 
     const [opponentProfile, setOpponentProfile] = useState<ChallengeOpponent | null>(null);
     const [timeControl, setTimeControl] = useState('10');
     const [isRated, setIsRated] = useState(true);
     const [color, setColor] = useState<ChallengeColor>('random');
-    const [sending, setSending] = useState(false);
-    const [sent, setSent] = useState(false);
-    const [declined, setDeclined] = useState(false);
 
     useEffect(() => {
         void fetch(`/api/profile/${encodeURIComponent(params.username)}`)
@@ -30,28 +27,16 @@ export default function ChallengePage(props: { params: Promise<{ username: strin
             .then((d: ChallengeOpponent | null) => { if (d) setOpponentProfile(d) })
     }, [params.username]);
 
-    useEffect(() => {
-        if (!socket) return;
-        const onReady = (data: { game_id: string }) => router.push(`/game/${data.game_id}`);
-        const onDeclined = () => { setSending(false); setSent(false); setDeclined(true); }
-        socket.on('challenge_ready', onReady);
-        socket.on('challenge_declined', onDeclined);
-        return () => { socket.off('challenge_ready', onReady); socket.off('challenge_declined', onDeclined); }
-    }, [socket, router]);
-
     const handleSend = () => {
         if (!myProfile) { router.push(`/login?redirect=/challenge/${params.username}`); return; }
-        if (!socket || !opponentProfile) return;
-        setSending(true);
-        socket.emit('challenge_request', {
+        if (!opponentProfile) return;
+        send({
             to_user_id: opponentProfile.id,
             from_username: myProfile.display_name || myProfile.username,
             time_control: timeControl,
             is_rated: isRated,
             color,
         });
-        setSent(true);
-        setSending(false);
     };
 
     if (!opponentProfile) return (

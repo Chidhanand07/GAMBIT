@@ -86,3 +86,23 @@ describe('X-Engine-Key [ENG-AUTH]', () => {
         expect(spy).not.toHaveBeenCalled();
     });
 });
+
+describe('X-Request-Id [OBSERVABILITY]', () => {
+    const { runWithRequestId } = require('../../src/observability/requestContext');
+
+    test('during an HTTP request the request id goes to the engine', async () => {
+        const spy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true });
+        await runWithRequestId('req-42', () => client.analyzePosition({ fen: 'F', depth: 10 }));
+        expect(spy.mock.calls[0][1].headers).toEqual({
+            'Content-Type': 'application/json',
+            'X-Engine-Key': 'engine-secret',
+            'X-Request-Id': 'req-42',
+        });
+    });
+
+    test('outside a request (socket events, the clock) no request id header is sent', async () => {
+        const spy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true });
+        await client.analyzePosition({ fen: 'F', depth: 10 });
+        expect(spy.mock.calls[0][1].headers).not.toHaveProperty('X-Request-Id');
+    });
+});

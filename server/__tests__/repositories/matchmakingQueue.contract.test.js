@@ -85,12 +85,28 @@ describe.each(implementations)('matchmaking queue contract: %s', (_name, create)
         expect(await a.size()).toBe(2);
     });
 
-    test('adding an already-queued player is a no-op (null) and keeps the first entry', async () => {
+    test('adding a player already queued from the same socket is a no-op (null) and keeps the first entry', async () => {
         const { a, b } = create();
         await a.add(entry('x'));
-        expect(await b.add(entry('x', 99, { time_control: '5+0', socketId: 'other' }))).toBeNull();
+        // Was: a no-op for ANY socket (pinned with socketId 'other'); see the reconnect case below [ACKS].
+        expect(await b.add(entry('x', 99, { time_control: '5+0' }))).toBeNull();
         expect(await a.get('x')).toEqual(entry('x'));
         expect(await a.size()).toBe(1);
+    });
+
+    test('a join from another socket (the client reconnected) takes the entry over, at the back of the queue [ACKS]', async () => {
+        const { a, b } = create();
+        await a.add(entry('x'));
+        await a.add(entry('y', 5));
+        const rejoined = entry('x', 50, { socketId: 'sock-x-reconnected' });
+        expect(await b.add(rejoined)).toBe(2);
+        expect(await a.get('x')).toEqual(rejoined);
+        expect((await a.list()).map((e) => e.user_id)).toEqual(['y', 'x']);
+        // The old socket's late disconnect does not take the player out of the queue...
+        expect(await a.remove('x', 'sock-x')).toBe(false);
+        expect(await a.get('x')).toEqual(rejoined);
+        // ...and the new entry is claimable with the joined_at it carries.
+        expect(await b.claimPair(rejoined, entry('y', 5))).toBe(true);
     });
 
     test('list: every entry, longest-waiting first (ties by user id)', async () => {

@@ -16,6 +16,7 @@ const { guard } = require('../wrap');
  * @property {{ leaveQueueBySocket: (socketId: string) => void }} matchmaking
  * @property {(userId: string, gameId: string) => Promise<number>} [countPlayerSockets] player sockets at that
  *   board on every instance (Socket.IO adapter); without it only this instance is asked
+ * @property {import('../../observability/log').Log} [log] the connection's child logger (socketId, userId)
  */
 
 /**
@@ -26,13 +27,13 @@ const { guard } = require('../wrap');
  * @param {ClientPort} client
  * @param {SessionHandlerDeps} deps
  */
-function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking, countPlayerSockets }) {
+function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking, countPlayerSockets, log }) {
     /** @type {string} */
     const userId = socket.data.userId;
     sessions.register(userId, socket.id);
     socket.join(`user_${userId}`);
     const cancelExpiry = watchTokenExpiry(socket);
-    void guard('connection', () => gameService.reconnect(userId, client))();
+    void guard('connection', () => gameService.reconnect(userId, client), log)();
 
     /**
      * Start the abandonment countdown in each game the player still has no socket in.
@@ -49,16 +50,23 @@ function registerSessionHandlers(socket, client, { sessions, gameService, matchm
 
     socket.on(
         'disconnect',
-        guard('disconnect', async () => {
-            cancelExpiry();
-            matchmaking.leaveQueueBySocket(socket.id);
-            // Only games this player has no socket left in: closing one of two tabs is not leaving.
-            const { orphanedGames } = sessions.unregister(socket.id);
-            if (!socket.data.tokenExpired) return leaveGames(orphanedGames);
-            // We closed this socket because its token expired. The client is coming straight back
-            // with a fresh one; only if it has not re-joined by then did the player really leave.
-            setTimeout(() => void guard('disconnect', () => leaveGames(orphanedGames))(), TOKEN_RECONNECT_GRACE_MS);
-        }),
+        guard(
+            'disconnect',
+            async () => {
+                cancelExpiry();
+                matchmaking.leaveQueueBySocket(socket.id);
+                // Only games this player has no socket left in: closing one of two tabs is not leaving.
+                const { orphanedGames } = sessions.unregister(socket.id);
+                if (!socket.data.tokenExpired) return leaveGames(orphanedGames);
+                // We closed this socket because its token expired. The client is coming straight back
+                // with a fresh one; only if it has not re-joined by then did the player really leave.
+                setTimeout(
+                    () => void guard('disconnect', () => leaveGames(orphanedGames), log)(),
+                    TOKEN_RECONNECT_GRACE_MS,
+                );
+            },
+            log,
+        ),
     );
 }
 

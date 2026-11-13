@@ -216,6 +216,14 @@ describe('rematch', () => {
     });
 
     test('rematch_accept DB failure → error logged, internal_error acked, nothing emitted', async () => {
+        // Each connection logs through its own child logger (socketId, userId) [OBSERVABILITY].
+        const childLogger = log.child;
+        const childErrors = [];
+        jest.spyOn(log, 'child').mockImplementation((bindings) => {
+            const child = childLogger.call(log, bindings);
+            jest.spyOn(child, 'error').mockImplementation((...args) => childErrors.push([bindings, ...args]));
+            return child;
+        });
         const { alice, bob } = await rematchRequested({ time_control: '10', is_rated: true });
         const events = recordAll(alice);
         supabase.queue('games', { data: null, error: { message: 'insert failed' } });
@@ -223,7 +231,11 @@ describe('rematch', () => {
         await sleep(50);
         expect(events.filter(([e]) => e !== 'queue_status')).toEqual([]);
         expect(opsFor('games')).toHaveLength(1);
-        expect(log.error).toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
+        // Was: log.error on the process logger, without the socket and user.
+        expect(childErrors).toEqual([
+            [{ socketId: bob.id, userId: 'bob' }, '[socket] rematch_accept failed:', 'insert failed'],
+        ]);
+        expect(log.error).not.toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
     });
 
     test('rematch_decline sends rematch_declined (no payload) to the REQUESTER and clears the request', async () => {
@@ -260,6 +272,21 @@ describe('challenges', () => {
         supabase.calls.length = 0;
         return { alice, bob };
     }
+
+    test('every challenge event is acknowledged: ok, or the reason it was refused [ACKS]', async () => {
+        const alice = await ctx.connect('alice');
+        const bob = await ctx.connect('bob');
+        const request = { to_user_id: 'bob', from_username: 'Alice', time_control: '10', is_rated: true, color: 'white' };
+        expect(await emitAck(alice, 'challenge_request', request)).toEqual({ ok: true });
+        expect(await emitAck(alice, 'challenge_request', { ...request, to_user_id: 'alice' })).toEqual({
+            ok: false,
+            error: 'invalid_target',
+        });
+        expect(await emitAck(alice, 'challenge_request', { to_user_id: 42 })).toEqual({ ok: false, error: 'invalid_payload' });
+        expect(await emitAck(bob, 'challenge_decline', { from_user_id: 'alice', by_username: 'Bob' })).toEqual({ ok: true });
+        expect(await emitAck(bob, 'challenge_decline', { from_user_id: 'alice', by_username: 'Bob' })).toEqual(NO_PENDING);
+        expect(await emitAck(bob, 'challenge_accept', { from_user_id: 'alice' })).toEqual(NO_PENDING);
+    });
 
     test('challenge_request forwards the payload, stores the request and inserts a notification', async () => {
         const alice = await ctx.connect('alice');

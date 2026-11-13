@@ -6,9 +6,27 @@
  */
 const { createClient } = require('@supabase/supabase-js');
 const { log } = require('../observability/log');
+const { REQUEST_ID_HEADER, currentRequestId } = require('../observability/requestContext');
 
 const PLACEHOLDER_URL = 'https://placeholder.supabase.co';
 const PLACEHOLDER_KEY = 'placeholder';
+
+/**
+ * The `fetch` the Supabase client uses: the global one, plus `X-Request-Id` while an HTTP
+ * request is being served, so a PostgREST/Auth call can be matched to our request log line
+ * (supabase-js `global.fetch`; the API gateway receives the header, whether it records it
+ * is up to Supabase). Resolves `fetch` per call, so tests can replace it.
+ * @param {string | URL | Request} input
+ * @param {RequestInit} [init]
+ * @returns {Promise<Response>}
+ */
+function requestIdFetch(input, init = {}) {
+    const requestId = currentRequestId();
+    if (!requestId) return fetch(input, init);
+    const headers = new Headers(init.headers);
+    headers.set(REQUEST_ID_HEADER, requestId);
+    return fetch(input, { ...init, headers });
+}
 
 /**
  * @param {object} settings
@@ -34,6 +52,7 @@ function createSupabaseClient({ url, key, keySource }) {
 
     return createClient(url || PLACEHOLDER_URL, key || PLACEHOLDER_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },
+        global: { fetch: requestIdFetch },
     });
 }
 

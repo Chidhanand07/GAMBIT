@@ -6,12 +6,15 @@
  * (__tests__/repositories/matchmakingQueue.contract.test.js) checks the Lua
  * itself behaves the same.
  *
- * `r` is the mock's synchronous core: get, setPx, del, exists, zadd, zrem,
+ * `r` is the mock's synchronous core: get, set, setPx, del, exists, zadd, zrem,
  * zscore, zcard. KEYS and ARGV arrive as strings, as they do in Redis.
+ * The outbox scripts mirror src/repositories/gameResultOutboxScripts.js
+ * (checked against real Redis by repositories/gameResultOutbox.contract.test.js).
  */
 const LUA_EMULATIONS = {
-    mmJoin(r, [queue, entry], [userId, json, joinedAt, ttlMs]) {
-        if (r.exists(entry)) return 0;
+    mmJoin(r, [queue, entry], [userId, json, joinedAt, ttlMs, socketId]) {
+        const raw = r.get(entry);
+        if (raw !== null && JSON.parse(raw).socketId === socketId) return 0;
         r.setPx(entry, json, Number(ttlMs));
         r.zadd(queue, Number(joinedAt), userId);
         return r.zcard(queue);
@@ -51,6 +54,46 @@ const LUA_EMULATIONS = {
     },
 
     mmUnlock(r, [lock], [token]) {
+        if (r.get(lock) === token) return r.del(lock);
+        return 0;
+    },
+
+    outboxEnqueue(r, [item, due], [gameId, json, dueAt]) {
+        if (r.exists(item)) return 0;
+        r.set(item, json);
+        r.zadd(due, Number(dueAt), gameId);
+        return 1;
+    },
+
+    outboxReschedule(r, [item, due], [gameId, json, dueAt]) {
+        if (!r.exists(item)) return 0;
+        r.set(item, json);
+        r.zadd(due, Number(dueAt), gameId);
+        return 1;
+    },
+
+    outboxPark(r, [item, due, parked], [gameId, json, parkedAt]) {
+        if (!r.exists(item)) return 0;
+        r.set(item, json);
+        r.zrem(due, gameId);
+        r.zadd(parked, Number(parkedAt), gameId);
+        return 1;
+    },
+
+    outboxRemove(r, [item, due, parked], [gameId]) {
+        r.zrem(due, gameId);
+        r.zrem(parked, gameId);
+        return r.del(item);
+    },
+
+    outboxRequeue(r, [item, due, parked], [gameId, dueAt]) {
+        if (!r.exists(item)) return 0;
+        r.zrem(parked, gameId);
+        r.zadd(due, Number(dueAt), gameId);
+        return 1;
+    },
+
+    outboxUnlock(r, [lock], [token]) {
         if (r.get(lock) === token) return r.del(lock);
         return 0;
     },

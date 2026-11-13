@@ -10,14 +10,18 @@
  */
 
 /**
- * Queue a player unless they already have an entry.
- * KEYS: queue, entry. ARGV: userId, entryJson, joinedAtMs, ttlMs.
- * Returns 0 when already queued, otherwise the queue size (the new position).
+ * Queue a player unless they are already queued from this socket. An entry
+ * made from another socket is replaced: the client reconnected (the automatic
+ * re-queue) before the server noticed the old socket was gone, and a match
+ * must reach the new socket [ACKS]. The replacement joins at the back.
+ * KEYS: queue, entry. ARGV: userId, entryJson, joinedAtMs, ttlMs, socketId.
+ * Returns 0 when already queued from this socket, otherwise the queue size.
  */
 const mmJoin = {
     numberOfKeys: 2,
     lua: `
-if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local raw = redis.call('GET', KEYS[2])
+if raw and cjson.decode(raw).socketId == ARGV[5] then return 0 end
 redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[4])
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 return redis.call('ZCARD', KEYS[1])

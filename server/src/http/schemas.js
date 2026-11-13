@@ -6,7 +6,8 @@ const { z } = require('zod');
 
 const MAX_FEN_LENGTH = 100;
 const MIN_DEPTH = 1;
-const MAX_DEPTH = 30;
+/** The engine refuses deeper searches (chess-engine config MAX_ANALYSIS_DEPTH, ADR F-063). */
+const MAX_DEPTH = 20;
 const MAX_USERNAME_LENGTH = 64;
 
 const schemas = {

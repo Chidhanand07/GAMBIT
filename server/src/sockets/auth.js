@@ -6,6 +6,7 @@
  * a user id from a payload. Any failure rejects the connection (SEC-09).
  */
 const { log } = require('../observability/log');
+const { reportError } = require('../observability/errorReporter');
 
 /** Supabase access tokens are ~1 KB; anything far larger is not a token. */
 const MAX_TOKEN_LENGTH = 8192;
@@ -41,6 +42,8 @@ function createHandshakeAuth({ verifyToken, tokenDeadline }) {
             next();
         } catch (error) {
             log.error('[socket] token verification failed:', /** @type {Error} */ (error).message);
+            // Not a bad token: verification itself failed (Supabase Auth unreachable), SEC-12.
+            void reportError(error, { where: 'socket:handshake' });
             next(new Error(UNAUTHORIZED));
         }
     };

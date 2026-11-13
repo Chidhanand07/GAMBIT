@@ -61,14 +61,16 @@ function createMatchmakingQueueRepository(
 
     return {
         /**
-         * Queue a player; a player already queued is left as they are.
+         * Queue a player. A player already queued from the same socket is left as they are; an
+         * entry from another socket (a reconnect) is replaced by this one, at the back [ACKS].
          * @param {QueueEntry} entry
          * @returns {Promise<number | null>} the queue size after joining, null when already queued
          */
         async add(entry) {
             const id = entry.user_id;
+            const json = JSON.stringify(entry);
             const size = Number(
-                await script('mmJoin')(queueKey, entryKey(id), id, JSON.stringify(entry), entry.joined_at, entryTtlMs),
+                await script('mmJoin')(queueKey, entryKey(id), id, json, entry.joined_at, entryTtlMs, entry.socketId),
             );
             return size === 0 ? null : size;
         },

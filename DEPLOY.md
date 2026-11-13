@@ -22,6 +22,13 @@
    - `00001_...sql` → `00002_...sql` → ... → latest
 3. Verify: go to **Table Editor** — you should see `profiles`, `games`, `friendships`, `notifications`, `messages` tables
 
+**Order constraint: `20261114100000_drop_legacy_clock_columns.sql`** drops
+`games.white_time_ms` / `black_time_ms`. Apply it **only after every game-server replica and the
+web app run the M2 release or later** (an older server writes `white_time_ms` when a player
+disconnects; an older web app selects it). The migration refuses to run while a function,
+policy or view in `public` still names either column. On a fresh project (nothing deployed
+yet) it is safe to apply with the others. pgTAP: `supabase/tests/04_legacy_clock_columns.test.sql`.
+
 ### 1c. Enable Google OAuth (optional)
 1. Go to **Authentication → Providers → Google**
 2. Enable it, add your Google Cloud OAuth Client ID and Secret
@@ -174,6 +181,7 @@ Go to your service → **Variables** tab and add:
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
 | `SOCKET_ADAPTER` | Optional. `redis` (default): Socket.IO rooms and broadcasts span every replica through Redis Streams. `none`: in-process only, for a single local instance. |
+| `ERROR_WEBHOOK_URL` | Optional (SEC-12). An `https://` webhook that gets one JSON POST per fatal error, HTTP 500, socket `internal_error`, failed token verification, rating-function error and stuck game result (`text`/`content` summary for Slack/Discord, plus `error`, `context`, `release`). At most 20 a minute; credential-like context keys are redacted. A secret: store it as a Railway variable. Unset: errors are only logged. The release tag comes from Railway's `RAILWAY_GIT_COMMIT_SHA` (set automatically). |
 | `PORT` | **do not set** — Railway injects this automatically |
 
 ### 4b-2. Running more than one replica
@@ -193,12 +201,43 @@ replica count, **after** all of the following:
    deploy the frontend first, then scale.
 4. Start with 2 replicas, run the two-replica manual test in section 6, then scale further.
 
+### 4b-3. Game results the database did not take (result outbox)
+If Supabase is unreachable when a game ends, the server retries the `games` row 3 times, then
+keeps it in Redis (`{outbox}:item:<gameId>`) and a worker on one replica writes it later (every
+5 s, backoff 5 s doubling to 5 min) and then rates the game. Each try is logged
+(`[outbox] game <id>: ...`). After 12 failed tries, or one hour, the item is **parked**: a
+`fatal` log line `[outbox] game <id>: result still not persisted after N re-drives; parked for an
+operator` (and an error report if `ERROR_WEBHOOK_URL` is set). Parked items are kept until
+someone acts:
+
+```
+redis-cli -u "$REDIS_URL" ZRANGE '{outbox}:parked' 0 -1          # which games
+redis-cli -u "$REDIS_URL" GET '{outbox}:item:<gameId>'            # the row, last error, attempts
+# Fix the cause, then queue it again (one more try; it parks again if it still fails):
+redis-cli -u "$REDIS_URL" ZREM '{outbox}:parked' '<gameId>'
+redis-cli -u "$REDIS_URL" ZADD '{outbox}:due' 0 '<gameId>'
+```
+
+Re-driving is safe to repeat: the row is written only while it is still `active`, and the rating
+function applies a game once.
+
 ### 4c. Get the URL
 After deploy → **Settings → Domains** → generate a Railway domain e.g. `https://gambit-server.up.railway.app`
 This becomes `NEXT_PUBLIC_SOCKET_URL` in the frontend.
 
 ### 4d. Verify
-Hit `https://gambit-server.up.railway.app/api/health` — should return `{ "status": "ok" }`.
+Hit `https://gambit-server.up.railway.app/readyz` — should return `200` with
+`{ "ready": true, "checks": { "redis": "ok", "supabase": "ok" } }`. `/livez` (and the older
+`/api/health`) only say the process is up.
+
+### 4e. Healthcheck
+`server/railway.toml` sets `healthcheckPath = "/readyz"` (NODE-21). Railway calls it when a new
+deploy starts and only switches traffic once it answers 200: Redis must answer `PING` and Supabase
+a one-row query, each within 2 s. **If Redis or Supabase is down, the new deploy does not go
+live and the previous one keeps serving; this is intended** (a replica that cannot reach Redis
+cannot run games). Railway does not use the healthcheck after the deploy is live, so an outage
+later does not restart running replicas. Railway's config-as-code takes precedence over the
+dashboard's healthcheck setting; the dashboard shows the value from the file after the next deploy.
 
 ---
 
@@ -238,7 +277,7 @@ Any time you change env vars in Vercel → **Deployments → Redeploy** the late
 ## 6. Post-Deploy Verification Checklist
 
 ```
-[ ] GET https://gambit-server.up.railway.app/api/health → { "status": "ok" }
+[ ] GET https://gambit-server.up.railway.app/readyz → 200 { "ready": true, … }
 [ ] GET https://gambit-engine.onrender.com/health → { "status": "ok", "engine": "online" }
 [ ] https://gambit.vercel.app/ → intro animation plays
 [ ] Sign up new account → redirected to /lobby, profile created in Supabase
@@ -357,3 +396,17 @@ The script runs `supabase db diff --remote --schema public` (`--linked` on CLI 2
 5. Never fix drift by editing the remote by hand, and never edit an already-applied migration file (SEC-08). If only the history table disagrees (`migration list` shows a version on one side), reconcile it with `supabase migration repair`.
 
 > Not yet verified: the script and workflow follow the Supabase CLI v3.1.0 reference but have not been run against a real project. Confirm the first manual run before relying on the schedule.
+
+---
+
+## 10. Re-run Stored Game Reviews (after the evaluation-perspective fix)
+
+Reviews written before the ENG-PERSPECTIVE fix (ADR F-060) scored every White move wrongly (1.e4 showed as "Inaccuracy") and drew White's moves upside down on the eval graph. `chess-engine/scripts/rereview_games.py` rebuilds the stored reviews of completed games. It writes only the review columns (`white_accuracy`, `black_accuracy`, `white_move_classifications`, `black_move_classifications`, `critical_moments`), only on rows whose `status` is `completed`, and never ratings, results or statuses.
+
+Run it once after the fix is deployed, from a shell on the engine service (Render → the engine → **Shell**), which already has `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `STOCKFISH_PATH`:
+```bash
+cd /app                                                   # chess-engine/ when run locally
+python -m scripts.rereview_games --limit 20               # DRY RUN: prints what would change, writes nothing
+python -m scripts.rereview_games --apply --concurrency 2  # writes the new reviews
+```
+Options: `--since 2026-11-01` (games that ended at or after that time; games without `ended_at` are skipped by it), `--limit N` (newest first), `--game-id <uuid>` (repeatable), `--concurrency N` (1–8, default 2; each worker holds one Stockfish instance, so keep it at or below `STOCKFISH_POOL_SIZE` while the service is serving players). Each game takes a depth-18 Stockfish pass per move, so a large backfill takes a while: start with `--limit`, then widen. Exit code 0 = no failures, 1 = some games failed (listed; rerun with `--game-id`), 2 = Supabase not configured. Re-running is safe: an unchanged review is not rewritten.

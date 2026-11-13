@@ -10,22 +10,30 @@ const { wrap } = require('../wrap');
 /**
  * @param {import('socket.io').Socket} socket
  * @param {{ matchmaking: { requestMatch: (data: any, socketId: string) => Promise<void>,
- *   leaveQueue: (userId: string) => void } }} deps
+ *   leaveQueue: (userId: string) => void }, log?: import('../../observability/log').Log }} deps
  */
-function registerLobbyHandlers(socket, { matchmaking }) {
+function registerLobbyHandlers(socket, { matchmaking, log }) {
     /** @type {string} */
     const userId = socket.data.userId;
     socket.on(
         'join_queue',
-        wrap('join_queue', schemas.join_queue, (data) =>
-            matchmaking.requestMatch({ ...data, user: { id: userId } }, socket.id),
+        wrap(
+            'join_queue',
+            schemas.join_queue,
+            (data) => matchmaking.requestMatch({ ...data, user: { id: userId } }, socket.id),
+            log,
         ),
     );
     socket.on(
         'leave_queue',
-        wrap('leave_queue', schemas.leave_queue, () => {
-            matchmaking.leaveQueue(userId);
-        }),
+        wrap(
+            'leave_queue',
+            schemas.leave_queue,
+            () => {
+                matchmaking.leaveQueue(userId);
+            },
+            log,
+        ),
     );
 }
 

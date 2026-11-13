@@ -37,6 +37,8 @@ function createRedisMock() {
         get(key) { expire(key); return strings.has(key) ? strings.get(key) : null; },
         exists(key) { expire(key); return strings.has(key); },
         setPx(key, value, ms) { strings.set(key, String(value)); expiries.set(key, Date.now() + ms); },
+        /** SET key value (no TTL; drops an earlier one). */
+        set(key, value) { strings.set(key, String(value)); expiries.delete(key); },
         del(key) { expiries.delete(key); return strings.delete(key) ? 1 : 0; },
         zadd(key, score, member) {
             if (!zsets.has(key)) zsets.set(key, new Map());
@@ -150,6 +152,17 @@ function createRedisMock() {
         async zrem(key, ...members) { maybeFail('zrem'); return members.reduce((n, m) => n + sync.zrem(key, m), 0); },
         async zscore(key, member) { maybeFail('zscore'); return sync.zscore(key, member); },
         async zcard(key) { maybeFail('zcard'); return sync.zcard(key); },
+        /** ZRANGEBYSCORE key min max [LIMIT offset count]; min/max may be '-inf' / '+inf'. */
+        async zrangebyscore(key, min, max, ...rest) {
+            maybeFail('zrangebyscore');
+            const bound = (v) => (v === '-inf' ? -Infinity : v === '+inf' ? Infinity : Number(v));
+            const [lo, hi] = [bound(min), bound(max)];
+            const z = zsets.get(key) ?? new Map();
+            const inRange = sync.zrange(key).filter((m) => z.get(m) >= lo && z.get(m) <= hi);
+            if (rest[0] !== 'LIMIT') return inRange;
+            const [offset, count] = [Number(rest[1]), Number(rest[2])];
+            return inRange.slice(offset, count < 0 ? undefined : offset + count);
+        },
         /** ZRANGE key 0 -1 (the only range the code reads). */
         async zrange(key, start, stop) {
             maybeFail('zrange');

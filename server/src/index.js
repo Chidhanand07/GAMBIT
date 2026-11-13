@@ -46,6 +46,8 @@ const { createRateLimiter } = require('./services/rateLimiter');
 const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
 const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
 const { createTickLockRepository } = require('./repositories/tickLockRepository');
+const { createGameResultOutboxRepository } = require('./repositories/gameResultOutboxRepository');
+const { createResultOutboxWorker } = require('./services/resultOutboxWorker');
 const { createSocketAdapter } = require('./clients/socketAdapter');
 const { createHttpRateLimit } = require('./http/rateLimit');
 const { createSocketRateLimit } = require('./sockets/rateLimit');
@@ -60,6 +62,20 @@ const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
 const { createShutdown } = require('./shutdown');
 const { log } = require('./observability/log');
+const { setErrorReporter } = require('./observability/errorReporter');
+const { createWebhookErrorReporter } = require('./clients/webhookErrorReporter');
+
+// SEC-12: fatal errors, 500s, internal_error acks and rating failures are reported; with
+// ERROR_WEBHOOK_URL to that webhook, otherwise nowhere but the logs (ADR F-069).
+const errorWebhookUrl = env.errorWebhookUrl();
+if (errorWebhookUrl) {
+    setErrorReporter(
+        createWebhookErrorReporter({
+            url: errorWebhookUrl,
+            origin: { service: 'gambit-server', release: env.release(), hostname: require('node:os').hostname() },
+        }),
+    );
+}
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
@@ -85,12 +101,22 @@ const socialService = createSocialService({
 // One finalizer for every way a game ends: moves and resignations (gameService)
 // and flag falls and abandonment (the clock) share it (G3).
 const reviewService = createReviewService({ engineClient });
+// Finished games whose row could not be written wait here for the worker (ERRORS, ADR F-066).
+const resultOutbox = createGameResultOutboxRepository(redis);
 const finalizer = createGameFinalizer({
     gameStore,
     gamesRepo,
     ratingService,
     reviewService,
     sessions,
+    emitter,
+    resultOutbox,
+});
+const resultOutboxWorker = createResultOutboxWorker({
+    outbox: resultOutbox,
+    gamesRepo,
+    ratingService,
+    reviewService,
     emitter,
 });
 const gameService = createGameService({
@@ -150,11 +176,14 @@ registerSocketHandlers(io, {
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
+    // Only a running server re-drives stuck results; requiring this module (tests) does not.
+    resultOutboxWorker.start();
     const shutdown = createShutdown({
         readiness,
         stopTimers: () => {
             matchmaking.destroy();
             stopGlobalClock();
+            resultOutboxWorker.stop();
         },
         notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
         closeSockets: () => io.close(),
