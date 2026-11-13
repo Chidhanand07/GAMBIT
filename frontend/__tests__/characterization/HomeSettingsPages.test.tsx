@@ -101,6 +101,18 @@ describe('landing page', () => {
     })
 })
 
+describe('landing demo board timers (F17)', () => {
+    test('one reset is scheduled after the last move, and unmount clears every timer', () => {
+        jest.useFakeTimers()
+        const { unmount } = render(<Home />)
+        act(() => { jest.advanceTimersByTime(900 * 8) }) // all 8 demo moves played
+        act(() => { jest.advanceTimersByTime(900 * 2) }) // two idle ticks while the reset is pending
+        expect(jest.getTimerCount()).toBe(2) // the move interval + exactly one reset timeout
+        unmount()
+        expect(jest.getTimerCount()).toBe(0)
+    })
+})
+
 describe('settings page', () => {
     const ME = {
         id: 'u-1', username: 'me1', display_name: 'Me', bio: 'hi', country: 'India', avatar_url: null,

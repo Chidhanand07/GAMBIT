@@ -104,6 +104,28 @@ describe('auth/exchange', () => {
         expect(replace.mock.calls).toEqual([['/login?error=oauth_failed']])
     })
 
+    test('F17: leaving the page cancels the pending error redirect', async () => {
+        jest.useFakeTimers()
+        searchParams = new URLSearchParams('code=c_FAKE')
+        auth.exchangeCodeForSession.mockResolvedValue({ error: { message: 'bad code' } })
+        const { unmount } = render(<ExchangePage />)
+        await flush()
+        unmount()
+        act(() => { jest.advanceTimersByTime(2000) })
+        expect(replace).not.toHaveBeenCalled()
+        expect(jest.getTimerCount()).toBe(0)
+    })
+
+    test('F17: an exchange that settles after the page is gone navigates nowhere', async () => {
+        searchParams = new URLSearchParams('code=c_FAKE')
+        let settle!: (v: unknown) => void
+        auth.exchangeCodeForSession.mockReturnValue(new Promise(r => { settle = r }))
+        const { unmount } = render(<ExchangePage />)
+        unmount()
+        await act(async () => { settle({ error: null }) })
+        expect(replace).not.toHaveBeenCalled()
+    })
+
     test('implicit hash tokens: sets the session and replaces to /lobby by default', async () => {
         window.location.hash = '#access_token=at_FAKE&refresh_token=rt_FAKE'
         auth.setSession.mockResolvedValue({ error: null })
