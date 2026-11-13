@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl, displayTimeControl } from '@/lib/chess/timeControl';
 import type { Profile, ProfileSummary } from '@/types/profile';
 import type { ProfileGameRow } from '@/types/profilePage';
@@ -8,8 +9,6 @@ import { accColor, formatDate, gameOutcome } from '../format';
 const TC_ICONS: Record<SpeedBucket, string> = { bullet: '⚡', blitz: '🔥', rapid: '⏱', classical: '📖' };
 const DEFAULT_TC_ICON = '⏱';
 const DEFAULT_RATING = 1200;
-
-type Outcome = ReturnType<typeof gameOutcome>;
 
 function ColorSwatch({ white }: { white: boolean }) {
     return (
@@ -60,14 +59,15 @@ function Players({ profileName, isWhite, me, opponent }: PlayersProps) {
     );
 }
 
-function outcomeStyle({ isWin, isDraw }: Outcome) {
-    if (isDraw) return { letter: 'D', score: '½-½', bg: 'rgba(94,83,76,0.2)', color: 'var(--text-secondary)' };
-    if (isWin) return { letter: 'W', score: '1-0', bg: 'rgba(79,168,90,0.2)', color: 'var(--green)' };
-    return { letter: 'L', score: '0-1', bg: 'rgba(192,57,43,0.2)', color: 'var(--red)' };
-}
+const OUTCOME_STYLES: Record<PlayerOutcome, { letter: string; score: string; bg: string; color: string }> = {
+    draw: { letter: 'D', score: '½-½', bg: 'rgba(94,83,76,0.2)', color: 'var(--text-secondary)' },
+    win: { letter: 'W', score: '1-0', bg: 'rgba(79,168,90,0.2)', color: 'var(--green)' },
+    loss: { letter: 'L', score: '0-1', bg: 'rgba(192,57,43,0.2)', color: 'var(--red)' },
+    aborted: { letter: 'A', score: 'Aborted', bg: 'rgba(94,83,76,0.2)', color: 'var(--text-tertiary)' },
+};
 
-function ResultBadge({ outcome }: { outcome: Outcome }) {
-    const { letter, score, bg, color } = outcomeStyle(outcome);
+function ResultBadge({ outcome }: { outcome: PlayerOutcome }) {
+    const { letter, score, bg, color } = OUTCOME_STYLES[outcome];
     return (
         <div className="shrink-0 flex items-center gap-1.5 ml-2">
             <div

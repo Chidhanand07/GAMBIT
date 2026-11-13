@@ -1,4 +1,5 @@
 // Pure display helpers for the profile page.
+import { playerOutcome, type OutcomeRow, type PlayerOutcome } from '@/lib/chess/gameOutcome';
 import type { Profile } from '@/types/profile';
 
 const ACCURACY_GREAT = 85;
@@ -43,7 +44,7 @@ export function avatarInitial(name: string | null | undefined, username: string 
     return (name || username || '?')[0].toUpperCase();
 }
 
-/** Outcome of a game from the point of view of `profileId`. A null winner on a non-draw counts as a loss (LEGACY). */
-export function gameOutcome(game: { winner_id: string | null; result: string | null }, profileId: string) {
-    return { isWin: game.winner_id === profileId, isDraw: game.result === 'draw' };
+/** Outcome of a finished game for `profileId`: win, loss, draw or aborted (see lib/chess/gameOutcome). */
+export function gameOutcome(game: OutcomeRow, profileId: string): PlayerOutcome {
+    return playerOutcome(game, profileId);
 }

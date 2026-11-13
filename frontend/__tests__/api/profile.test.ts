@@ -129,6 +129,20 @@ describe('GET /api/profile/[username]/stats', () => {
         })
     })
 
+    test('F12: an aborted game is not counted, and a game nobody won is a draw, not a loss', async () => {
+        db.queue('profiles', { data: { id: uid('p'), games_played: 0, wins: 0, losses: 0, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                { time_control: '10', status: 'aborted', result: null, winner_id: null },
+                { time_control: '10', status: 'completed', result: 'aborted', winner_id: null },
+                { time_control: '10', status: 'completed', result: null, winner_id: null },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.byCategory.rapid).toEqual({ played: 1, wins: 0, losses: 0, draws: 1 })
+    })
+
     test('404 for an unknown user', async () => {
         expect((await getStats(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
     })

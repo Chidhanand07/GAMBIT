@@ -216,7 +216,9 @@ describe('header and overview tab', () => {
         }
         await renderProfile()
         expect(screen.getByText('Win')).toBeInTheDocument()
-        expect(screen.getAllByText('Loss')).toHaveLength(2) // LEGACY: null winner + non-draw counts as Loss
+        // F12 (was: two 'Loss' rows, "null winner + non-draw counts as Loss"): an aborted game is labelled Aborted
+        expect(screen.getAllByText('Loss')).toHaveLength(1)
+        expect(screen.getByText('Aborted')).toBeInTheDocument()
         expect(screen.getByText('Draw')).toBeInTheDocument()
         expect(screen.getAllByRole('link', { name: 'vs Alice' })[0]).toHaveAttribute('href', '/profile/alice')
         expect(screen.getByRole('link', { name: 'vs alice' })).toHaveAttribute('href', '/profile/alice')
