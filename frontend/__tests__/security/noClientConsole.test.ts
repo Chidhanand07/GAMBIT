@@ -21,7 +21,8 @@ const isServerOnly = (file: string) =>
  * Client files that still call console and could not be changed with S14 (owned by another
  * change in flight). Remove an entry when its file is cleaned; never add one.
  */
-const KNOWN_CLIENT_OFFENDERS = ['features/lobby/hooks/usePrivateGame.ts', 'lib/socket/connection.ts']
+// Empty: the last two offenders were cleaned on the branch that owns them. Keep it empty.
+const KNOWN_CLIENT_OFFENDERS: string[] = []
 
 const CONSOLE_USE = /\bconsole\s*(\.|\[|\?\.)/
 const SERVER_ALLOWED = /\bconsole\s*\.\s*(error|warn)\s*\(/g

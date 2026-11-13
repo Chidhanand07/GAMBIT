@@ -319,14 +319,14 @@ describe('private game modal', () => {
         expect(screen.getByTestId('qr')).toHaveAttribute('data-value', 'http://localhost/join/tok_FAKE_0002')
     })
 
-    test('a response without a token logs the error and returns to the config step', async () => {
+    test('a response without a token returns to the config step, without logging to the browser console [S14]', async () => {
         const err = jest.spyOn(console, 'error').mockImplementation(() => {})
         privateCreate = async () => jsonResponse({ error: 'boom' })
         await renderLobby()
         openFriendModal()
         click(screen.getByRole('button', { name: 'Generate Invite Link' }))
-        await waitFor(() => expect(err).toHaveBeenCalledWith('Private game error:', 'boom'))
-        expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument()
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument())
+        expect(err).not.toHaveBeenCalled()
         expect(socket.emitted('join_game')).toEqual([])
     })
 

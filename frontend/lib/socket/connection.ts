@@ -51,7 +51,6 @@ export function createGameSocket({ url, getToken }: GameSocketOptions): GameSock
     });
 
     socket.on('connect_error', (err: Error) => {
-        console.warn('[Socket] Connection error:', err.message);
         if (err.message !== UNAUTHORIZED || retryTimer) return;
         retryTimer = setTimeout(() => {
             retryTimer = null;
@@ -59,7 +58,6 @@ export function createGameSocket({ url, getToken }: GameSocketOptions): GameSock
         }, UNAUTHORIZED_RETRY_MS);
     });
     socket.on('disconnect', (reason: string) => {
-        console.warn('[Socket] Disconnected:', reason);
         // The server ends a connection when its access token expires (it says `token_expired`
         // first). socket.io never reconnects after a server-side disconnect, so do it here:
         // the handshake asks for the token again and gets the refreshed one.

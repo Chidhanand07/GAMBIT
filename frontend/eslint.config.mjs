@@ -99,12 +99,4 @@ export default [
         files: ['__tests__/**/*.{ts,tsx}', 'jest.setup.ts', 'scripts/**', '*.config.{ts,mts,mjs,js}'],
         rules: { 'no-console': 'off' },
     },
-    {
-        // TEMPORARY (S14): these two client files still call console.error / console.warn and
-        // are being changed by another branch, so they could not be cleaned here. Delete each
-        // entry (and its line in noClientConsole.test.ts) when the file is cleaned.
-        name: 'gambit/no-console-pending',
-        files: ['features/lobby/hooks/usePrivateGame.ts', 'lib/socket/connection.ts'],
-        rules: { 'no-console': 'off' },
-    },
 ];

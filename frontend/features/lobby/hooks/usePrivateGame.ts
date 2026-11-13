@@ -47,7 +47,6 @@ export function usePrivateGame({ socket, customMin, customInc }: PrivateGameOpti
                 setInviteGameId(data.game_id ?? null);
                 setInviteState('share');
             } else {
-                console.error('Private game error:', data.error);
                 setInviteState('config');
             }
         } catch {
