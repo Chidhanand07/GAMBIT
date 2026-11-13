@@ -22,6 +22,8 @@ let onlineCount = 42
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
 jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount }) }))
+const toast = jest.fn()
+jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
 import LobbyPage from '@/app/lobby/page'
 
@@ -34,6 +36,7 @@ let privateCreate: () => Promise<any>
 beforeEach(() => {
     socket.reset()
     push.mockClear()
+    toast.mockClear()
     profile = { ...ME }
     onlineCount = 42
     activeGame = null
@@ -113,12 +116,13 @@ describe('mount & static content', () => {
 })
 
 describe('Play Online', () => {
-    test('emits join_queue with the FULL profile object as user, the canonical "M+S" time control, and no is_rated', async () => {
+    test('emits join_queue in the one queue shape: {id} only, canonical "M+S", increment and is_rated [F8]', async () => {
         await renderLobby()
         playOnline()
+        // Was: the FULL profile object as user and no is_rated (the reconnect re-queue used another shape).
         expect(socket.emit.mock.calls).toEqual([
             // The third argument is the ack callback: a refused join is reported (ACKS).
-            ['join_queue', { user: { ...ME }, time_control: '3+0', increment: 0 }, expect.any(Function)],
+            ['join_queue', { user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }, expect.any(Function)],
         ])
     })
 
@@ -126,7 +130,7 @@ describe('Play Online', () => {
         await renderLobby()
         click(screen.getByText('Daily'))
         playOnline()
-        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '1440+0', increment: 0 }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '1440+0', increment: 0, is_rated: true }])
     })
 
     test('match_found falls back to game_id when id is missing', async () => {
@@ -150,14 +154,43 @@ describe('Play Online', () => {
         expect(screen.getByText('00:00')).toBeInTheDocument()
     })
 
-    test('a socket reconnect while searching re-emits join_queue in a DIFFERENT shape ({id} only, is_rated: true)', async () => {
+    test('a socket reconnect while searching re-emits the SAME join_queue payload, with an ack [F8]', async () => {
+        await renderLobby()
+        playOnline()
+        const [first] = socket.emitted('join_queue')
+        socket.emit.mockClear()
+        socket.serverSends('connect')
+        // Was: a different shape and no ack, so a refused re-queue left the player "searching" forever.
+        expect(socket.emit.mock.calls).toEqual([['join_queue', first, expect.any(Function)]])
+    })
+
+    test('the reconnect re-queue keeps the queued time control even if the selection changed meanwhile [F8]', async () => {
         await renderLobby()
         playOnline()
         socket.emit.mockClear()
+        click(screen.getByText('Rapid')) // the cards stay mounted while searching
         socket.serverSends('connect')
-        expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }],
-        ])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }])
+    })
+
+    test('a refused reconnect re-queue stops the search and shows why [F8] [ACKS]', async () => {
+        await renderLobby()
+        playOnline()
+        socket.emit.mockImplementationOnce((_e: string, _p: unknown, ack?: (res: unknown) => void) =>
+            ack?.({ ok: false, error: 'invalid_time_control' }))
+        socket.serverSends('connect')
+        expect(screen.queryByText('Finding opponent…')).not.toBeInTheDocument()
+        expect(toast).toHaveBeenCalledWith('That time control is not available.', 'error')
+    })
+
+    test('match_found while not searching is ignored [F8]', async () => {
+        await renderLobby()
+        socket.serverSends('match_found', { id: 'stale', white_id: 'me', black_id: 'x' })
+        expect(push).not.toHaveBeenCalled()
+        playOnline()
+        click(screen.getByRole('button', { name: 'Cancel search' }))
+        socket.serverSends('match_found', { id: 'stale-2', white_id: 'me', black_id: 'x' })
+        expect(push).not.toHaveBeenCalled()
     })
 
     test('a socket reconnect while NOT searching emits nothing', async () => {
@@ -166,13 +199,20 @@ describe('Play Online', () => {
         expect(socket.emit).not.toHaveBeenCalled()
     })
 
-    test('unmounting while searching does NOT emit leave_queue, but removes the listeners', async () => {
+    test('unmounting while searching leaves the queue and removes the listeners [F8]', async () => {
         const { unmount } = await renderLobby()
         playOnline()
         socket.emit.mockClear()
         unmount()
-        expect(socket.emit).not.toHaveBeenCalled()
+        // Was: no leave_queue, so the server could still pair a player who had left the lobby.
+        expect(socket.emit.mock.calls).toEqual([['leave_queue', 'me']])
         expect(socket.listenedEvents()).toEqual([])
+    })
+
+    test('unmounting while NOT searching emits nothing [F8]', async () => {
+        const { unmount } = await renderLobby()
+        unmount()
+        expect(socket.emit).not.toHaveBeenCalled()
     })
 })
 
@@ -209,7 +249,7 @@ describe('custom time control modal', () => {
         expect(screen.getByText('12+5')).toBeInTheDocument()
         expect(screen.queryByText('Configure')).not.toBeInTheDocument()
         playOnline()
-        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '12+5', increment: 5 }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true }])
     })
 
     test('reconnect re-queue for a custom control keeps the increment ("12+5") [TIME-CONTROL]', async () => {
