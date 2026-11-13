@@ -22,6 +22,7 @@ const DEFAULT_RATING = 1200;
 const PAIRING_LOCK_TTL_MS = 5000;
 const ESTIMATED_WAIT_SECONDS = 10;
 const INVALID_TIME_CONTROL = Object.freeze({ ok: false, error: 'invalid_time_control' });
+const PROFILE_NOT_FOUND = Object.freeze({ ok: false, error: 'profile_not_found' });
 const GAME_CREATION_FAILED = Object.freeze({ reason: 'game_creation_failed' });
 /** Above this `random()` value the longer-waiting player gets White. */
 const WHITE_FOR_FIRST_THRESHOLD = 0.5;
@@ -97,8 +98,10 @@ async function joinQueue(mm, { user, socketId, timeControl, increment, isRated =
 
 /**
  * `join_queue`: queue the player with their rating read from the DB (C3: never
- * trust a client-provided rating). Unknown users are ignored; an invalid
- * time control is refused with a reason.
+ * trust a client-provided rating). An invalid time control and an unknown
+ * profile are refused with a reason, so the client stops searching [ACKS].
+ * A join from a new socket of a player who is already queued (the client's
+ * automatic re-queue after a reconnect) moves the entry to that socket.
  * @param {Matchmaker} mm
  * @param {{ user?: { id?: string }, time_control?: unknown, increment?: unknown, is_rated?: boolean }} data
  * @param {string} socketId
@@ -110,7 +113,7 @@ async function requestMatch(mm, data, socketId) {
     if (!model) return INVALID_TIME_CONTROL;
     const timeControl = formatTimeControl(model);
     const { data: profile } = await mm.profilesRepo.findForMatchmaking(data.user.id);
-    if (!profile) return;
+    if (!profile) return PROFILE_NOT_FOUND;
     const verifiedUser = {
         id: profile.id,
         username: profile.username,

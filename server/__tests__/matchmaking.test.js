@@ -47,11 +47,15 @@ describe('queue', () => {
         expect(io.emitted).toContainEqual({ room: 'sock-a', event: 'queue_joined', payload: { position: 1, estimated_wait: 10 } });
     });
 
-    test('joining twice keeps one entry', async () => {
+    test('joining twice keeps one entry; a join from a new socket (reconnect) moves it there [ACKS]', async () => {
         await mm.joinQueue(user('a', 1500), 's1', '10', 0);
-        await mm.joinQueue(user('a', 1500), 's2', '10', 0);
+        await mm.joinQueue(user('a', 1500), 's1', '10', 0);
         expect(await mm.queueSize()).toBe(1);
         expect((await mm.queuedEntry('a')).socketId).toBe('s1');
+        // Was: the entry kept 's1' (a dead socket after a reconnect, so match_found went nowhere).
+        await mm.joinQueue(user('a', 1500), 's2', '10', 0);
+        expect(await mm.queueSize()).toBe(1);
+        expect((await mm.queuedEntry('a')).socketId).toBe('s2');
     });
 
     test('players with under 5 games are provisional; missing rating defaults to 1200', async () => {

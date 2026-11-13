@@ -12,8 +12,9 @@
  * (checked against real Redis by repositories/gameResultOutbox.contract.test.js).
  */
 const LUA_EMULATIONS = {
-    mmJoin(r, [queue, entry], [userId, json, joinedAt, ttlMs]) {
-        if (r.exists(entry)) return 0;
+    mmJoin(r, [queue, entry], [userId, json, joinedAt, ttlMs, socketId]) {
+        const raw = r.get(entry);
+        if (raw !== null && JSON.parse(raw).socketId === socketId) return 0;
         r.setPx(entry, json, Number(ttlMs));
         r.zadd(queue, Number(joinedAt), userId);
         return r.zcard(queue);

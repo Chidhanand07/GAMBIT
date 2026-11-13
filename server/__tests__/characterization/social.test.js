@@ -273,6 +273,21 @@ describe('challenges', () => {
         return { alice, bob };
     }
 
+    test('every challenge event is acknowledged: ok, or the reason it was refused [ACKS]', async () => {
+        const alice = await ctx.connect('alice');
+        const bob = await ctx.connect('bob');
+        const request = { to_user_id: 'bob', from_username: 'Alice', time_control: '10', is_rated: true, color: 'white' };
+        expect(await emitAck(alice, 'challenge_request', request)).toEqual({ ok: true });
+        expect(await emitAck(alice, 'challenge_request', { ...request, to_user_id: 'alice' })).toEqual({
+            ok: false,
+            error: 'invalid_target',
+        });
+        expect(await emitAck(alice, 'challenge_request', { to_user_id: 42 })).toEqual({ ok: false, error: 'invalid_payload' });
+        expect(await emitAck(bob, 'challenge_decline', { from_user_id: 'alice', by_username: 'Bob' })).toEqual({ ok: true });
+        expect(await emitAck(bob, 'challenge_decline', { from_user_id: 'alice', by_username: 'Bob' })).toEqual(NO_PENDING);
+        expect(await emitAck(bob, 'challenge_accept', { from_user_id: 'alice' })).toEqual(NO_PENDING);
+    });
+
     test('challenge_request forwards the payload, stores the request and inserts a notification', async () => {
         const alice = await ctx.connect('alice');
         const bob = await ctx.connect('bob');

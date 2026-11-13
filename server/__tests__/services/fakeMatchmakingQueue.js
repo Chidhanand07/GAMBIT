@@ -29,7 +29,8 @@ function fakeMatchmakingQueue({ entryTtlMs = DEFAULT_ENTRY_TTL_MS, clock = () =>
 
     return {
         async add(entry) {
-            if (live(entry.user_id)) return null;
+            const current = live(entry.user_id);
+            if (current && JSON.parse(current.json).socketId === entry.socketId) return null;
             entries.set(entry.user_id, { json: JSON.stringify(entry), expiresAt: clock() + entryTtlMs });
             members.set(entry.user_id, entry.joined_at);
             return members.size;

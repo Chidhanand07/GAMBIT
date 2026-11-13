@@ -31,6 +31,8 @@ let loading = false
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socketValue }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile, loading }) }))
 jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 7 }) }))
+const toast = jest.fn()
+jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
 import Navbar from '@/components/Navbar'
 
@@ -233,6 +235,38 @@ describe('challenge banner', () => {
             { from_user_id: 'u-opp', by_username: 'me1' },
         ])
         expect(screen.queryByText('challenges you')).toBeNull()
+    })
+
+    /** Answer the last `event` emit, as the server's ack would. */
+    const ack = (event: string, value: unknown) =>
+        act(() => {
+            socket.emit.mock.calls.filter(([e]) => e === event).at(-1)![2](value)
+        })
+
+    test('an accept the server refuses (the challenge expired) is shown as an error toast [ACKS]', () => {
+        toast.mockClear()
+        render(<Navbar />)
+        socket.serverSends('challenge_request', CHALLENGE)
+        click(screen.getByRole('button', { name: 'Accept' }))
+        ack('challenge_accept', { ok: false, error: 'no_pending_request' })
+        expect(toast).toHaveBeenCalledWith('That request has expired.', 'error')
+    })
+
+    test('an accepted accept or decline shows nothing; an unanswered decline is sent once more, then reported [ACKS]', () => {
+        toast.mockClear()
+        jest.useFakeTimers()
+        render(<Navbar />)
+        socket.serverSends('challenge_request', CHALLENGE)
+        click(screen.getByRole('button', { name: 'Accept' }))
+        ack('challenge_accept', { ok: true })
+        socket.serverSends('challenge_request', CHALLENGE)
+        click(screen.getByRole('button', { name: 'Decline' }))
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(socket.emitted('challenge_decline')).toHaveLength(2)
+        expect(toast).not.toHaveBeenCalled()
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(toast).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.', 'error')
+        expect(socket.emitted('challenge_decline')).toHaveLength(2)
     })
 
     test('auto-dismisses after 30 s; a new challenge restarts the timer', () => {

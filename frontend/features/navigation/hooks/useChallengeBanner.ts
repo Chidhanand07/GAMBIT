@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/components/SocketProvider';
+import { useToast } from '@/components/Toast';
+import { emitWithAck, rejectionMessage } from '@/lib/socket/ack';
 import type { ChallengeRequestPayload, GameIdPayload } from '@/types/socket';
 import type { NavProfile } from '../types';
 
@@ -10,11 +12,14 @@ const CHALLENGE_DISMISS_MS = 30_000;
 
 /**
  * Incoming challenge toast via socket (challenge_request / _declined / _ready),
- * auto-dismissed after 30 s, with accept/decline emits.
+ * auto-dismissed after 30 s, with accept/decline emits. Both wait for the server's ack; a
+ * refusal (the challenge expired) or no answer is shown as an error toast (ACKS, F-065).
  */
 export function useChallengeBanner(profile: NavProfile | null) {
     const socket = useSocket();
     const router = useRouter();
+    const { toast } = useToast();
+    const toldWhenRefused = { onRejected: (code: string) => toast(rejectionMessage(code), 'error') };
     const [challengeBanner, setChallengeBanner] = useState<ChallengeRequestPayload | null>(null);
     // The subscription re-runs only on [socket, profile], as before; the router is read through a ref.
     const routerRef = useRef(router);
@@ -57,13 +62,14 @@ export function useChallengeBanner(profile: NavProfile | null) {
         if (!socket || !challengeBanner || !profile) return;
         // Only the challenger is named: the server starts the game from the challenge it stored
         // (time control, rated flag and the challenger's colour), not from anything sent here.
-        socket.emit('challenge_accept', { from_user_id: challengeBanner.from_user_id });
+        emitWithAck(socket, 'challenge_accept', { from_user_id: challengeBanner.from_user_id }, toldWhenRefused);
         setChallengeBanner(null);
     };
 
     const decline = () => {
         if (!socket || !challengeBanner || !profile) return;
-        socket.emit('challenge_decline', { from_user_id: challengeBanner.from_user_id, by_username: profile.username });
+        const answer = { from_user_id: challengeBanner.from_user_id, by_username: profile.username };
+        emitWithAck(socket, 'challenge_decline', answer, toldWhenRefused);
         setChallengeBanner(null);
     };
 
