@@ -20,6 +20,16 @@ const FILES = [
     ],
 ];
 
+/** The file's content, or null when it does not exist (one read, no exists-then-read race). */
+function readIfPresent(file) {
+    try {
+        return fs.readFileSync(file, 'utf8');
+    } catch (e) {
+        if (e.code === 'ENOENT') return null;
+        throw e;
+    }
+}
+
 const check = process.argv.includes('--check');
 let stale = 0;
 
@@ -27,7 +37,7 @@ for (const [source, copies] of FILES) {
     const content = fs.readFileSync(path.join(root, 'shared', source), 'utf8');
     for (const copy of copies) {
         const target = path.join(root, copy);
-        const current = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+        const current = readIfPresent(target);
         if (current === content) continue;
         if (check) {
             console.error(`out of date: ${copy} (run node scripts/sync-shared.js)`);
