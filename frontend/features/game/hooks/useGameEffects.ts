@@ -7,7 +7,11 @@ import type { GameAction, GameOverInfo } from '../state/gameReducer';
 /** Lets the board render the final position before the modal covers it. */
 const GAME_OVER_MODAL_DELAY_MS = 400;
 
-export function useMoveListAutoScroll(listRef: RefObject<HTMLDivElement>, moveList: string[], isLive: boolean): void {
+export function useMoveListAutoScroll(
+    listRef: RefObject<HTMLDivElement | null>,
+    moveList: string[],
+    isLive: boolean,
+): void {
     useEffect(() => {
         if (listRef.current && isLive) {
             listRef.current.scrollTop = listRef.current.scrollHeight;

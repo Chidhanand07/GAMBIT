@@ -4,7 +4,7 @@ Three deployable services plus Supabase:
 
 | Service | Stack | Deployed to | Owns |
 |---|---|---|---|
-| `frontend/` | Next.js 14 App Router, TypeScript | Vercel | UI, and Next.js route handlers for profile, friends, notifications, games history, leaderboard, auth |
+| `frontend/` | Next.js 16 App Router, React 19, TypeScript | Vercel | UI, and Next.js route handlers for profile, friends, notifications, games history, leaderboard, auth |
 | `server/` | Node, Express 4, Socket.io, CommonJS | Railway | Realtime only: sessions, matchmaking, clocks, live game state (Redis), game end, rating, review trigger |
 | `chess-engine/` | FastAPI, python-chess, Stockfish | Render | Move validation, position analysis, full-game review, computer opponent |
 | `supabase/` | Postgres + Auth | Supabase | Persistent data; schema changes only via `supabase migration new` (SEC-08) |
@@ -71,6 +71,8 @@ repositories/, clients/ ──▶ @supabase/supabase-js, ioredis, fetch
 ## Frontend (`frontend/`)
 
 ```
+proxy.ts              session refresh + optimistic redirect for the protected pages only
+                      (allow-list matcher); never the only auth check (NX-09)
 app/**/page.tsx       thin compositions (< 150 lines)
 app/api/**/route.ts   parse → identity → lib/server data function → respond
 features/<feature>/   components/, hooks/, state/, utils — one folder per feature:

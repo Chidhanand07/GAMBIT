@@ -43,6 +43,8 @@ export function createSupabaseMock() {
         calls,
         auth: {
             getUser: jest.fn(async () => ({ data: { user: null }, error: null })),
+            /** Verified JWT claims (NX-10). Default: nothing verifies. */
+            getClaims: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: null, error: null })),
             getSession: jest.fn(async () => ({ data: { session: null }, error: null })),
             signInWithPassword: jest.fn(async () => ({ data: { session: null }, error: null })),
             admin: {
@@ -63,8 +65,9 @@ export function createSupabaseMock() {
             const found = call?.ops.find(o => o[0] === method)
             return found ? found.slice(1) : undefined
         },
-        /** Make auth.getSession() report a signed-in user (used by routes built on @supabase/ssr). */
+        /** A genuine session: the claims verify, and Supabase Auth also confirms the user. */
         signIn(userId: string) {
+            client.auth.getClaims.mockResolvedValue({ data: { claims: { sub: userId } }, error: null })
             client.auth.getSession.mockResolvedValue({ data: { session: { user: { id: userId } } as any }, error: null })
             client.auth.getUser.mockResolvedValue({ data: { user: { id: userId } } as any, error: null })
         },
@@ -73,6 +76,7 @@ export function createSupabaseMock() {
             calls.length = 0
             from.mockClear()
             client.auth.getUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
+            client.auth.getClaims.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.getSession.mockReset().mockResolvedValue({ data: { session: null }, error: null })
             client.auth.signInWithPassword.mockReset().mockResolvedValue({ data: { session: null }, error: null })
             client.auth.admin.createUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })

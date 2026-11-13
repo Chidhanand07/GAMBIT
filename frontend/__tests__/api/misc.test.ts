@@ -147,6 +147,4 @@ describe('POST /api/maverick-move', () => {
     })
 })
 
-describe('/api/debug/session', () => {
-    test.todo('exposes cookie names and the full profile row — disable or protect this route in production')
-})
+// /api/debug/session is deleted [S12]; __tests__/security/noDebugRoutes.test.ts keeps it that way.

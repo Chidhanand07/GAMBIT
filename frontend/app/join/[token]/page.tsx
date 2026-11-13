@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/components/SocketProvider';
 import { createClient } from '@/lib/supabase/client';
@@ -10,7 +10,8 @@ import { InviteActions, InviteExpired, InviteLoading } from '@/features/join/com
 import type { GameWithPlayers } from '@/types/game';
 import type { Profile } from '@/types/profile';
 
-export default function JoinPage({ params }: { params: { token: string } }) {
+export default function JoinPage(props: { params: Promise<{ token: string }> }) {
+    const params = use(props.params);
     const router = useRouter()
     const socket = useSocket()
     const [game, setGame] = useState<GameWithPlayers | null>(null)

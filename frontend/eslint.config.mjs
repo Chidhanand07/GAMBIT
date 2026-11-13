@@ -1,5 +1,5 @@
 // ESLint flat config for the Next.js app (docs/ENGINEERING_RULES.md).
-// `next lint` (Next 14) still reads .eslintrc; CI runs `npx eslint .` with this file.
+// Next 16 removed `next lint`; CI and local runs use the ESLint CLI (`npx eslint .`) with this file.
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';

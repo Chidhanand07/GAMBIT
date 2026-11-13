@@ -48,13 +48,15 @@ describe('POST /api/auth/login', () => {
         db.auth.signInWithPassword.mockImplementation(async () => {
             const cookies = (supabaseSsrMock.createServerClient.mock.calls.at(-1) as any)[2].cookies
             // @supabase/ssr ≥ 0.4 hands every cookie to setAll (was: one `set` call per cookie).
-            cookies.setAll([{ name: 'sb-testref-auth-token', value: 'session-value', options: { path: '/' } }])
+            cookies.setAll([{ name: 'sb-testref-auth-token', value: 'session-value', options: { path: '/' } }], { 'Cache-Control': 'private, no-store' })
             return { data: { session: { access_token: 't' } }, error: null } as any
         })
         const res = await login(req('/api/auth/login', { method: 'POST', body: { email: 'a@b.c', password: 'pw' } }))
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true })
         expect(res.headers.get('set-cookie')).toContain('sb-testref-auth-token=session-value')
+        // A response that sets session cookies must not be cached (NX-11).
+        expect(res.headers.get('cache-control')).toBe('private, no-store')
         expect(db.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'pw' })
     })
 })

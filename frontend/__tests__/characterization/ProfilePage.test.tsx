@@ -44,6 +44,7 @@ jest.mock('@/lib/supabase/client', () => ({
 }))
 
 import ProfilePage from '@/app/profile/[username]/page'
+import { routeParams } from '../helpers/params'
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 const BOB = {
@@ -90,7 +91,7 @@ async function settle() {
     for (let i = 0; i < 6; i++) await act(async () => {})
 }
 async function renderProfile(username = 'bob') {
-    const utils = render(<ProfilePage params={{ username }} />)
+    const utils = render(<ProfilePage params={routeParams({ username })} />)
     await settle()
     return utils
 }

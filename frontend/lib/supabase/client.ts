@@ -20,7 +20,7 @@ export function createClient(): SupabaseClient {
     )
   }
 
-  // 'raw' keeps the cookie format of existing sessions and of middleware.ts (see lib/server/supabase.ts).
+  // 'raw' keeps the cookie format of existing sessions and of the proxy (see lib/server/supabase.ts).
   _client = createBrowserClient(url, key, { cookieEncoding: 'raw' })
   return _client
 }

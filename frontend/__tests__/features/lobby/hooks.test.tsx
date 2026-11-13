@@ -19,6 +19,7 @@ const router = {
     back: jest.fn(),
     forward: jest.fn(),
     refresh: jest.fn(),
+    bfcacheId: 'test',
 };
 const profile = { id: 'me', username: 'me1' } as never;
 let fetchMock: jest.Mock;

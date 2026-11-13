@@ -9,7 +9,8 @@ import { parseInput, schemas } from '@/lib/server/validation';
 export const dynamic = 'force-dynamic';
 
 // GET /api/profile/[username]/stats — totals, ratings and per-bucket results
-export async function GET(_req: NextRequest, { params }: { params: { username: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ username: string }> }) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
 

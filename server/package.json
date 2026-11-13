@@ -2,6 +2,9 @@
   "name": "gambit-server",
   "version": "1.0.0",
   "type": "commonjs",
+  "engines": {
+    "node": "26.x"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
@@ -13,7 +16,7 @@
     "format:check": "prettier --check --no-error-on-unmatched-pattern \"src/**/*.js\""
   },
   "dependencies": {
-    "@supabase/supabase-js": "~2.109.0",
+    "@supabase/supabase-js": "^2.119.0",
     "axios": "^1.6.2",
     "chess.js": "^1.4.0",
     "cors": "^2.8.5",

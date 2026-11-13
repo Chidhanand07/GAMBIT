@@ -26,26 +26,26 @@ describe('GET /api/games/[id]', () => {
     ])('caller %s sees myColor=%s', async (userId, color) => {
         db.signIn(uid(userId))
         db.queue('games', { data: game, error: null })
-        const res = await json(await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } }))
+        const res = await json(await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) }))
         expect(res.body).toMatchObject({ id: uid('g1'), myColor: color })
     })
 
     test('signed-out callers get 401 and the game is not read (was: the whole row, as a spectator) [S5][S8]', async () => {
         db.queue('games', { data: game, error: null })
-        expect((await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } })).status).toBe(401)
+        expect((await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) })).status).toBe(401)
         expect(db.calls).toEqual([])
     })
 
     test('a signed-in non-player is a spectator', async () => {
         signInWithCookie(uid('someone-else'))
         db.queue('games', { data: game, error: null })
-        expect((await json(await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } }))).body.myColor).toBe('spectator')
+        expect((await json(await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) }))).body.myColor).toBe('spectator')
     })
 
     test('unknown game → 404', async () => {
         signInWithCookie(uid('me'))
         db.queue('games', { data: null, error: { message: 'not found' } })
-        expect((await getGame(req(`/api/games/${uid('x')}`), { params: { id: uid('x') } })).status).toBe(404)
+        expect((await getGame(req(`/api/games/${uid('x')}`), { params: Promise.resolve({ id: uid('x') }) })).status).toBe(404)
     })
 })
 
@@ -68,7 +68,7 @@ describe('game responses never carry the invite token [S8]', () => {
     ])('GET as %s: minimal DTO, no invite_token / invite_expires_at', async (_label, who) => {
         db.signIn(uid(who))
         db.queue('games', { data: row, error: null })
-        const res = await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } })
+        const res = await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) })
         const text = await res.text()
         expect(text).not.toContain('SECRETTOKN')
         const body = JSON.parse(text)
@@ -82,7 +82,7 @@ describe('game responses never carry the invite token [S8]', () => {
         db.signIn(uid('w'))
         db.queue('games', { data: { white_id: uid('w'), black_id: uid('b') }, error: null }, { data: { ...row, draw_offer: true }, error: null })
         const res = await patchGame(req(`/api/games/${uid('g1')}`, { method: 'PATCH', body: { draw_offer: true } }), {
-            params: { id: uid('g1') },
+            params: Promise.resolve({ id: uid('g1') }),
         })
         expect(res.status).toBe(200)
         expect(await res.text()).not.toContain('SECRETTOKN')
@@ -90,7 +90,7 @@ describe('game responses never carry the invite token [S8]', () => {
 })
 
 describe('PATCH /api/games/[id]', () => {
-    const patch = (body: unknown, id = uid('g1')) => patchGame(req(`/api/games/${id}`, { method: 'PATCH', body }), { params: { id } })
+    const patch = (body: unknown, id = uid('g1')) => patchGame(req(`/api/games/${id}`, { method: 'PATCH', body }), { params: Promise.resolve({ id }) })
 
     test('401 when signed out', async () => {
         expect((await patch({ draw_offer: true })).status).toBe(401)

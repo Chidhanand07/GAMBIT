@@ -38,7 +38,7 @@ function DropdownHeader({ profile }: { profile: NavProfile | null }) {
 }
 
 interface UserMenuProps {
-    menuRef: RefObject<HTMLDivElement>;
+    menuRef: RefObject<HTMLDivElement | null>;
     profile: NavProfile | null;
     isOpen: boolean;
     onToggle: () => void;

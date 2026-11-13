@@ -42,7 +42,7 @@
 **Tech Stack:**
 | Layer | Technology | Port |
 |-------|-----------|------|
-| Frontend | Next.js 14 App Router, TypeScript, Tailwind CSS | 3000 |
+| Frontend | Next.js 16 App Router, React 19, TypeScript, Tailwind CSS | 3000 |
 | Backend | Node.js + Express + Socket.io | 3001 |
 | Chess Engine | Python + FastAPI + python-chess + Stockfish | 8001 |
 | Database | Supabase (PostgreSQL + Auth) | cloud |
@@ -90,7 +90,7 @@ Gambit/
 ├── package.json                 ← Root (no real code, just workspace)
 ├── .env.example                 ← Template for env vars
 │
-├── frontend/                    ← Next.js 14 App Router
+├── frontend/                    ← Next.js 16 App Router
 │   ├── .env.local               ← Frontend secrets (NEVER COMMIT)
 │   ├── app/
 │   │   ├── layout.tsx           ← Root layout with providers
@@ -137,7 +137,6 @@ Gambit/
 │       └── supabase/
 │           ├── client.ts        ← Browser Supabase client
 │           ├── server.ts        ← Server Supabase client (cookie-based)
-│           └── middleware.ts    ← Supabase middleware helper
 │
 ├── server/                      ← Node.js backend
 │   ├── server.js                ← MAIN SERVER FILE ← everything in one file
@@ -343,7 +342,7 @@ This is the most important section. Do not change how auth works without reading
 - Use `window.location.assign('/lobby')` NOT `router.push('/lobby')`. The push doesn't trigger a full page reload, so the cookie isn't re-read by the middleware. The `window.location.assign` forces a fresh load.
 
 ### Middleware
-- `frontend/middleware.ts` — protects routes. Reads cookie, verifies token, redirects to `/login` if invalid.
+- `frontend/proxy.ts` (Next 16; was `middleware.ts`) — refreshes the session cookie and redirects visitors without a verified session away from protected pages. It is not an authorization check; route handlers call `requireUser()`.
 - Protected routes: `/game/**, /lobby, /profile/**, /settings, /leaderboard, /challenge/**`
 
 ---
@@ -404,7 +403,7 @@ Contains:
 ## 9. DO NOT TOUCH – DANGER ZONES
 
 ### Never change these without reading the full auth section first:
-- `frontend/middleware.ts` — changing protected route patterns will break auth
+- `frontend/proxy.ts` — changing the matcher changes which pages redirect signed-out visitors
 - `frontend/app/api/auth/login/route.ts` and `signup/route.ts` — changing how cookies are set will break all downstream auth reads
 - The `getUserId()` cookie parsing function (in `active/route.ts`, `me/route.ts`) — this is fragile by design; Supabase's cookie format is proprietary
 
@@ -439,7 +438,7 @@ The frontend listens for exact event names: `move_made`, `game_end`, `rating_upd
 | What you want to change | File(s) to edit |
 |------------------------|----------------|
 | UI styling / colors | `frontend/app/globals.css` (CSS vars), `tailwind.config.ts` |
-| Add a new page | Create `frontend/app/<page-name>/page.tsx`, add to middleware.ts protected list if auth-required |
+| Add a new page | Create `frontend/app/<page-name>/page.tsx`, add its prefix to the `matcher` in proxy.ts if auth-required |
 | Add a new API route | Create `frontend/app/api/<path>/route.ts`, add `export const dynamic = 'force-dynamic'` if it reads from DB |
 | Change time control options | `frontend/app/lobby/page.tsx` → `BASE_TIME_CONTROLS` array |
 | Change rating cap per game | `server/services/rating.js` → `const MAX_CHANGE = 50` |
@@ -705,7 +704,7 @@ The Node server is in-memory. If it restarts mid-game, `gameClocks` is empty. Wi
 The Glicko-2 default RD of 350 means the algorithm has maximum uncertainty, causing ±200 swings per game. For a chess platform with many games per day, this makes ratings meaningless. Capping at ±50 keeps ratings stable while still reflecting performance.
 
 ### Why `export const dynamic = 'force-dynamic'` on profile API routes?
-Next.js 14 statically renders route handlers that don't use dynamic features. A GET route that queries Supabase but doesn't use `cookies()` or `headers()` would be rendered once and cached forever. The profile would show 1200 rating even after 100 games.
+Next.js statically renders route handlers that don't use dynamic features. A GET route that queries Supabase but doesn't use `cookies()` or `headers()` would be rendered once and cached forever. The profile would show 1200 rating even after 100 games.
 
 ### Why `window.location.assign` instead of `router.push` after login?
 Next.js `router.push` is client-side navigation — it doesn't re-run middleware. The auth cookie is set by the server, but middleware only runs on full page requests. `window.location.assign` triggers a full page load, middleware runs, the user is recognized as authenticated.

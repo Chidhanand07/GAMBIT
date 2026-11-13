@@ -7,7 +7,7 @@ import { supabasePublicKey } from '@/lib/supabase/publicEnv';
 import { supabaseSecretKey } from './env';
 
 /** The `cookies()` store of the current request (next/headers). */
-export type RequestCookieStore = ReturnType<typeof cookies>;
+export type RequestCookieStore = Awaited<ReturnType<typeof cookies>>;
 
 type ResponseCookieOptions = Parameters<NextResponse['cookies']['set']>[2];
 type CookieToSet = { name: string; value: string; options?: object };
@@ -17,8 +17,7 @@ const noSessionPersistence = () => ({ autoRefreshToken: false, persistSession: f
 
 /**
  * Session cookies stay in the "raw" JSON form @supabase/ssr 0.1 wrote, so sessions created
- * before this upgrade keep working and `middleware.ts` (which reads the cookie for its
- * optimistic redirect) keeps understanding it. The browser client uses the same setting.
+ * before this upgrade keep working. The browser client and the proxy use the same setting.
  */
 export const SESSION_COOKIE_ENCODING = 'raw' as const;
 
@@ -40,7 +39,7 @@ export function createAdminClient(): SupabaseClient {
 
 /**
  * Public-key (publishable / legacy anon) @supabase/ssr client bound to the request's session cookies. Used only to ask
- * Supabase Auth who the caller is (`auth.getUser()`); it is never used to bypass RLS.
+ * verify who the caller is (`auth.getClaims()`, see identity.ts); it is never used to bypass RLS.
  *
  * `setAll` writes a refreshed session back. That works in Route Handlers; in a Server
  * Component the store is read-only and the write is skipped (the browser client refreshes).
@@ -72,10 +71,12 @@ export function createResponseCookieClient(request: NextRequest, response: NextR
         cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
             getAll: () => request.cookies.getAll(),
-            setAll: (cookiesToSet: CookieToSet[]) => {
+            setAll: (cookiesToSet: CookieToSet[], headers?: Record<string, string>) => {
                 for (const { name, value, options } of cookiesToSet) {
                     response.cookies.set(name, value, options as ResponseCookieOptions);
                 }
+                // A response that sets auth cookies must never be cached (Supabase passes no-store).
+                for (const [key, value] of Object.entries(headers ?? {})) response.headers.set(key, value);
             },
         },
     });

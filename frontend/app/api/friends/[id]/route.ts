@@ -7,10 +7,11 @@ import { parseInput, schemas } from '@/lib/server/validation';
 // Per-user data: never prerendered or cached (NX-11).
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 // PUT /api/friends/[id]?action=accept|decline
-export async function PUT(req: NextRequest, { params }: Params) {
+export async function PUT(req: NextRequest, props: Params) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
     const meId = auth.userId;
@@ -30,7 +31,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/friends/[id]
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(_req: NextRequest, props: Params) {
+    const params = await props.params;
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
     const meId = auth.userId;
