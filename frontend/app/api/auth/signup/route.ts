@@ -41,10 +41,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the auth user via admin (bypasses email rate limits on the anon endpoint)
-    const signupError = await createUserWithProfile(admin, { email, password, username });
+    const signup = await createUserWithProfile(admin, { email, password, username });
 
-    if (signupError) {
-        return NextResponse.json({ error: signupError }, { status: 400 });
+    if (!signup.ok) {
+        return NextResponse.json({ error: signup.message }, { status: signup.status });
     }
 
     // Return ok — client will sign in using the browser client directly

@@ -111,4 +111,17 @@ describe('POST /api/auth/signup', () => {
         expect(res).toEqual({ status: 400, body: { error: 'Username already taken' } })
         expect(db.auth.admin.deleteUser).toHaveBeenCalledWith('uid-1')
     })
+
+    test.each([
+        ['returns an error', () => db.auth.admin.deleteUser.mockResolvedValue({ data: null, error: { message: 'boom' } } as any)],
+        ['throws', () => db.auth.admin.deleteUser.mockRejectedValue(new Error('network'))],
+    ])('F18: when the rollback deleteUser %s, it is logged and the signup fails with a 500', async (_name, setup) => {
+        setup()
+        db.auth.admin.createUser.mockResolvedValue({ data: { user: { id: 'uid-1' } }, error: null } as any)
+        db.queue('profiles', { data: null, error: null }, { data: null, error: { message: 'insert failed' } })
+        const res = await json(await post())
+        expect(res.status).toBe(500)
+        expect(res.body.error).toMatch(/could not be completed/i)
+        expect(console.error).toHaveBeenCalledWith(expect.stringContaining('rollback'), 'uid-1', expect.anything())
+    })
 })
