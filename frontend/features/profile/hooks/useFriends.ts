@@ -23,6 +23,7 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
     const [pendingRequests, setPendingRequests] = useState<PendingFriendRequest[]>([]);
     const [pendingLoading, setPendingLoading] = useState(false);
     const [friendSearch, setFriendSearch] = useState('');
+    const [respondError, setRespondError] = useState<string | null>(null);
 
     // Keyed on profile?.id rather than the profile object (legacy dependency list, kept on purpose).
     useEffect(() => {
@@ -56,7 +57,16 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
     }, [activeTab, profile?.id, isOwnProfile]);
 
     const respondToRequest = async (friendshipId: string, action: FriendRequestAction) => {
-        await respondToFriendRequest(friendshipId, action);
+        setRespondError(null);
+        const ok = await respondToFriendRequest(friendshipId, action).then(
+            (res) => res.ok,
+            () => false,
+        );
+        if (!ok) {
+            // The request is still pending on the server: keep it on screen so it can be retried (F12).
+            setRespondError(`Could not ${action} the request. Try again.`);
+            return;
+        }
         setPendingRequests((prev) => prev.filter((r) => r.id !== friendshipId));
         if (action === 'accept') {
             const requester = pendingRequests.find((r) => r.id === friendshipId)?.requester;
@@ -72,5 +82,6 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
         friendSearch,
         setFriendSearch,
         respondToRequest,
+        respondError,
     };
 }

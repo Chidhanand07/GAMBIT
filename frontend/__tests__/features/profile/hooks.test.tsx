@@ -73,6 +73,8 @@ describe('useFriends', () => {
     test('accepting moves the requester into the list with its friendship id', async () => {
         routes['/api/friends?userId=u-1'] = [];
         routes['/api/friends/pending'] = [{ id: 'f-1', requester: { username: 'carol' } }];
+        // F12: the PUT now has to succeed (before, the test passed with a failing PUT).
+        routes['/api/friends/f-1?action=accept'] = {};
         const { result } = renderHook(() => useFriends({ activeTab: 'friends', profile: PROFILE, isOwnProfile: true }));
         await flush();
         expect(result.current.pendingRequests).toHaveLength(1);
@@ -82,6 +84,19 @@ describe('useFriends', () => {
         expect(fetchMock).toHaveBeenLastCalledWith('/api/friends/f-1?action=accept', { method: 'PUT' });
         expect(result.current.pendingRequests).toEqual([]);
         expect(result.current.friends).toEqual([{ username: 'carol', friendship_id: 'f-1' }]);
+    });
+
+    test('F12: a failed accept keeps the request, adds no friend and reports the error', async () => {
+        routes['/api/friends?userId=u-1'] = [];
+        routes['/api/friends/pending'] = [{ id: 'f-1', requester: { username: 'carol' } }];
+        const { result } = renderHook(() => useFriends({ activeTab: 'friends', profile: PROFILE, isOwnProfile: true }));
+        await flush();
+        await act(async () => {
+            await result.current.respondToRequest('f-1', 'accept');
+        });
+        expect(result.current.pendingRequests).toHaveLength(1);
+        expect(result.current.friends).toEqual([]);
+        expect(result.current.respondError).toBe('Could not accept the request. Try again.');
     });
 
     test('other profiles do not load pending requests', async () => {

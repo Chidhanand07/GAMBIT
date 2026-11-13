@@ -18,6 +18,7 @@ export function FriendsTab({ profile, isOwnProfile, friendsState: s }: FriendsTa
                     pendingRequests={s.pendingRequests}
                     pendingLoading={s.pendingLoading}
                     onRespond={s.respondToRequest}
+                    respondError={s.respondError}
                 />
             )}
             <FriendsListCard

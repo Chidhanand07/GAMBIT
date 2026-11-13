@@ -558,11 +558,11 @@ describe('friends tab', () => {
         expect(screen.getByRole('link', { name: /Challenge/ })).toHaveAttribute('href', '/challenge/carol')
     })
 
-    test('Decline PUTs ?action=decline and just removes the request (even if the PUT fails)', async () => {
+    test('Decline PUTs ?action=decline and removes the request', async () => {
         routes['/api/profile/me'] = { id: 'u-bob', username: 'bob' }
         routes['/api/friends?userId=u-bob'] = []
         routes['/api/friends/pending'] = [PENDING[0]]
-        routes['/api/friends/f-1?action=decline'] = FAIL()
+        routes['/api/friends/f-1?action=decline'] = {}
         await renderProfile()
         click(tab('Friends'))
         await settle()
@@ -570,6 +570,26 @@ describe('friends tab', () => {
         await settle()
         expect(callFor('/api/friends/f-1?action=decline')).toEqual(['/api/friends/f-1?action=decline', { method: 'PUT' }])
         expect(screen.getByText('No pending requests.')).toBeInTheDocument()
+        expect(screen.getByText('No friends yet.')).toBeInTheDocument()
+    })
+
+    // F12 (was: 'Decline ... just removes the request (even if the PUT fails)').
+    test('a failed Decline or Accept keeps the request and says so', async () => {
+        routes['/api/profile/me'] = { id: 'u-bob', username: 'bob' }
+        routes['/api/friends?userId=u-bob'] = []
+        routes['/api/friends/pending'] = [PENDING[0]]
+        routes['/api/friends/f-1?action=decline'] = FAIL()
+        routes['/api/friends/f-1?action=accept'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        click(tab('Friends'))
+        await settle()
+        click(screen.getByRole('button', { name: 'Decline' }))
+        await settle()
+        expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument()
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not decline the request')
+        click(screen.getByRole('button', { name: 'Accept' }))
+        await settle()
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not accept the request')
         expect(screen.getByText('No friends yet.')).toBeInTheDocument()
     })
 
