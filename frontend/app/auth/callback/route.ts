@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeWithRetry } from '@/lib/server/auth';
 import { ensureOAuthProfile } from '@/lib/server/profiles';
 import { createResponseCookieClient } from '@/lib/server/supabase';
+import { safeRedirectPath } from '@/lib/safeRedirect';
 
 const loginErrorRedirect = (message: string, request: NextRequest) =>
     NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
@@ -17,11 +18,12 @@ async function ensureProfileNonFatal(user: User) {
     }
 }
 
-// GET /auth/callback?code=&next= — OAuth code exchange, then redirect to `next` (default /lobby)
+// GET /auth/callback?code=&next= — OAuth code exchange, then redirect to `next` when it is a
+// path on this site (S6: never an absolute or protocol-relative URL); otherwise to /lobby.
 export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const code = searchParams.get('code');
-    const next = searchParams.get('next') ?? '/lobby';
+    const next = safeRedirectPath(searchParams.get('next'));
     const errorParam = searchParams.get('error');
 
     if (errorParam) return loginErrorRedirect(errorParam, request);
