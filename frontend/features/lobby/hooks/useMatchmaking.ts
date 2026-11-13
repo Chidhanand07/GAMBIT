@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useState } from 'react';
 import type { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
-import { onRejected } from '@/lib/socket/ack';
+import { emitWithAck } from '@/lib/socket/ack';
 import type { JoinQueuePayload } from '@/types/socket';
 import type { TimeControl } from '@/types/timeControl';
 import type { LobbyProfile } from '../types';
@@ -75,11 +75,13 @@ export function useMatchmaking(options: MatchmakingOptions) {
 
     const sendJoin = (terms: QueueTerms) => {
         if (!socket || !profile) return;
-        const refused = onRejected((code) => {
-            setQueued(null);
-            options.onQueueRefused?.(code);
+        // join_queue is idempotent on the server, so a timeout retries once (F-065).
+        emitWithAck(socket, 'join_queue', queuePayload(profile.id, terms), {
+            onRejected: (code) => {
+                setQueued(null);
+                options.onQueueRefused?.(code);
+            },
         });
-        socket.emit('join_queue', queuePayload(profile.id, terms), refused);
     };
     const sendLeave = () => socket?.emit('leave_queue', profile?.id);
 

@@ -57,3 +57,47 @@ test('an illegal or late move is explained; the board itself is restored by the 
     const { rejectionMessage } = jest.requireActual('@/lib/socket/ack')
     expect(rejectionMessage('time_expired')).toBe('Your time ran out before the move arrived.')
 })
+
+describe('a server that never answers [ACKS] (F-065)', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    function silent() {
+        const emit = jest.fn()
+        const notify = jest.fn()
+        const dispatch = jest.fn()
+        const state = {
+            ...createInitialGameState(),
+            myColor: 'white' as const,
+            chatMsg: 'gg',
+            gameData: { white_id: 'me', black_id: 'opp', time_control: '10+0', is_rated: true } as never,
+        }
+        const ctx = { socket: { emit } as never, myProfile: { id: 'me', username: 'me' } as never, gameId: 'g1', state, dispatch, notify }
+        return { ctx, emit, notify, dispatch }
+    }
+
+    // Not idempotent on the server: sent once, the timeout is reported, never re-sent.
+    test.each(['sendChat', 'resign', 'requestRematch', 'acceptRematch'] as const)('%s: told after the timeout, not re-sent', (command) => {
+        const { ctx, emit, notify } = silent()
+        commands[command](ctx)
+        jest.advanceTimersByTime(8_000)
+        expect(emit).toHaveBeenCalledTimes(1)
+        expect(notify).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.')
+    })
+
+    test('requestRematch: a timeout resets the rematch state, like a refusal', () => {
+        const { ctx, dispatch } = silent()
+        commands.requestRematch(ctx)
+        jest.advanceTimersByTime(8_000)
+        expect(dispatch).toHaveBeenLastCalledWith({ type: 'rematchStateSet', value: 'idle' })
+    })
+
+    test('declineRematch is idempotent: retried once, then told', () => {
+        const { ctx, emit, notify } = silent()
+        commands.declineRematch(ctx)
+        jest.advanceTimersByTime(8_000)
+        expect(emit).toHaveBeenCalledTimes(2)
+        jest.advanceTimersByTime(8_000)
+        expect(notify).toHaveBeenCalledTimes(1)
+    })
+})

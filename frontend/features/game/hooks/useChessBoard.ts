@@ -8,7 +8,7 @@ import { Chess, type Color, type Square } from 'chess.js';
 import type { Socket } from 'socket.io-client';
 import type { GameAction, GameState } from '../state/gameReducer';
 import { isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
-import { onRejected, rejectionMessage } from '@/lib/socket/ack';
+import { emitWithAck, rejectionMessage } from '@/lib/socket/ack';
 
 interface Options {
     gameId: string;
@@ -53,11 +53,17 @@ function commitMoveWith(opts: Options, from: Square, to: Square, promotion: stri
     const moveObj = chess.move({ from, to, promotion });
     if (!moveObj) return;
     dispatch({ type: 'moveCommitted', fen: chess.fen(), from, to });
-    socket?.emit(
-        'make_move',
-        { game_id: gameId, from, to, promotion },
-        onRejected((code) => opts.notify?.(rejectionMessage(code))),
-    );
+    // Never re-sent on a timeout (not idempotent, F-065): the player is told instead.
+    if (socket) {
+        emitWithAck(
+            socket,
+            'make_move',
+            { game_id: gameId, from, to, promotion },
+            {
+                onRejected: (code) => opts.notify?.(rejectionMessage(code)),
+            },
+        );
+    }
     if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
 }
 

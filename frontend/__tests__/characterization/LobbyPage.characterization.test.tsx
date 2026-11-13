@@ -146,12 +146,26 @@ describe('Play Online', () => {
         await renderLobby()
         playOnline()
         expect(screen.getByText('00:00')).toBeInTheDocument()
+        // The server accepts the join (since F-065 an unanswered join gives up after one retry).
+        const ack = socket.emit.mock.calls.find(([e]) => e === 'join_queue')![2]
+        act(() => { ack({ ok: true }) })
         act(() => { jest.advanceTimersByTime(65_000) })
         expect(screen.getByText('01:05')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Cancel search' }))
         expect(socket.emitted('leave_queue')).toEqual(['me'])
         playOnline()
         expect(screen.getByText('00:00')).toBeInTheDocument()
+    })
+
+    test('a server that never answers join_queue: retried once, then the search stops with a message [ACKS]', async () => {
+        jest.useFakeTimers()
+        await renderLobby()
+        playOnline()
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(socket.emitted('join_queue')).toHaveLength(2)
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(screen.queryByRole('button', { name: 'Cancel search' })).not.toBeInTheDocument()
+        expect(toast).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.', 'error')
     })
 
     test('a socket reconnect while searching re-emits the SAME join_queue payload, with an ack [F8]', async () => {
