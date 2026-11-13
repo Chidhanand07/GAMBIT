@@ -33,7 +33,11 @@ export function playCheckmateSound()  { play('checkmate'); }
 export function playPromoteSound()    { play('promote'); }
 export function playGameStartSound()  { play('matchstart'); }
 
-export function playGameEndSound(_won: boolean) {
-    // Generic end (resign, timeout, draw) — reuse checkmate sound for loss, move for draw
-    play('checkmate');
+/**
+ * End-of-game sound. There is no dedicated win clip, so a win plays the bright promotion
+ * chime and anything else (loss, draw, abort) the heavier checkmate clip (F17: `won` used
+ * to be ignored, so every ending sounded like a loss).
+ */
+export function playGameEndSound(won: boolean) {
+    play(won ? 'promote' : 'checkmate');
 }
