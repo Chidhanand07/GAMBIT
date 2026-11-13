@@ -141,6 +141,27 @@ describe('POST /api/maverick-move', () => {
         expect((await post({ fen })).status).toBe(502)
     })
 
+    test('engine 503 (busy) → 503 with the engine\'s Retry-After, not 502', async () => {
+        jest.spyOn(global, 'fetch').mockResolvedValue(
+            new Response('{"detail":"Engine busy"}', { status: 503, headers: { 'Retry-After': '3' } }),
+        )
+        const res = await post({ fen })
+        expect(res.status).toBe(503)
+        expect(res.headers.get('Retry-After')).toBe('3')
+        expect((await res.json()).error).toBe('Engine busy')
+    })
+
+    test('engine 503 without a usable Retry-After → 503 without the header', async () => {
+        jest.spyOn(global, 'fetch')
+            .mockResolvedValueOnce(new Response('busy', { status: 503 }))
+            .mockResolvedValueOnce(new Response('busy', { status: 503, headers: { 'Retry-After': 'soon; x' } }))
+        for (let i = 0; i < 2; i++) {
+            const res = await post({ fen })
+            expect(res.status).toBe(503)
+            expect(res.headers.get('Retry-After')).toBeNull()
+        }
+    })
+
     test('engine unreachable → 502', async () => {
         jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'))
         expect(await json(await post({ fen }))).toEqual({ status: 502, body: { error: 'Engine unreachable', detail: 'ECONNREFUSED' } })
