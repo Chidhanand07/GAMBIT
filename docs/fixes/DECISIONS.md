@@ -1993,7 +1993,12 @@ charged twice and broadcasts that reach half the room (NODE-15, NODE-17, TEST-06
   the in-memory adapter. `socket.data` must hold plain data only: the adapter serializes it for
   recovery (a stored pino logger made every disconnect throw; found by the two-instance test).
   The adapter connection closes with `quit` so recovery sessions written during shutdown are not
-  dropped.
+  dropped. The adapter fires some writes without awaiting them (recovery-session `SET`,
+  heartbeat and response `XADD`/`PUBLISH`); with Redis unreachable each was an unhandled
+  rejection, which F-056 makes fatal, so a Redis blip would have restarted every replica.
+  `handleUnawaitedWrites` attaches a logging handler to those calls (found by the two-instance
+  test under load; pinned by `clients/socketAdapter.test.js`). Each real-Redis test suite uses
+  its own key namespace and adapter stream (`streamName`), because CI shares one Redis.
 - **WebSocket transport only, server and client.** HTTP long-polling needs every request of a
   session to reach the same replica (sticky sessions), which Railway does not offer. All
   supported browsers have WebSocket; a network that blocks it cannot play (accepted). The

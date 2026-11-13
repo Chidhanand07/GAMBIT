@@ -10,7 +10,11 @@
 const http = require('node:http');
 const Redis = require('ioredis');
 const { io: ioClient } = require('socket.io-client');
-const { startRealRedis } = require('../helpers/realRedis');
+const { startRealRedis, uniqueNamespace } = require('../helpers/realRedis');
+
+// This file's own adapter stream and game ids: in CI every suite shares one Redis (REDIS_TEST_URL).
+const NS = uniqueNamespace('two-instances');
+const GAME = { full: `${NS}-full`, race: `${NS}-race`, end: `${NS}-end` };
 const { defineRedisCommands } = require('../../src/clients/redisCommands');
 const { createSocketAdapter } = require('../../src/clients/socketAdapter');
 const { createGameStateRepository } = require('../../src/repositories/gameStateRepository');
@@ -38,7 +42,7 @@ afterAll(async () => {
 
 async function startInstance(name) {
     const redis = defineRedisCommands(new Redis(redisServer.url, { maxRetriesPerRequest: 1 }));
-    const adapter = createSocketAdapter(redisServer.url);
+    const adapter = createSocketAdapter(redisServer.url, { streamName: `${NS}:stream` });
     const server = http.createServer();
     const io = createSocketServer(server, allowAll, { adapter: adapter.adapter });
     const emitter = createIoEmitter(io);
@@ -146,13 +150,13 @@ async function seed(store, id) {
 maybe('a full game across two instances: every move reaches both players, mate is decided once', async () => {
     const a = await startInstance('A');
     const b = await startInstance('B');
-    await seed(a.gameStore, 'g-full');
+    await seed(a.gameStore, GAME.full);
 
     const white = await player(a.url, 'alice');
     const black = await player(b.url, 'bob');
     const synced = [once(white, 'game_state_sync'), once(black, 'game_state_sync')];
-    white.emit('join_game', 'g-full');
-    black.emit('join_game', 'g-full');
+    white.emit('join_game', GAME.full);
+    black.emit('join_game', GAME.full);
     await Promise.all(synced);
 
     const seenByWhite = [];
@@ -163,10 +167,10 @@ maybe('a full game across two instances: every move reaches both players, mate i
     const endB = once(black, 'game_end', 8000);
 
     // Fool's mate: 1. f3 e5 2. g4 Qh4#
-    expect(await emitAck(white, 'make_move', { game_id: 'g-full', from: 'f2', to: 'f3' })).toEqual({ ok: true });
-    expect(await emitAck(black, 'make_move', { game_id: 'g-full', from: 'e7', to: 'e5' })).toEqual({ ok: true });
-    expect(await emitAck(white, 'make_move', { game_id: 'g-full', from: 'g2', to: 'g4' })).toEqual({ ok: true });
-    expect(await emitAck(black, 'make_move', { game_id: 'g-full', from: 'd8', to: 'h4' })).toEqual({ ok: true });
+    expect(await emitAck(white, 'make_move', { game_id: GAME.full, from: 'f2', to: 'f3' })).toEqual({ ok: true });
+    expect(await emitAck(black, 'make_move', { game_id: GAME.full, from: 'e7', to: 'e5' })).toEqual({ ok: true });
+    expect(await emitAck(white, 'make_move', { game_id: GAME.full, from: 'g2', to: 'g4' })).toEqual({ ok: true });
+    expect(await emitAck(black, 'make_move', { game_id: GAME.full, from: 'd8', to: 'h4' })).toEqual({ ok: true });
 
     const [w, bl] = await Promise.all([endW, endB]);
     expect(w).toMatchObject({ result: 'Black wins', reason: 'Checkmate' });
@@ -174,48 +178,48 @@ maybe('a full game across two instances: every move reaches both players, mate i
     await new Promise((r) => setTimeout(r, 300));
     expect(seenByWhite).toEqual(['f3', 'e5', 'g4', 'Qh4#']);
     expect(seenByBlack).toEqual(['f3', 'e5', 'g4', 'Qh4#']);
-    expect(db.finishCalls.filter((c) => c.id === 'g-full')).toHaveLength(1);
-    expect((await b.gameStore.getGame('g-full')).status).toBe('completed');
+    expect(db.finishCalls.filter((c) => c.id === GAME.full)).toHaveLength(1);
+    expect((await b.gameStore.getGame(GAME.full)).status).toBe('completed');
 });
 
 maybe('the same player sends the same move to both instances at once: it is applied once', async () => {
     const a = await startInstance('A2');
     const b = await startInstance('B2');
-    await seed(a.gameStore, 'g-race');
+    await seed(a.gameStore, GAME.race);
     const whiteOnA = await player(a.url, 'alice');
     const whiteOnB = await player(b.url, 'alice');
-    await Promise.all([emitAck(whiteOnA, 'join_game', 'g-race'), emitAck(whiteOnB, 'join_game', 'g-race')]);
+    await Promise.all([emitAck(whiteOnA, 'join_game', GAME.race), emitAck(whiteOnB, 'join_game', GAME.race)]);
 
     const acks = await Promise.all([
-        emitAck(whiteOnA, 'make_move', { game_id: 'g-race', from: 'e2', to: 'e4' }),
-        emitAck(whiteOnB, 'make_move', { game_id: 'g-race', from: 'e2', to: 'e4' }),
+        emitAck(whiteOnA, 'make_move', { game_id: GAME.race, from: 'e2', to: 'e4' }),
+        emitAck(whiteOnB, 'make_move', { game_id: GAME.race, from: 'e2', to: 'e4' }),
     ]);
     expect(acks.filter((x) => x.ok)).toHaveLength(1);
     expect(acks.find((x) => !x.ok)).toEqual({ ok: false, error: 'not_your_turn' });
-    const state = await a.gameStore.getGame('g-race');
+    const state = await a.gameStore.getGame(GAME.race);
     expect(state.moveLog).toHaveLength(1);
-    expect(db.moveRows.filter((r) => r.game_id === 'g-race')).toHaveLength(1);
+    expect(db.moveRows.filter((r) => r.game_id === GAME.race)).toHaveLength(1);
 });
 
 maybe('resign on one instance while a mating move lands on the other: one ending only', async () => {
     const a = await startInstance('A3');
     const b = await startInstance('B3');
-    await seed(a.gameStore, 'g-end');
+    await seed(a.gameStore, GAME.end);
     const white = await player(a.url, 'alice');
     const black = await player(b.url, 'bob');
-    await Promise.all([emitAck(white, 'join_game', 'g-end'), emitAck(black, 'join_game', 'g-end')]);
+    await Promise.all([emitAck(white, 'join_game', GAME.end), emitAck(black, 'join_game', GAME.end)]);
     for (const [who, from, to] of [
         [white, 'f2', 'f3'],
         [black, 'e7', 'e5'],
         [white, 'g2', 'g4'],
     ]) {
-        await emitAck(who, 'make_move', { game_id: 'g-end', from, to });
+        await emitAck(who, 'make_move', { game_id: GAME.end, from, to });
     }
     const [mate, resign] = await Promise.all([
-        emitAck(black, 'make_move', { game_id: 'g-end', from: 'd8', to: 'h4' }),
-        emitAck(white, 'resign', { game_id: 'g-end' }),
+        emitAck(black, 'make_move', { game_id: GAME.end, from: 'd8', to: 'h4' }),
+        emitAck(white, 'resign', { game_id: GAME.end }),
     ]);
     expect([mate.ok, resign.ok].filter(Boolean).length).toBeGreaterThanOrEqual(1);
     await new Promise((r) => setTimeout(r, 300));
-    expect(db.finishCalls.filter((c) => c.id === 'g-end')).toHaveLength(1);
+    expect(db.finishCalls.filter((c) => c.id === GAME.end)).toHaveLength(1);
 });

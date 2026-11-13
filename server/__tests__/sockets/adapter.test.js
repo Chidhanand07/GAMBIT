@@ -7,7 +7,11 @@ const http = require('node:http');
 const ioClient = require('socket.io-client');
 const { createSocketServer } = require('../../src/sockets');
 const { createSocketAdapter } = require('../../src/clients/socketAdapter');
-const { startRealRedis } = require('../helpers/realRedis');
+
+const { startRealRedis, uniqueNamespace } = require('../helpers/realRedis');
+
+// This file's own adapter stream: in CI every suite shares one Redis (REDIS_TEST_URL).
+const STREAM = uniqueNamespace('adapter-stream');
 
 let redisServer;
 const closers = [];
@@ -22,7 +26,7 @@ afterAll(async () => {
 });
 
 async function instance() {
-    const adapter = createSocketAdapter(redisServer.url);
+    const adapter = createSocketAdapter(redisServer.url, { streamName: STREAM });
     const server = http.createServer();
     const io = createSocketServer(server, allowAll, { adapter: adapter.adapter });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

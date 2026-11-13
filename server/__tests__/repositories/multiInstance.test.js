@@ -7,7 +7,13 @@ const Redis = require('ioredis');
 const { createGameStateRepository } = require('../../src/repositories/gameStateRepository');
 const { createTickLockRepository } = require('../../src/repositories/tickLockRepository');
 const { defineRedisCommands } = require('../../src/clients/redisCommands');
-const { startRealRedis } = require('../helpers/realRedis');
+const { startRealRedis, uniqueNamespace } = require('../helpers/realRedis');
+
+// Keys of this file only: in CI every suite shares one Redis (REDIS_TEST_URL).
+const NS = uniqueNamespace('multi');
+const G = `${NS}:g`;
+const C = `${NS}:c`;
+const F = `${NS}:f`;
 
 let redisServer;
 const clients = [];
@@ -37,16 +43,16 @@ const maybe = (name, fn) => test(name, async () => {
 maybe('two instances applying a move to the same game at once: exactly one wins, nothing is lost', async () => {
     const a = instance();
     const b = instance();
-    await a.store.setGame('g', { id: 'g', ply: 0, moves: [] });
+    await a.store.setGame(G, { id: G, ply: 0, moves: [] });
 
     // Both instances read ply 0 and want to append "their" move.
     const play = (inst, move) =>
-        inst.store.mutateGame('g', (game) => (game.ply === 0 ? { ...game, ply: 1, moves: [move] } : null));
+        inst.store.mutateGame(G, (game) => (game.ply === 0 ? { ...game, ply: 1, moves: [move] } : null));
     const [ra, rb] = await Promise.all([play(a, 'e4'), play(b, 'd4')]);
 
     const applied = [ra, rb].filter(Boolean);
     expect(applied).toHaveLength(1);
-    const final = await a.store.getGame('g');
+    const final = await a.store.getGame(G);
     expect(final.ply).toBe(1);
     expect(final.moves).toEqual(applied[0].moves);
 });
@@ -54,27 +60,27 @@ maybe('two instances applying a move to the same game at once: exactly one wins,
 maybe('many concurrent increments from two instances are all applied (no lost update)', async () => {
     const a = instance();
     const b = instance();
-    await a.store.setGame('c', { n: 0 });
-    const bump = (inst) => inst.store.mutateGame('c', (game) => ({ ...game, n: game.n + 1 }));
+    await a.store.setGame(C, { n: 0 });
+    const bump = (inst) => inst.store.mutateGame(C, (game) => ({ ...game, n: game.n + 1 }));
     await Promise.all(Array.from({ length: 40 }, (_, i) => bump(i % 2 ? a : b)));
-    expect((await a.store.getGame('c')).n).toBe(40);
+    expect((await a.store.getGame(C)).n).toBe(40);
 });
 
 maybe('finalizing on two instances at once: exactly one active → completed transition', async () => {
     const a = instance();
     const b = instance();
-    await a.store.setGame('f', { status: 'active' });
+    await a.store.setGame(F, { status: 'active' });
     const finish = (inst, by) =>
-        inst.store.mutateGame('f', (game) => (game.status === 'active' ? { status: 'completed', by } : null));
+        inst.store.mutateGame(F, (game) => (game.status === 'active' ? { status: 'completed', by } : null));
     const results = await Promise.all([finish(a, 'A'), finish(b, 'B'), finish(a, 'A2'), finish(b, 'B2')]);
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect((await a.store.getGame('f')).status).toBe('completed');
+    expect((await a.store.getGame(F)).status).toBe('completed');
 });
 
 maybe('the clock tick of one game runs on one instance per tick', async () => {
     const a = instance();
     const b = instance();
-    const wins = await Promise.all([a.ticks.tryAcquire('g', 1000), b.ticks.tryAcquire('g', 1000), a.ticks.tryAcquire('g', 1000)]);
+    const wins = await Promise.all([a.ticks.tryAcquire(G, 1000), b.ticks.tryAcquire(G, 1000), a.ticks.tryAcquire(G, 1000)]);
     expect(wins.filter(Boolean)).toHaveLength(1);
-    expect(await b.ticks.tryAcquire('other-game', 1000)).toBe(true);
+    expect(await b.ticks.tryAcquire(`${NS}:other`, 1000)).toBe(true);
 });
