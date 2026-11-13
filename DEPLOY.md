@@ -173,7 +173,25 @@ Go to your service → **Variables** tab and add:
 | `FRONTEND_URL` | Deprecated: read only when `CORS_ORIGINS` is not set. |
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
+| `SOCKET_ADAPTER` | Optional. `redis` (default): Socket.IO rooms and broadcasts span every replica through Redis Streams. `none`: in-process only, for a single local instance. |
 | `PORT` | **do not set** — Railway injects this automatically |
+
+### 4b-2. Running more than one replica
+The game server keeps no game state in process memory: games, the matchmaking queue, pending
+challenges and rematches live in Redis; moves and endings are compare-and-set writes; the clock
+ticker takes a per-game Redis lock; Socket.IO rooms span replicas via the Redis Streams adapter.
+A test plays a full game with White and Black on two different instances over one Redis
+(`server/__tests__/integration/twoInstances.test.js`). It is therefore safe to raise Railway's
+replica count, **after** all of the following:
+
+1. `SOCKET_ADAPTER` is unset or `redis` on every replica.
+2. Redis supports Lua (`EVAL`) and Streams (`XADD`/`XREAD BLOCK`). Railway Redis and Redis ≥ 6.2
+   do. Upstash supports both, but every blocking `XREAD` counts as a command: with two or more
+   replicas, a Railway Redis add-on (or a fixed-price Upstash plan) is the cheaper choice.
+3. Clients connect with the WebSocket transport only (the frontend does since this release), so
+   no sticky sessions are needed. Keep the old frontend from talking to a multi-replica server:
+   deploy the frontend first, then scale.
+4. Start with 2 replicas, run the two-replica manual test in section 6, then scale further.
 
 ### 4c. Get the URL
 After deploy → **Settings → Domains** → generate a Railway domain e.g. `https://gambit-server.up.railway.app`
@@ -236,6 +254,11 @@ Any time you change env vars in Vercel → **Deployments → Redeploy** the late
 [ ] /profile/[username] → shows stats, games list, online dot
 [ ] /analysis → engine evaluation works
 [ ] /leaderboard → shows ranked players
+[ ] Two replicas: open two browsers with two accounts until the Railway logs show them on
+    different replicas (pino `socketId`/hostname), then play a game to the end: moves, clocks,
+    chat, resign and rematch reach both sides; one rating change; /readyz is 200 on both
+[ ] Two replicas: restart one replica mid-game → its player reconnects to the other and the game
+    continues (clocks did not run twice)
 ```
 
 ---
@@ -261,3 +284,76 @@ Make sure `REDIS_URL` uses `rediss://` (TLS) not `redis://` for Upstash. Railway
 
 ### Invite link generates but /join/[token] shows "not found"
 The game row in Supabase may not have the `invite_token` or `invite_expires_at` columns. Re-run the migrations that add those columns.
+
+---
+
+## 8. CI Security Checks (GitHub)
+
+### 8a. Repository settings (one-time, owner)
+1. **Settings → Advanced Security**: enable **Dependency graph**, **Dependabot alerts**, **Dependabot security updates**, **Secret scanning** and **Push protection** (SEC-10, GIT-06).
+2. **Code scanning → CodeQL analysis**: leave it on **Advanced** (the repo ships `.github/workflows/codeql.yml`). If "Default" setup is switched on, GitHub rejects the workflow's uploads.
+3. **Rulesets** for `main` and `preprod`: add the required checks `Dependency audit`, `CodeQL (javascript-typescript)` and `CodeQL (python)` next to the test checks.
+4. Create the labels `dependencies`, `server`, `frontend`, `chess-engine` and `ci` (Dependabot applies them to its PRs).
+
+Dependabot (`.github/dependabot.yml`) opens its weekly PRs against `preprod`. Dependabot *security* updates ignore that setting and target the default branch: retarget them to `preprod` before merging.
+
+### 8b. Dependency audit and approved exceptions (SEC-11)
+The `Dependency audit` check fails when:
+- `server` or `frontend` has a **high or critical** advisory in its production dependencies (`npm audit --omit=dev --audit-level=high`);
+- `chess-engine` has **any** known vulnerability (`pip-audit -r requirements.txt`; pip-audit reports no severity, so it cannot be limited to high/critical).
+
+Run it locally from the repo root (no `npm install` needed; the pip audit needs `pip install pip-audit`):
+```bash
+node scripts/dependency-audit.js npm server
+node scripts/dependency-audit.js npm frontend
+node scripts/dependency-audit.js pip chess-engine
+```
+
+The fix is to upgrade the dependency. When that is not possible yet, add an exception to `.github/dependency-audit-allowlist.json` in a reviewed PR:
+```json
+{
+  "exceptions": [
+    {
+      "id": "GHSA-xxxx-xxxx-xxxx",
+      "scope": "server",
+      "reason": "Why it is not exploitable here, or why the fix cannot ship yet.",
+      "approvedBy": "github-handle",
+      "expires": "2026-12-31"
+    }
+  ]
+}
+```
+Every field is required. `scope` is `server`, `frontend` or `chess-engine` (one entry per package tree), and `expires` may be at most 90 days ahead. An expired or incomplete entry fails the check; an entry that no longer matches a finding only warns, so delete it once the upgrade lands.
+
+---
+
+## 9. Check for Schema Drift (Supabase)
+
+Drift means the hosted database no longer matches `supabase/migrations`: somebody changed it in the dashboard or SQL Editor, or a merged migration was never applied. The check is read-only.
+
+**In CI:** the `Schema drift` workflow (job `Schema drift (Supabase)`) runs daily and from **Actions → Schema drift → Run workflow**. It needs three repository secrets and passes with a "skipped" notice until all are set:
+
+| Secret | Value |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | Personal access token from supabase.com → Account → Access Tokens |
+| `SUPABASE_DB_PASSWORD` | The project's database password |
+| `SUPABASE_PROJECT_REF` | The project ref (the id in the project URL) |
+
+It is not a PR check (it needs secrets), so do not add it to a ruleset's required checks.
+
+**By hand** (needs the Supabase CLI and Docker running):
+```bash
+supabase login                      # once
+supabase link <project-ref>         # once per clone; asks for the database password
+scripts/schema-drift.sh             # exit 0 = no drift, 1 = drift (prints the SQL), 2 = could not check
+```
+The script runs `supabase db diff --remote --schema public` (`--linked` on CLI 2.x) and fails when the diff contains SQL. Set `SCHEMA_DRIFT_SCHEMAS=public,other` to compare more schemas. It also prints `supabase migration list --remote` for information.
+
+**When drift is found**
+1. Read the printed SQL: it is what would turn the migrations' schema into the remote's.
+2. If the remote change should stay, capture it: `supabase migration new <name>`, put the SQL in the new file, add pgTAP tests where it touches RLS or functions, and open a PR to `preprod`.
+3. If it should not stay, write a migration that reverts it and ship that the same way.
+4. If the SQL shows a repo migration that was never applied, apply it through the normal migration deploy, not by pasting it into the SQL Editor.
+5. Never fix drift by editing the remote by hand, and never edit an already-applied migration file (SEC-08). If only the history table disagrees (`migration list` shows a version on one side), reconcile it with `supabase migration repair`.
+
+> Not yet verified: the script and workflow follow the Supabase CLI v3.1.0 reference but have not been run against a real project. Confirm the first manual run before relying on the schedule.

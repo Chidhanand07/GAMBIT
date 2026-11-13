@@ -44,7 +44,8 @@ export function createGameSocket({ url, getToken }: GameSocketOptions): GameSock
         reconnectionAttempts: Infinity,
         reconnectionDelay: RECONNECTION_DELAY_MS,
         reconnectionDelayMax: RECONNECTION_DELAY_MAX_MS,
-        transports: ['websocket', 'polling'],
+        // WebSocket only: the game server runs several instances without sticky sessions (MULTI-INSTANCE).
+        transports: ['websocket'],
         auth: (cb) => {
             void handshakeAuth(getToken).then(cb);
         },

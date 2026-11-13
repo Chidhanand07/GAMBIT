@@ -9,7 +9,11 @@
  */
 const { clocksAt } = require('../domain/clock');
 const { clockVerdict } = require('../domain/clockVerdict');
+
+/** A tick lock lasts a little less than the 1 s tick, so the next tick can take it again. */
+const TICK_LOCK_MS = 900;
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -23,6 +27,8 @@ const { gameRoom } = require('./emitter');
  * @property {{ endGameIf: (gameId: string, decide: (game: any) => Verdict | null, at?: number) => Promise<boolean> }} finalizer
  * @property {Emitter} emitter
  * @property {() => number} now
+ * @property {{ tryAcquire: (gameId: string, ms: number) => Promise<boolean> }} [tickLocks] with several
+ *   instances, only the instance that gets a game's tick lock ticks it (MULTI-INSTANCE)
  */
 
 /**
@@ -34,6 +40,7 @@ const { gameRoom } = require('./emitter');
  * @param {string} gameId
  */
 async function tickGame(deps, gameId) {
+    if (deps.tickLocks && !(await deps.tickLocks.tryAcquire(gameId, TICK_LOCK_MS))) return;
     const game = await deps.gameStore.getGame(gameId);
     if (!game || game.status !== 'active') return;
 
@@ -65,12 +72,12 @@ async function tick(deps) {
                 try {
                     await tickGame(deps, gameId);
                 } catch (e) {
-                    console.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
+                    log.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
                 }
             }),
         );
     } catch (e) {
-        console.error('[clock] ticker error:', /** @type {Error} */ (e).message);
+        log.error('[clock] ticker error:', /** @type {Error} */ (e).message);
     }
 }
 

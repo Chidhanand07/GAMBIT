@@ -14,6 +14,7 @@ const { playMove } = require('../domain/chessRules');
 const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {import('../domain/chessRules').PlayedMove} PlayedMove
@@ -111,10 +112,10 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
             }),
         ])
             .then(([gRes, mRes]) => {
-                if (gRes?.error) console.error('[make_move] game persist:', gRes.error.message);
-                if (mRes?.error) console.error('[make_move] move persist:', mRes.error.message);
+                if (gRes?.error) log.error('[make_move] game persist:', gRes.error.message);
+                if (mRes?.error) log.error('[make_move] move persist:', mRes.error.message);
             })
-            .catch((e) => console.error('[make_move] persist failed:', /** @type {Error} */ (e).message));
+            .catch((e) => log.error('[make_move] persist failed:', /** @type {Error} */ (e).message));
     }
 
     /**

@@ -5,14 +5,15 @@ jest.mock('@supabase/supabase-js', () => ({ createClient: jest.fn(() => ({ fake:
 
 const { createClient } = require('@supabase/supabase-js');
 const { createSupabaseClient } = require('../../src/clients/supabaseClient');
+const { log } = require('../../src/observability/log');
 
 const AUTH_OPTIONS = { auth: { autoRefreshToken: false, persistSession: false } };
 let logSpy;
 let errSpy;
 beforeEach(() => {
     createClient.mockClear();
-    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = jest.spyOn(log, 'info');
+    errSpy = jest.spyOn(log, 'error');
 });
 afterEach(() => jest.restoreAllMocks());
 

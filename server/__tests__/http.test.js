@@ -65,9 +65,9 @@ describe('public endpoints', () => {
     });
 
     test('GET /api/matchmaking/status reports the queue size', async () => {
-        matchmaking.queue.set('x', {});
+        await matchmaking.joinQueue({ id: 'x', username: 'x' }, 'sock-x', '10', 0);
         const res = await request(app).get('/api/matchmaking/status');
-        matchmaking.queue.clear();
+        await matchmaking.leaveQueue('x');
         expect(res.body).toEqual({ players_searching: 1 });
     });
 

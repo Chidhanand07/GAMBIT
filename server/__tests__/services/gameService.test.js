@@ -40,7 +40,7 @@ describe('joinGame', () => {
         const client = fakeClient('s1');
         ctx.sessions.register('white-user', 's1'); // as the connection handler does
         await ctx.svc.joinGame('g', client, 'white-user');
-        expect(client.joined).toEqual(['game_g']);
+        expect(client.joined).toEqual(['game_g', expect.stringMatching(/^player:g:/)]);
         expect(ctx.sessions.activeGameOf('white-user')).toBe('g');
         expect(ctx.sessions.socketsInGame('white-user', 'g')).toBe(1);
         expect(client.emitted[0]).toEqual({
@@ -360,7 +360,7 @@ describe('disconnect and reconnect', () => {
         const client = fakeClient();
         await ctx.svc.reconnect('black-user', client);
         expect(ctx.gameStore.state.get('g')).toMatchObject({ disconnectInfo: null, lastMoveAt: T });
-        expect(client.joined).toEqual(['game_g']);
+        expect(client.joined).toEqual(['game_g', expect.stringMatching(/^player:g:/)]);
         expect(client.emitted).toEqual([{ event: 'clock_sync', args: [{ whiteMs: 598000, blackMs: 600000 }] }]);
     });
 
@@ -673,5 +673,21 @@ describe('session links do not outlive the game [G17]', () => {
             for (const gameId of orphanedGames) await ctx.svc.handleDisconnect('white-user', gameId);
         }
         expect(ctx.sessions.stats()).toEqual(EMPTY);
+    });
+});
+
+describe('player rooms for cross-instance presence [MULTI-INSTANCE]', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+    test('a player socket joins its player room for the game; a spectator does not', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', fen: START }) });
+        ctx.sessions.register('white-user', 's1');
+        ctx.sessions.register('watcher', 's2');
+        const player = fakeClient('s1');
+        const watcher = fakeClient('s2');
+        await ctx.svc.joinGame('g', player, 'white-user');
+        await ctx.svc.joinGame('g', watcher, 'watcher');
+        expect(player.joined).toEqual(['game_g', 'player:g:white-user']);
+        expect(watcher.joined).toEqual(['game_g']);
     });
 });

@@ -9,6 +9,7 @@
  */
 const { ratingField } = require('../domain/timeControl');
 const glicko = require('../domain/rating/glicko');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {{ oldRating: number, newRating: number, change: number }} RatingChange
@@ -114,7 +115,7 @@ function computeRatings(service, { field, wp, bp, result }) {
 async function apply(gameResultsRepo, args) {
     const { data, error } = await gameResultsRepo.applyGameResult(args);
     if (error) {
-        console.error(`[rating] game ${args.gameId}: not applied:`, error.message);
+        log.error(`[rating] game ${args.gameId}: not applied:`, error.message);
         return null;
     }
     return /** @type {string} */ (data);
@@ -146,7 +147,7 @@ async function applyRated({ profilesRepo, gameResultsRepo }, service, { gameId, 
         // 'already_applied' (rated before: its broadcast was sent then) or refused.
         if (status !== 'stale') return null;
     }
-    console.error(`[rating] game ${gameId}: profiles kept changing, not rated after ${APPLY_ATTEMPTS} attempts`);
+    log.error(`[rating] game ${gameId}: profiles kept changing, not rated after ${APPLY_ATTEMPTS} attempts`);
     return null;
 }
 
@@ -202,7 +203,7 @@ function createRatingService({ profilesRepo, gameResultsRepo }) {
                     field,
                 });
             } catch (e) {
-                console.error('[rating] processGameEnd error:', /** @type {Error} */ (e).message);
+                log.error('[rating] processGameEnd error:', /** @type {Error} */ (e).message);
                 return null;
             }
         },

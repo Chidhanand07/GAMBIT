@@ -3,6 +3,7 @@
  */
 const { createRatingService } = require('../../src/services/ratingService');
 const { result } = require('./fakes');
+const { log } = require('../../src/observability/log');
 
 function profile(id, extra = {}) {
     return { id, rating_rapid: 1500, rating_blitz: 1400, games_played: 10, wins: 5, losses: 4, draws: 1, ...extra };
@@ -71,13 +72,13 @@ test('a refused apply is logged and yields null; a thrown error yields null', as
     const repo = repoWith([profile('w'), profile('b')]);
     repo.applyGameResult.mockReturnValueOnce(result(null, { message: 'rls' }));
     expect(await serviceOn(repo).processGameEnd('g', 'w', 'b', 'white', '10')).toBeNull();
-    expect(console.error).toHaveBeenCalledWith('[rating] game g: not applied:', 'rls');
+    expect(log.error).toHaveBeenCalledWith('[rating] game g: not applied:', 'rls');
 
     repo.findRatingsByIds.mockImplementation(() => {
         throw new Error('down');
     });
     expect(await serviceOn(repo).processGameEnd('g', 'w', 'b', 'white', '10')).toBeNull();
-    expect(console.error).toHaveBeenCalledWith('[rating] processGameEnd error:', 'down');
+    expect(log.error).toHaveBeenCalledWith('[rating] processGameEnd error:', 'down');
 });
 
 test('_ratingField follows the time control', () => {

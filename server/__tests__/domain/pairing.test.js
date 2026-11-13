@@ -5,6 +5,7 @@ const {
     isRatingCompatible,
     sortByLongestWaiting,
     findOpponent,
+    planPairs,
 } = require('../../src/domain/matchmaking/pairing');
 
 const NOW = 1_700_000_000_000;
@@ -167,4 +168,27 @@ describe('findOpponent', () => {
     });
 
     test('no candidates → null', () => expect(findOpponent(entry('p'), [], fixedClock)).toBeNull());
+});
+
+describe('planPairs [MULTI-INSTANCE]', () => {
+    const fixedClock = () => NOW;
+
+    test('longest-waiting first; each player at most once; the input is not reordered', () => {
+        const input = [entry('c', { joined_at: NOW - 1000 }), entry('a', { joined_at: NOW - 3000 }), entry('b', { joined_at: NOW - 2000 })];
+        const pairs = planPairs(input, fixedClock);
+        expect(pairs.map(([x, y]) => [x.user_id, y.user_id])).toEqual([['a', 'b']]);
+        expect(input.map((e) => e.user_id)).toEqual(['c', 'a', 'b']);
+    });
+
+    test('pairs everyone it can, and nobody across time controls', () => {
+        const input = ['a', 'b', 'c', 'd'].map((id, i) => entry(id, { joined_at: NOW - 10_000 + i }));
+        input.push(entry('blitz', { time_control: '3' }));
+        const ids = planPairs(input, fixedClock).map(([x, y]) => [x.user_id, y.user_id]);
+        expect(ids).toEqual([
+            ['a', 'b'],
+            ['c', 'd'],
+        ]);
+    });
+
+    test('empty queue → no pairs', () => expect(planPairs([], fixedClock)).toEqual([]));
 });

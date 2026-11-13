@@ -5,6 +5,7 @@
  * builds that service (it shares the game finalizer) and hands it in here.
  */
 const { parseIncrementMs } = require('../src/domain/timeControl');
+const { log } = require('../src/observability/log');
 
 const TICK_MS = 1000;
 
@@ -30,7 +31,7 @@ function startGlobalClock(clockService) {
         void clockService.tick();
     }, TICK_MS);
 
-    console.log('[Clock] Global ticker started');
+    log.info('[Clock] Global ticker started');
 }
 
 function stopGlobalClock() {

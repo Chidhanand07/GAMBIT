@@ -10,6 +10,7 @@ const { nanoid } = require('nanoid');
 const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
 const { formatTimeControl, timeControlOf } = require('../domain/timeControl');
+const { log } = require('../observability/log');
 
 const INVITE_TOKEN_LENGTH = 10;
 const INVITE_TTL_HOURS = 48;
@@ -114,19 +115,19 @@ function isExpired(expiresAt, nowMs) {
 async function findInvitedGame({ gamesRepo, invitesRepo }, token) {
     const { data: invite, error: inviteError } = await invitesRepo.findByToken(token);
     if (inviteError) {
-        console.error('[FriendsService] getGameByToken error:', inviteError.message);
+        log.error('[FriendsService] getGameByToken error:', inviteError.message);
         return null;
     }
     if (!invite) return null;
 
     if (isExpired(invite.expires_at, Date.now())) {
-        console.warn(`[FriendsService] An invite for game ${invite.game_id} expired at ${invite.expires_at}`);
+        log.warn(`[FriendsService] An invite for game ${invite.game_id} expired at ${invite.expires_at}`);
         return null;
     }
 
     const { data, error } = await gamesRepo.findByIdWithPlayers(invite.game_id);
     if (error) {
-        console.error('[FriendsService] getGameByToken error:', error.message);
+        log.error('[FriendsService] getGameByToken error:', error.message);
         return null;
     }
     if (!data) return null;

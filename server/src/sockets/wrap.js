@@ -8,6 +8,7 @@
  * Ack shape: `{ ok: true }`, or `{ ok: false, error }` where `error` is
  * 'invalid_payload', 'internal_error' or a reason the handler returned.
  */
+const { log } = require('../observability/log');
 
 const INVALID_PAYLOAD = Object.freeze({ ok: false, error: 'invalid_payload' });
 const INTERNAL_ERROR = Object.freeze({ ok: false, error: 'internal_error' });
@@ -39,7 +40,7 @@ function acknowledge(ack, result) {
  */
 function logFailure(event, error) {
     const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
-    console.error(`[socket] ${event} failed:`, message ?? error);
+    log.error(`[socket] ${event} failed:`, message ?? error);
 }
 
 /** @param {unknown} result */

@@ -20,6 +20,7 @@ const { createIoEmitter } = require('../src/services/emitter');
 const { createGameFinalizer } = require('../src/services/gameFinalizer');
 const { createSessionRegistry } = require('../src/sockets/sessionRegistry');
 const { makeGame, makeIo } = require('./helpers/fixtures');
+const { log } = require('../src/observability/log');
 
 const NOW = new Date('2026-01-01T12:00:00Z').getTime();
 
@@ -189,7 +190,7 @@ describe('finalization of a game the clock ended [G3]', () => {
         supabase.queue('games', { data: { id: 'game-1' }, error: null });
         rating.processGameEnd.mockRejectedValue(new Error('rating down'));
         await jest.advanceTimersByTimeAsync(1000);
-        expect(console.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'rating down');
+        expect(log.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'rating down');
         expect(io.eventsNamed('game_end')).toHaveLength(1);
     });
 

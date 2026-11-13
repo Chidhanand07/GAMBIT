@@ -14,6 +14,8 @@ const { guard } = require('../wrap');
  * @property {{ reconnect: (userId: string, client: ClientPort) => Promise<void>,
  *   handleDisconnect: (userId: string | undefined, gameId: string | undefined) => Promise<void> }} gameService
  * @property {{ leaveQueueBySocket: (socketId: string) => void }} matchmaking
+ * @property {(userId: string, gameId: string) => Promise<number>} [countPlayerSockets] player sockets at that
+ *   board on every instance (Socket.IO adapter); without it only this instance is asked
  */
 
 /**
@@ -24,7 +26,7 @@ const { guard } = require('../wrap');
  * @param {ClientPort} client
  * @param {SessionHandlerDeps} deps
  */
-function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking }) {
+function registerSessionHandlers(socket, client, { sessions, gameService, matchmaking, countPlayerSockets }) {
     /** @type {string} */
     const userId = socket.data.userId;
     sessions.register(userId, socket.id);
@@ -38,7 +40,10 @@ function registerSessionHandlers(socket, client, { sessions, gameService, matchm
      */
     const leaveGames = async (gameIds) => {
         for (const gameId of gameIds) {
-            if (sessions.socketsInGame(userId, gameId) === 0) await gameService.handleDisconnect(userId, gameId);
+            if (sessions.socketsInGame(userId, gameId) > 0) continue;
+            // Another instance may hold a socket of this player at this board (MULTI-INSTANCE).
+            if (countPlayerSockets && (await countPlayerSockets(userId, gameId)) > 0) continue;
+            await gameService.handleDisconnect(userId, gameId);
         }
     };
 

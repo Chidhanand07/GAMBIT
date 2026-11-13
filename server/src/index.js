@@ -12,7 +12,7 @@
  */
 const http = require('http');
 // Express, cors and socket.io load before dotenv runs, as in the original server.js.
-const { createApp } = require('./http/app');
+const { createApp, attachErrorHandler } = require('./http/app');
 const { createSocketServer, registerSocketHandlers } = require('./sockets');
 require('dotenv').config();
 
@@ -22,7 +22,7 @@ const ratingService = require('../services/rating');
 const { supabase } = require('../supabase');
 const gameStore = require('../lib/gameStore');
 const redis = require('../lib/redis');
-const { startGlobalClock } = require('../services/clock');
+const { startGlobalClock, stopGlobalClock } = require('../services/clock');
 const env = require('./config/env');
 const { buildPgnFromMoveLog } = require('./domain/pgn');
 const { createEngineClient } = require('./clients/engineClient');
@@ -45,13 +45,21 @@ const { createOriginPolicy } = require('./services/originPolicy');
 const { createRateLimiter } = require('./services/rateLimiter');
 const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
 const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
+const { createTickLockRepository } = require('./repositories/tickLockRepository');
+const { createSocketAdapter } = require('./clients/socketAdapter');
 const { createHttpRateLimit } = require('./http/rateLimit');
 const { createSocketRateLimit } = require('./sockets/rateLimit');
+const { createReadiness } = require('./services/readiness');
+const { redisProbe, supabaseProbe } = require('./clients/healthProbes');
+
+const READINESS_TIMEOUT_MS = 2000;
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
+const { createShutdown } = require('./shutdown');
+const { log } = require('./observability/log');
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
@@ -60,7 +68,9 @@ const gamesRepo = createGamesRepository(supabase);
 const originPolicy = () => createOriginPolicy({ origins: env.corsOrigins(), previewPattern: env.corsPreviewPattern() });
 const app = createApp({ originPolicy });
 const server = http.createServer(app);
-const io = createSocketServer(server, originPolicy);
+// Rooms and broadcasts across instances (NODE-15); off under test and with SOCKET_ADAPTER=none.
+const socketAdapter = env.socketAdapter() === 'redis' ? createSocketAdapter(env.redisUrl()) : null;
+const io = createSocketServer(server, originPolicy, { adapter: socketAdapter?.adapter });
 
 const matchmaking = new MatchmakingService(io);
 
@@ -95,7 +105,7 @@ const gameService = createGameService({
 });
 
 // Start single global clock ticker (replaces all per-game setInterval timers)
-startGlobalClock(createClockService({ gameStore, finalizer, emitter }));
+startGlobalClock(createClockService({ gameStore, finalizer, emitter, tickLocks: createTickLockRepository(redis) }));
 
 const chatService = createChatService({
     gameStore,
@@ -106,15 +116,23 @@ const chatService = createChatService({
 // Rate limits live in Redis, so every instance shares them (NODE-12).
 const rateLimiter = createRateLimiter({ store: createRateLimitRepository(redis), rules: RATE_LIMIT_RULES });
 app.use(createHttpRateLimit({ limiter: rateLimiter }));
+// /readyz: Redis and Supabase answer within 2 s, and the process is not draining (NODE-21).
+const readiness = createReadiness({
+    probes: { redis: redisProbe(redis), supabase: supabaseProbe(supabase) },
+    timeoutMs: READINESS_TIMEOUT_MS,
+});
 
 registerRoutes(app, {
-    queueSize: () => matchmaking.queue.size,
+    queueSize: () => matchmaking.searchingCount(),
+    readiness,
     profileService: createProfileService({ profilesRepo: createProfilesRepository(supabase) }),
     analysisService: createAnalysisService({ engineClient }),
     privateGames,
     socialService,
     requireUserId: createRequireUserId({ getUser: (token) => supabase.auth.getUser(token) }),
 });
+// After every route: JSON 404 and the one error middleware (Express 5 forwards async errors).
+attachErrorHandler(app);
 
 const getUser = /** @type {import('./services/tokenVerifier').GetUser} */ ((token) => supabase.auth.getUser(token));
 const tokenVerifier = createTokenVerifier({ getUser });
@@ -132,11 +150,27 @@ registerSocketHandlers(io, {
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
-    registerProcessHandlers();
+    const shutdown = createShutdown({
+        readiness,
+        stopTimers: () => {
+            matchmaking.destroy();
+            stopGlobalClock();
+        },
+        notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
+        closeSockets: () => io.close(),
+        closeHttp: () => new Promise((resolve) => server.close(() => resolve(undefined))),
+        closeRedis: async () => {
+            await socketAdapter?.close();
+            await redis.quit();
+        },
+        flushLogs: () => new Promise((resolve) => log.pino.flush(() => resolve(undefined))),
+        exit: (code) => process.exit(code),
+    });
+    registerProcessHandlers(shutdown);
     const PORT = env.port();
     server.listen(PORT, () => {
-        console.log(`Node server running on port ${PORT}`);
+        log.info(`Node server running on port ${PORT}`);
     });
 }
 
-module.exports = { app, server, io, matchmaking, buildPgnFromMoveLog, start };
+module.exports = { app, server, io, matchmaking, readiness, buildPgnFromMoveLog, start };

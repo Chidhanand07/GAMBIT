@@ -4,6 +4,7 @@
  */
 const { registerSocketHandlers } = require('../../src/sockets');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
+const { log } = require('../../src/observability/log');
 
 function connect(deps, userId = 'u1') {
     let onConnection;
@@ -38,6 +39,8 @@ function deps() {
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
+        // Other instances hold no socket of this player unless a test says so.
+        countPlayerSockets: jest.fn(async () => 0),
         socialService: {
             requestRematch: fn(),
             acceptRematch: fn(),
@@ -49,13 +52,13 @@ function deps() {
     };
 }
 
-beforeEach(() => jest.spyOn(console, 'log').mockImplementation(() => {}));
+beforeEach(() => jest.spyOn(log, 'info'));
 afterEach(() => jest.restoreAllMocks());
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 test('registers the handshake middleware and exactly the supported events (no `authenticate`, no client `game_end`)', () => {
-    const { handlers, middlewares } = connect(deps());
+    const { handlers, middlewares, socket } = connect(deps());
     expect(middlewares).toHaveLength(1);
     expect(Object.keys(handlers).sort()).toEqual(
         [
@@ -75,7 +78,9 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'disconnect',
         ].sort(),
     );
-    expect(console.log).toHaveBeenCalledWith('Client connected:', 'sock-1');
+    // socket.data is serialized by the Redis adapter for connection-state recovery: plain data
+    // only. Was: a pino child logger stored there, which made every disconnect throw [MULTI-INSTANCE].
+    expect(() => structuredClone(socket.data)).not.toThrow();
 });
 
 test('the handshake middleware rejects a connection without a valid token [S2]', async () => {
@@ -104,7 +109,7 @@ test('a connection registers the verified user, joins user_<id>, then resumes th
 test('a failing reconnect on connection is logged, not thrown [S15]', async () => {
     const d = deps();
     d.gameService.reconnect.mockRejectedValue(new Error('redis down'));
-    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const error = jest.spyOn(log, 'error');
     connect(d);
     await flush();
     expect(error).toHaveBeenCalledWith('[socket] connection failed:', 'redis down');
@@ -172,7 +177,7 @@ test('a failing service is logged and acked, not thrown [S15]', async () => {
     const d = deps();
     d.gameService.makeMove.mockRejectedValue(new Error('redis down'));
     d.gameService.handleDisconnect.mockRejectedValue(new Error('redis down'));
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(log, 'error');
     const { handlers } = connect(d);
     const ack = jest.fn();
     await expect(handlers.make_move({ game_id: 'g', from: 'e2', to: 'e4' }, ack)).resolves.toBeUndefined();
@@ -249,5 +254,24 @@ describe('a socket closed because its token expired [TOKEN-LIFETIME]', () => {
         await handlers.disconnect();
         await jest.advanceTimersByTimeAsync(4_000_000);
         expect(socket.disconnect).not.toHaveBeenCalled();
+    });
+});
+
+describe('the countdown needs every instance to agree the player is gone [MULTI-INSTANCE]', () => {
+    test('a player socket on another instance keeps the game alive', async () => {
+        const d = { ...deps(), countPlayerSockets: jest.fn(async () => 1) };
+        const { handlers } = connect(d, 'u1');
+        d.sessions.linkSocket('sock-1', 'g');
+        await handlers.disconnect();
+        expect(d.countPlayerSockets).toHaveBeenCalledWith('u1', 'g');
+        expect(d.gameService.handleDisconnect).not.toHaveBeenCalled();
+    });
+
+    test('no player socket anywhere: the countdown starts', async () => {
+        const d = { ...deps(), countPlayerSockets: jest.fn(async () => 0) };
+        const { handlers } = connect(d, 'u1');
+        d.sessions.linkSocket('sock-1', 'g');
+        await handlers.disconnect();
+        expect(d.gameService.handleDisconnect.mock.calls).toEqual([['u1', 'g']]);
     });
 });

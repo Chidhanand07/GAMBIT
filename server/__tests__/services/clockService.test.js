@@ -6,6 +6,7 @@ const { createGameFinalizer } = require('../../src/services/gameFinalizer');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
 const { fakeEmitter, fakeGameStore, result } = require('./fakes');
 const { makeGame } = require('../helpers/fixtures');
+const { log } = require('../../src/observability/log');
 
 const T = 1_000_000;
 
@@ -110,7 +111,7 @@ test('a game the database already finalized is not rated or reviewed again; a ra
     const failing = setup(makeGame({ lastMoveAt: T - 5000, blackClockMs: 4000, activeSide: 'b' }));
     failing.rating.processGameEnd.mockRejectedValue(new Error('boom'));
     await failing.svc.tick();
-    expect(console.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'boom');
+    expect(log.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'boom');
     // The game is over for the players all the same.
     expect(failing.emitter.named('game_end')).toHaveLength(1);
 });
@@ -124,7 +125,7 @@ test('a ticker-level failure is logged', async () => {
     const { svc, gameStore } = setup(makeGame());
     gameStore.getActiveGameIds.mockRejectedValue(new Error('redis down'));
     await svc.tick();
-    expect(console.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
+    expect(log.error).toHaveBeenCalledWith('[clock] ticker error:', 'redis down');
 });
 
 test('a flag fall that loses the race to another ending does nothing (one finalizer wins) [S3]', async () => {
@@ -236,4 +237,25 @@ test('a player who disconnects before any move: the game is aborted after the gr
     expect(gameStore.state.get('game-1')).toMatchObject({ status: 'completed', result: 'aborted' });
     expect(gamesRepo.finishIfActive.mock.calls[0][1]).toMatchObject({ status: 'aborted', winner_id: null });
     expect(rating.processGameEnd).not.toHaveBeenCalled();
+});
+
+describe('with several instances, one ticks each game per tick [MULTI-INSTANCE]', () => {
+    test('two clock services sharing a tick lock: one clock_sync per game per tick', async () => {
+        const game = makeGame({ lastMoveAt: T - 1500, whiteClockMs: 10000 });
+        const a = setup(game);
+        const held = new Set();
+        const tickLocks = { tryAcquire: jest.fn(async (id) => (held.has(id) ? false : (held.add(id), true))) };
+        const svcA = createClockService({ gameStore: a.gameStore, finalizer: { endGameIf: jest.fn() }, emitter: a.emitter, now: () => T, tickLocks });
+        const svcB = createClockService({ gameStore: a.gameStore, finalizer: { endGameIf: jest.fn() }, emitter: a.emitter, now: () => T, tickLocks });
+        await Promise.all([svcA.tick(), svcB.tick()]);
+        expect(a.emitter.named('clock_sync')).toHaveLength(1);
+        expect(tickLocks.tryAcquire).toHaveBeenCalledWith('game-1', 900);
+    });
+
+    test('without a tick lock (one instance) every tick runs, as before', async () => {
+        const { svc, emitter } = setup(makeGame({ lastMoveAt: T - 1500 }));
+        await svc.tick();
+        await svc.tick();
+        expect(emitter.named('clock_sync')).toHaveLength(2);
+    });
 });

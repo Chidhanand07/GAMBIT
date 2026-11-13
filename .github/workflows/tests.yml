@@ -19,6 +19,15 @@ jobs:
     name: Server (Node)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A real Redis for the multi-instance tests (Lua compare-and-set, the Socket.IO adapter, TEST-06).
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6379
     defaults:
       run:
         working-directory: server
@@ -46,6 +55,8 @@ jobs:
           fi
           npm run lint:baseline
       - run: npx jest --ci
+      - name: Repository script self-tests (schema drift, dependency audit)
+        run: node --test ../scripts/schema-drift.test.js ../scripts/dependency-audit.test.js
 
   frontend:
     name: Frontend (Next.js)

@@ -65,6 +65,21 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
 | [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
 | [F-044](#f-044) | Stale-game detection reads the last move from `moves`, lazily; a failed read keeps the game | M2 | G22 |
+| [F-045](#f-045) | One `CORS_ORIGINS` allow-list for Express and the Socket.IO handshake; rejections are a plain 403 | M3 | S13 |
+| [F-046](#f-046) | Rate limits in shared stores: Redis for the game server, Upstash REST for the web app, a bounded queue in the engine; the limiters fail open | M3 | RATE-LIMITS |
+| [F-047](#f-047) | One FEN check at the HTTP boundary of the engine, answering 400 | M3 | G19 |
+| [F-048](#f-048) | A mate on the top line scores ±10000 (White's perspective); moves are parsed as UCI first, then SAN | M3 | G20 |
+| [F-049](#f-049) | A game without moves is never reviewed; a side without moves has no accuracy | M3 | G21 |
+| [F-050](#f-050) | Render builds the engine's Dockerfile, which is the only place Stockfish is installed; the MAVERICK weights stay in git with a checksum-verified download as fallback | M3 | ENGINE-BUILD |
+| [F-051](#f-051) | One pure helper decides post-sign-in redirects: a same-origin path with exactly one leading `/` | M3 | S6 |
+| [F-052](#f-052) | No console output from browser code; ESLint enforces it | M3 | S14 |
+| [F-053](#f-053) | Ratings and statistics are written once per game, atomically, by `public.apply_game_result`; closes the SEC-04 deviation in F-017 | M3 | RATING-ATOMIC |
+| [F-054](#f-054) | Express 5; one error middleware; routes throw instead of wrapping | M4 | EXPRESS-5 |
+| [F-055](#f-055) | Structured logs with pino; `/livez` and `/readyz` | M4 | OBSERVABILITY |
+| [F-056](#f-056) | Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart | M4 | SHUTDOWN |
+| [F-057](#f-057) | Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list | M4 | SUPPLY-CHAIN |
+| [F-058](#f-058) | Schema drift is checked against the linked Supabase project on a schedule, not on every PR | M4 | SCHEMA-DRIFT |
+| [F-059](#f-059) | The game server can run as several replicas behind one Redis | M4 | MULTI-INSTANCE |
 
 ---
 
@@ -1812,3 +1827,199 @@ instead of one file per ADR under `docs/refactor/adr/`.
   exactly for the compare-and-set. If they do not, every rated game would come back `stale`
   and stay unrated after 5 attempts; check one rated game on staging first.
 - *Implemented on a side branch by a helper agent (`wip/medium-3-rating`) and cherry-picked.*
+## F-054
+
+**Express 5; one error middleware; routes throw instead of wrapping (EXPRESS-5).**
+
+- **Context.** NODE-02 asks for Express 5 (Express 4 is in maintenance). Every async route
+  wrapped its body in try/catch because Express 4 did not forward a rejected promise.
+- **Decision.**
+  - `express` `^5.2.0` (resolves 5.3.0, released 2026-10-09).
+  - `http/app.js` `attachErrorHandler(app)`, called after the routes: a JSON
+    `404 { error: 'not_found' }` and one error middleware that calls `sendError` (AppError →
+    its status and code; anything else → logged, generic 500). Express 5 forwards rejected
+    async handlers to it, so the analysis and username routes lost their try/catch.
+  - `express.json({ limit: '16kb' })` (NODE-12); a malformed body → `400 invalid_request` JSON,
+    an oversized one → `413 payload_too_large` JSON (they were Express's HTML error pages).
+  - `x-powered-by` disabled (NODE-09).
+- **Kept on purpose.** The invite routes (`/api/games/join/:token`) still catch and answer 400
+  with the service's message: that is their documented contract (the web app shows the
+  message), not a wrapper. Turning those messages into codes is a client change.
+- **Path syntax.** All routes use plain `:param` segments; nothing uses the patterns Express 5
+  changed (`*`, optional `?`, regex strings), checked by search.
+- **Not verified.** No deploy; Railway runs the same `node server.js`.
+
+## F-055
+
+**Structured logs with pino; `/livez` and `/readyz` (OBSERVABILITY).**
+
+- **Context.** The game server logged with `console.*` (33 calls): plain text, no request or
+  socket context, nothing redacted. There was one health route, `/api/health`, which said "ok"
+  even with Redis down.
+- **Decision.**
+  - `src/observability/log.js`: pino, JSON lines on stdout, ISO time, `service: 'gambit-server'`,
+    `redact` for authorization/cookie/engine-key headers and token/password/secret fields
+    (`[REDACTED]`). Code uses a two-argument port, `log.error(message, detail?)`, written as
+    `{ detail, msg }`, so every former console call kept its message and argument and tests
+    assert the same pair on the logger. `log.child(bindings)` adds context.
+  - Level from `LOG_LEVEL` (default `info`; `silent` under test). The config module cannot import
+    the logger (the logger reads its level from config), so config warnings go through a sink
+    the logger registers (`env.setWarningSink`).
+  - Requests: `pino-http` with a request id (a sane incoming `X-Request-Id` is kept, otherwise a
+    UUID), echoed as `X-Request-Id`. Sockets: a child logger with `socketId` and
+    `userId` writes the connection line (not kept on `socket.data`, see F-059); finalizer lines name the game id in the message.
+  - `/livez` (process up), `/readyz` (Redis `PING` and a one-row PostgREST `HEAD` request, 2 s
+    timeout each; 503 naming the failed check; 503 while draining). `/api/health` stays for the
+    current Railway healthcheck setting.
+  - No `console` call is left in `server/src` or the legacy facades.
+- **Not done.** The socket handler wrapper (`wrap`) logs through the process logger, not the
+  socket's child (it does not receive the socket); the request id is not propagated to Supabase
+  or engine calls. An error tracker (SEC-12) is not part of this item.
+- **Owner action.** Point Railway's healthcheck at `/readyz` when convenient (NODE-21); keep
+  `/api/health` until then. Optional `LOG_LEVEL`.
+
+## F-056
+
+**Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart (SHUTDOWN).**
+
+- **Context.** The process had no SIGTERM handling: a deploy killed live sockets mid-move.
+  An unhandled rejection was logged and the process kept running (F-003 recorded that as a
+  deviation from NODE-07).
+- **Decision.** `src/shutdown.js`, wired in `start()`:
+  1. `/readyz` starts answering 503 (the platform stops routing new connections here);
+  2. matchmaking and clock intervals stop;
+  3. every socket is told `server_shutdown { reconnect: true }`;
+  4. `io.close()`, then the HTTP server closes (in-flight requests finish);
+  5. Redis `QUIT`; logs are flushed; exit 0.
+  A step that throws is logged and the next one runs. If the whole sequence takes longer than
+  `DEFAULT_DRAIN_MS` (20 s, inside Railway's default 30 s drain), the process exits 1. A second
+  signal does not start a second shutdown. An uncaught exception or unhandled rejection is
+  logged at `fatal`, logs are flushed, and the process exits 1.
+- **Clients.** The web client already reconnects after a server-side disconnect (TOKEN-LIFETIME,
+  F-041); with a second instance (M4 MULTI-INSTANCE) it lands on the other one and re-joins its
+  game. With one instance it reconnects when the new deploy is up; the 20 s disconnect grace
+  period covers a fast deploy, a slower one can end games by abandonment.
+- **The Dockerfile runs `node server.js` directly** (M1), so SIGTERM reaches Node rather than
+  stopping at `npm`.
+- **Not verified.** No real Railway deploy; Railway's drain window was not measured.
+
+## F-057
+
+**Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list (SUPPLY-CHAIN).**
+
+- **Dependabot** (`.github/dependabot.yml`): npm `/server`, npm `/frontend`, pip `/chess-engine`,
+  github-actions `/`; weekly (Mondays 06:00 UTC); one grouped minor+patch PR per ecosystem,
+  majors individually; at most 5 open PRs per npm/pip entry, 3 for actions; target `preprod`.
+  Security-update PRs ignore `target-branch` and open against the default branch: retarget them
+  by hand.
+- **CodeQL** (`.github/workflows/codeql.yml`): `javascript-typescript` and `python`,
+  `build-mode: none`, `security-extended` queries, on PRs, pushes to `main`/`preprod` and weekly;
+  `security-events: write` on that job only. *Deviation from GIT-06* ("default setup"): a
+  workflow file keeps triggers and queries reviewable in the repo; default setup and a workflow
+  cannot both be on, so keep the repository on advanced setup.
+- **Dependency audit** (`.github/workflows/dependency-audit.yml`, job `Dependency audit`):
+  `npm audit --omit=dev --audit-level=high` (server, frontend) and `pip-audit -r requirements.txt`
+  (engine), through `scripts/dependency-audit.js`, which subtracts approved exceptions from
+  `.github/dependency-audit-allowlist.json`. An exception needs `id`, `scope`, a reason of at
+  least 20 characters, `approvedBy` and an `expires` date at most 90 days ahead; an invalid or
+  expired entry fails the job; an audit that cannot run fails closed. pip-audit reports no
+  severity, so the engine gate fails on **any** known vulnerability (stricter than SEC-11).
+  Runs on every PR, pushes, Mondays and on demand; it is a separate workflow so it does not
+  lengthen the test jobs (TEST-10).
+- **State at the time of writing.** The audit is **red**: the server lockfile had 29 blocking
+  advisories (28 high, 1 critical), the frontend 4 high, all transitive (ws, socket.io-parser,
+  axios, body-parser, qs, …). Some are fixed by this phase's upgrades (Express 5, Next 16), the
+  rest need dependency bumps that Dependabot will propose. Re-run after merging and either
+  upgrade or add dated exceptions.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-058
+
+**Schema drift is checked against the linked Supabase project on a schedule, not on every PR (SCHEMA-DRIFT).**
+
+- `scripts/schema-drift.sh` runs `supabase db diff` against the remote project for schema
+  `public` (`--remote` on CLI v3+, where `--linked` is deprecated; `--linked` on 2.x; overridable
+  with `SCHEMA_DRIFT_TARGET` / `SCHEMA_DRIFT_SCHEMAS`). Any non-comment line in the diff is drift:
+  exit 1 and the SQL is printed; exit 2 when the check cannot run. `supabase migration list` is
+  printed for information.
+- `.github/workflows/schema-drift.yml` (job `Schema drift (Supabase)`): daily and on manual
+  dispatch only, because it needs `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
+  `SUPABASE_PROJECT_REF`; without them it passes with a "skipped" notice. Do not make it a
+  required check. The manual command is in DEPLOY.md.
+- **Tested** with a fake CLI on `PATH` (`scripts/schema-drift.test.js`, run in the `Server (Node)`
+  job): no drift → 0, SQL in the diff → 1, a failing diff → 2 (never "clean"), `--remote` on CLI
+  v3 and `--linked` on 2.x, missing link or credentials → 2.
+- **Not verified.** The real CLI never ran here (no Docker, CLI download not permitted); flags
+  were taken from the CLI v3.1 reference. `supabase link` writes `supabase/.temp/`, which is not
+  git-ignored. Run the workflow once by hand after adding the secrets.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-059
+
+**The game server can run as several replicas behind one Redis (MULTI-INSTANCE).**
+
+Context: every replica kept its own copy of the parts that must be global: the matchmaking
+queue (a `Map`), a per-process lock around each game's read-modify-write, the clock ticker,
+and Socket.IO rooms. Two replicas meant players who never meet, moves applied twice, clocks
+charged twice and broadcasts that reach half the room (NODE-15, NODE-17, TEST-06).
+
+- **Game state: compare-and-set on the stored value, not a lock.** `mutateGame` reads the JSON,
+  runs the pure mutation, then writes with the `casSetGame` Lua script, which writes only if the
+  key still holds exactly the JSON that was read (`''` = absent) and keeps the TTL. On a lost
+  race it re-reads and re-runs the mutation, with a jittered growing pause, at most 10 attempts,
+  then throws; the socket handler's error path (F-042) turns that into an error ack, never a silent drop.
+  Rejected: `WATCH`/`MULTI` (needs a dedicated connection per transaction with ioredis); a
+  Redlock-style lock (correctness would depend on lock expiry and clock assumptions). A version
+  counter was rejected as unnecessary: the whole value is the version and the script compares it
+  in one step.
+- **Clock ticker: one replica per game per tick.** Every replica keeps ticking its active set;
+  before checking a game it takes `SET clocktick:<id> 1 PX 900 NX`. The verdict itself still
+  runs inside `endGameIf`'s compare-and-set, so the lock only saves work; a lock that expires
+  early cannot end a game twice.
+- **Matchmaking queue in Redis.** One sorted set `{mm}:queue` (member user id, score
+  `joined_at`) plus `{mm}:entry:<userId>` JSON with a 2-minute TTL refreshed every second by the
+  instance that queued it (a crashed instance's players lapse). Five Lua scripts: join (no-op if
+  queued), leave (only if the socket id matches), **claimPair** (both or neither, and only if
+  each score still equals the `joined_at` the pass read), prune, unlock (compare-and-delete). A
+  pairing lock `SET NX PX 5000` lets one replica run the pass and broadcast `queue_status`; the
+  claim, not the lock, is what makes pairing correct: tests pass with the lock removed. The
+  pairing rules stay in the pure `planPairs` (SOLID-07) instead of Lua. One sorted set rather
+  than one per time control, because `position` and `players_searching` count the whole queue.
+  `{mm}` is a hash tag so every key is in one Redis Cluster slot.
+- **Socket.IO: `@socket.io/redis-streams-adapter`.** Chosen over the Pub/Sub adapter because it
+  supports connection-state recovery (a client that reconnects within 2 minutes to any replica
+  gets the missed events) and survives a short Redis disconnect (streams are replayed). Cost: one
+  blocking `XREAD` connection per replica. `SOCKET_ADAPTER=none` (the default under test) keeps
+  the in-memory adapter. `socket.data` must hold plain data only: the adapter serializes it for
+  recovery (a stored pino logger made every disconnect throw; found by the two-instance test).
+  The adapter connection closes with `quit` so recovery sessions written during shutdown are not
+  dropped. The adapter fires some writes without awaiting them (recovery-session `SET`,
+  heartbeat and response `XADD`/`PUBLISH`); with Redis unreachable each was an unhandled
+  rejection, which F-056 makes fatal, so a Redis blip would have restarted every replica.
+  `handleUnawaitedWrites` attaches a logging handler to those calls (found by the two-instance
+  test under load; pinned by `clients/socketAdapter.test.js`). Each real-Redis test suite uses
+  its own key namespace and adapter stream (`streamName`), because CI shares one Redis.
+- **WebSocket transport only, server and client.** HTTP long-polling needs every request of a
+  session to reach the same replica (sticky sessions), which Railway does not offer. All
+  supported browsers have WebSocket; a network that blocks it cannot play (accepted). The
+  frontend must be deployed before the server is scaled.
+- **Presence across replicas.** Each player socket joins `player:<gameId>:<userId>`. A disconnect
+  starts the abandonment countdown only if no socket of that player is left in that room on any
+  replica (`fetchSockets`), so a second tab on another replica keeps the game alive.
+- **Pending challenges and rematches** already lived in Redis (high-risk phase).
+- **Proof.** `__tests__/integration/twoInstances.test.js`: two full server instances (game
+  service, finalizer, CAS store, adapter) over one real Redis; White on A, Black on B play Fool's
+  mate: every move reaches both, one `game_end`, the result is written once; the same move sent to
+  both replicas at once is applied once; a resign racing the mating move ends the game once.
+  `multiInstance.test.js` (concurrent moves and finalize on real Redis), `adapter.test.js`
+  (cross-server rooms), `matchmakingTwoInstances.test.js` (31 players, two services, overlapping
+  passes, with and without the lock: nobody paired twice). CI gets a `redis:7-alpine` service and
+  `REDIS_TEST_URL`; without a Redis the real-Redis tests skip with a message.
+- **Not verified:** Redis Cluster; Redis failover and network partitions; Upstash's handling of
+  blocking `XREAD` (supported per its docs, but each call is billed: DEPLOY.md recommends a
+  Railway Redis add-on for two or more replicas); the matchmaking test uses fake emitters, so
+  `match_found` to a socket on another replica relies on the adapter (covered by
+  `adapter.test.js`, not end to end).
+- **Behaviour.** `joinQueue`/`leaveQueue` are async; `/api/matchmaking/status` reads a snapshot
+  that may be up to ~1 s stale on a replica that does not hold the pairing lock.
+- *The matchmaking part was implemented on a side branch by a helper agent and merged here.*

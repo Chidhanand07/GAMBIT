@@ -55,7 +55,7 @@ describe('join_queue', () => {
 
     test('stores the verified queue entry (client rating ignored; client increment / is_rated passed through)', async () => {
         const { s } = await queued('q1', { user: { id: 'q1', rating: 3000 }, time_control: '3+2', increment: 2, is_rated: false });
-        expect(ctx.matchmaking.queue.get('q1')).toEqual({
+        expect(await ctx.matchmaking.queuedEntry('q1')).toEqual({
             user_id: 'q1',
             username: 'q1-name',
             rating: 1002,
@@ -84,7 +84,7 @@ describe('join_queue', () => {
         supabase.queue('profiles', { data: profile('tc'), error: null });
         s.emit('join_queue', { user: { id: 'tc' }, time_control: timeControl });
         await once(s, 'queue_joined');
-        expect(ctx.matchmaking.queue.get('tc').rating).toBe(rating);
+        expect((await ctx.matchmaking.queuedEntry('tc')).rating).toBe(rating);
     });
 
     test.each(['blitz', '0', '-5', '1441', '10+181', 'x'])(
@@ -93,18 +93,18 @@ describe('join_queue', () => {
             const s = await ctx.connect('tc');
             const ack = await new Promise((resolve) => s.emit('join_queue', { time_control: timeControl }, resolve));
             expect(ack).toEqual({ ok: false, error: 'invalid_payload' });
-            expect(ctx.matchmaking.queue.has('tc')).toBe(false);
+            expect(await ctx.matchmaking.queuedEntry('tc')).toBeNull();
         },
     );
 
     test('missing rating column → 1200; missing games_played → 0 (provisional); is_rated null → true', async () => {
         await queued('q1', { is_rated: null }, { rating_rapid: null, games_played: null });
-        expect(ctx.matchmaking.queue.get('q1')).toMatchObject({ rating: 1200, isProvisional: true, isRated: true });
+        expect(await ctx.matchmaking.queuedEntry('q1')).toMatchObject({ rating: 1200, isProvisional: true, isRated: true });
     });
 
     test('rating 0 in the DB stays 0 inside matchmaking (`??`, not `||`) [G12]', async () => {
         await queued('q1', {}, { rating_rapid: 0 });
-        expect(ctx.matchmaking.queue.get('q1').rating).toBe(0);
+        expect((await ctx.matchmaking.queuedEntry('q1')).rating).toBe(0);
     });
 
     test('the queued player is the verified user: no payload id is needed, and a foreign one is ignored [S2]', async () => {
@@ -113,7 +113,7 @@ describe('join_queue', () => {
         s.emit('join_queue', { user: { id: 'someone-else' }, time_control: '10' });
         await once(s, 'queue_joined');
         expect(opsFor('profiles')).toEqual([[['select', PROFILE_COLUMNS], ['eq', 'id', 'q1'], ['maybeSingle']]]);
-        expect([...ctx.matchmaking.queue.keys()]).toEqual(['q1']);
+        expect(await ctx.matchmaking.queuedUserIds()).toEqual(['q1']);
     });
 
     test('a null payload is rejected: nothing is looked up or queued [S15]', async () => {
@@ -132,19 +132,19 @@ describe('join_queue', () => {
         await sleep(80);
         expect(opsFor('profiles')).toHaveLength(1);
         expect(joined).toEqual([]);
-        expect(ctx.matchmaking.queue.size).toBe(0);
+        expect(await ctx.matchmaking.queueSize()).toBe(0);
     });
 
     test('joining twice re-queries the DB but keeps the first entry and emits nothing new', async () => {
         const { s } = await queued('q1');
-        const first = ctx.matchmaking.queue.get('q1');
+        const first = await ctx.matchmaking.queuedEntry('q1');
         const joined = record(s, 'queue_joined');
         supabase.queue('profiles', { data: profile('q1', { rating_rapid: 2500 }), error: null });
         s.emit('join_queue', { user: { id: 'q1' }, time_control: '5' });
         await sleep(80);
         expect(opsFor('profiles')).toHaveLength(2);
         expect(joined).toEqual([]);
-        expect(ctx.matchmaking.queue.get('q1')).toEqual(first);
+        expect(await ctx.matchmaking.queuedEntry('q1')).toEqual(first);
     });
 });
 
@@ -154,10 +154,10 @@ describe('leave_queue and queue_status', () => {
         const stranger = await ctx.connect();
         stranger.emit('leave_queue', 'q1');
         await sleep(50);
-        expect(ctx.matchmaking.queue.has('q1')).toBe(true);
+        expect(await ctx.matchmaking.queuedEntry('q1')).not.toBeNull();
         s.emit('leave_queue');
         await sleep(50);
-        expect(ctx.matchmaking.queue.has('q1')).toBe(false);
+        expect(await ctx.matchmaking.queuedEntry('q1')).toBeNull();
     });
 
     test('leave_queue emits nothing back', async () => {
@@ -180,7 +180,7 @@ describe('leave_queue and queue_status', () => {
         await queued('q2', { time_control: '5' });
         s.disconnect();
         await sleep(50);
-        expect([...ctx.matchmaking.queue.keys()]).toEqual(['q2']);
+        expect(await ctx.matchmaking.queuedUserIds()).toEqual(['q2']);
     });
 });
 
@@ -223,7 +223,7 @@ describe('pairing', () => {
         expect(m2).toEqual({ ...row, color: 'black', opponent: opponent('p1', 1500) });
         expect(JSON.stringify([m1, m2])).not.toContain(s1.id);
         expect(JSON.stringify([m1, m2])).not.toContain(s2.id);
-        expect(ctx.matchmaking.queue.size).toBe(0);
+        expect(await ctx.matchmaking.queueSize()).toBe(0);
 
         expect(opsFor('games')).toEqual([
             [
@@ -272,7 +272,7 @@ describe('pairing', () => {
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
         expect(found).toEqual([]);
-        expect(ctx.matchmaking.queue.size).toBe(2);
+        expect(await ctx.matchmaking.queueSize()).toBe(2);
     });
 
     test('"10" with a separate increment of 5 on both sides → a 10+5 game (the increment is no longer lost) [G4]', async () => {
@@ -293,7 +293,7 @@ describe('pairing', () => {
 
     test('"10" and "10+0" are the same time control and are paired [TIME-CONTROL]', async () => {
         await pairUp(0.9, { time_control: '10' }, { time_control: '10+0' });
-        expect(ctx.matchmaking.queue.size).toBe(0);
+        expect(await ctx.matchmaking.queueSize()).toBe(0);
         expect(await getGame('match-1')).toMatchObject({ timeControl: '10+0', incrementMs: 0 });
     });
 
@@ -304,7 +304,7 @@ describe('pairing', () => {
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
         await once(s1, 'queue_status', TICK_TIMEOUT_MS);
         expect(found).toEqual([]);
-        expect(ctx.matchmaking.queue.size).toBe(2);
+        expect(await ctx.matchmaking.queueSize()).toBe(2);
     });
 
     test('games insert failure: both players get match_failed and leave the queue; nothing is seeded [G12]', async () => {
@@ -322,7 +322,7 @@ describe('pairing', () => {
         expect(opsFor('games')).toHaveLength(1);
         expect(found).toEqual([]);
         expect(found2).toEqual([]);
-        expect(ctx.matchmaking.queue.size).toBe(0);
+        expect(await ctx.matchmaking.queueSize()).toBe(0);
         expect(gameKeys(redis)).toEqual([]); // rate-limit counters aside [RATE-LIMITS]
     });
 });

@@ -2,6 +2,7 @@
  * src/sockets/auth.js — handshake identity [S2] (NODE-10, SEC-09).
  */
 const { createHandshakeAuth } = require('../../src/sockets/auth');
+const { log } = require('../../src/observability/log');
 
 const socketWith = (auth) => ({ handshake: { auth }, data: {} });
 
@@ -52,7 +53,7 @@ test('fails closed when the verifier throws (auth service unavailable)', async (
     const err = await run(createHandshakeAuth({ verifyToken }), socket);
     expect(err.message).toBe('unauthorized');
     expect(socket.data.userId).toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith('[socket] token verification failed:', 'supabase unreachable');
+    expect(log.error).toHaveBeenCalledWith('[socket] token verification failed:', 'supabase unreachable');
 });
 
 test('the deadline of the token is recorded next to the user id [TOKEN-LIFETIME]', async () => {

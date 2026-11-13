@@ -6,6 +6,7 @@
 const { createChatService } = require('../../src/services/chatService');
 const { fakeEmitter, fakeGameStore, result, flush } = require('./fakes');
 const { makeGame } = require('../helpers/fixtures');
+const { log } = require('../../src/observability/log');
 
 function setup(game = makeGame({ id: 'g' })) {
     const emitter = fakeEmitter();
@@ -65,6 +66,6 @@ test('a persist error is logged after the broadcast; the message was still deliv
     messagesRepo.insert.mockReturnValue(result(null, { message: 'rls' }));
     expect(await svc.sendMessage({ game_id: 'g', text: 'hi' }, 'white-user')).toEqual({ ok: true });
     await flush();
-    expect(console.error).toHaveBeenCalledWith('[send_message] persist:', 'rls');
+    expect(log.error).toHaveBeenCalledWith('[send_message] persist:', 'rls');
     expect(emitter.named('chat_message')).toHaveLength(1);
 });
