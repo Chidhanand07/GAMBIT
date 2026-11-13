@@ -5,7 +5,8 @@ import { z } from 'zod';
 // contains `,`, `(` or `)` changes the filter itself, so these builders are the only place
 // such strings are assembled, and they refuse anything that is not a UUID (NX-07, NODE-08).
 
-const uuid = z.string().uuid();
+// z.guid() keeps zod 3's uuid() rule (any 8-4-4-4-12 hex id); see schemas.uuid (F-094).
+const uuid = z.guid();
 
 /** `id` if it is a UUID; throws otherwise (never interpolate an unchecked value). */
 function requireUuid(id: unknown): string {
