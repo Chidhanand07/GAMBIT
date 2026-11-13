@@ -8,6 +8,8 @@ import { act } from '@testing-library/react'
 type Handler = (payload?: any) => void
 
 export interface FakeSocket {
+    /** Mirrors socket.io's `connected`; true unless a test simulates a socket still connecting. */
+    connected: boolean
     emit: jest.Mock
     on: jest.Mock
     off: jest.Mock
@@ -23,6 +25,7 @@ export interface FakeSocket {
 export function createFakeSocket(): FakeSocket {
     const handlers = new Map<string, Set<Handler>>()
     const socket: FakeSocket = {
+        connected: true,
         emit: jest.fn(),
         on: jest.fn((event: string, h: Handler) => {
             if (!handlers.has(event)) handlers.set(event, new Set())
@@ -41,6 +44,7 @@ export function createFakeSocket(): FakeSocket {
         emitted: event => socket.emit.mock.calls.filter(([e]) => e === event).map(c => c[1]),
         reset: () => {
             handlers.clear()
+            socket.connected = true
             socket.emit.mockClear()
             socket.on.mockClear()
             socket.off.mockClear()

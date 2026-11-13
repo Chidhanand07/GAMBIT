@@ -1,6 +1,6 @@
 // Handlers for the server events the game page listens to: the 13 legacy ones in their original
 // registration order, then `move_rejected` (the server refused our move; a resync follows).
-// Built fresh on every run of the socket effect, so they close over that run's myColor/soundOn.
+// Built once per join (useGameSocket); render-dependent fields are read from `ctx` when an event arrives.
 import type { Dispatch, MutableRefObject } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { Chess, Square } from 'chess.js';

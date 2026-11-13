@@ -101,15 +101,35 @@ describe('mount', () => {
         expect(fetchMock.mock.calls[0]).toEqual(['/api/games/g1'])
     })
 
-    test('emits join_game (never authenticate) on mount and AGAIN when my colour resolves (effect deps include myColor)', async () => {
+    test('emits join_game (never authenticate) exactly once per game, even after my colour resolves [F2]', async () => {
         await renderGame()
-        // LEGACY: the socket effect depends on myColor, so it re-runs once the
-        // game row says we are white, re-emitting the join.
+        // Was (LEGACY): the socket effect depended on myColor, so resolving the seat re-emitted the join.
         // S2: identity travels in the socket handshake, so no `authenticate` is emitted.
-        expect(socket.emit.mock.calls).toEqual([
-            ['join_game', 'g1'],
-            ['join_game', 'g1'],
-        ])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
+    })
+
+    test('a refreshed profile object (same user) does not re-join or re-register handlers [F2]', async () => {
+        const { rerender } = await renderGame()
+        const registrations = socket.on.mock.calls.length
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
+    })
+
+    test('a socket that is still connecting joins once, on connect, not twice [F2]', async () => {
+        socket.connected = false
+        await renderGame()
+        expect(socket.emitted('join_game')).toEqual([])
+        socket.connected = true
+        socket.serverSends('connect')
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+    })
+
+    test('handlers read the current seat: game_end after the seat resolved plays the win sound for white [F2]', async () => {
+        await renderGame()
+        socket.serverSends('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate' })
+        expect(sounds.playGameEndSound).toHaveBeenCalledWith(true)
     })
 
     test('signed-out viewer: no socket emits, but the game still loads as spectator', async () => {
@@ -808,12 +828,17 @@ describe('board controls', () => {
         expect(names).toEqual(['Alice', 'Bob'])
     })
 
-    test('toggling sound off silences move sounds (and re-runs the socket effect)', async () => {
+    test('toggling sound off silences move sounds without re-joining the game [F2]', async () => {
         await renderGame()
+        const registrations = socket.on.mock.calls.length
         click(screen.getAllByTitle('Toggle sound')[0])
-        // LEGACY: soundOn is a dependency of the socket effect, so it re-joins
-        expect(socket.emit.mock.calls.slice(-1)).toEqual([['join_game', 'g1']])
+        // Was (LEGACY): soundOn was a dependency of the socket effect, so toggling re-emitted join_game.
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         expect(sounds.playMoveSound).not.toHaveBeenCalled()
+        click(screen.getAllByTitle('Toggle sound')[0])
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
+        expect(sounds.playMoveSound).toHaveBeenCalledTimes(1)
     })
 })
