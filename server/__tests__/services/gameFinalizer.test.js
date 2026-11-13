@@ -7,6 +7,8 @@ const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
 const { fakeEmitter, fakeGameStore, result } = require('./fakes');
 const { makeGame } = require('../helpers/fixtures');
 const { log } = require('../../src/observability/log');
+const { fakeResultOutbox } = require('./fakeResultOutbox');
+const { setErrorReporter } = require('../../src/observability/errorReporter');
 
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/);
@@ -25,8 +27,19 @@ function setup(game = makeGame({ id: 'g' })) {
     const reviewService = { triggerGameReview: jest.fn() };
     const sleeps = [];
     const sleep = async (ms) => void sleeps.push(ms);
-    const finalizer = createGameFinalizer({ gameStore, gamesRepo, ratingService, reviewService, sessions, emitter, now: () => NOW, sleep });
-    return { finalizer, sleeps, gameStore, emitter, sessions, gamesRepo, ratingService, reviewService };
+    const resultOutbox = fakeResultOutbox({ now: () => NOW });
+    const finalizer = createGameFinalizer({
+        gameStore,
+        gamesRepo,
+        ratingService,
+        reviewService,
+        sessions,
+        emitter,
+        resultOutbox,
+        now: () => NOW,
+        sleep,
+    });
+    return { finalizer, sleeps, gameStore, emitter, sessions, gamesRepo, ratingService, reviewService, resultOutbox };
 }
 
 beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
@@ -322,16 +335,63 @@ describe('failures while a game is being finished [ERRORS]', () => {
         expect(ctx.reviewService.triggerGameReview).toHaveBeenCalledTimes(1);
     });
 
-    test('the retries are bounded; a game that cannot be persisted is logged with its id, and not rated', async () => {
+    test('the retries are bounded; a game that cannot be persisted is queued in the outbox for re-drive, and not rated yet [ERRORS]', async () => {
         const ctx = setup();
         ctx.gamesRepo.finishIfActive.mockReturnValue(result(null, { message: 'db down' }));
         expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
 
         expect(ctx.gamesRepo.finishIfActive).toHaveBeenCalledTimes(3);
-        expect(log.error).toHaveBeenCalledWith('[finalizer] game g: result not persisted after 3 attempts:', 'db down');
+        // Was: only logged ('... after 3 attempts:'), and the row stayed 'active' for good (F-042).
+        expect(log.error).toHaveBeenCalledWith(
+            '[finalizer] game g: result not persisted after 3 attempts, queued for re-drive:',
+            'db down',
+        );
+        const row = ctx.gamesRepo.finishIfActive.mock.calls[0][1];
+        expect(await ctx.resultOutbox.due(NOW + 4999, 10)).toEqual([]);
+        expect(await ctx.resultOutbox.due(NOW + 5000, 10)).toEqual([
+            {
+                gameId: 'g',
+                row,
+                outcome: 'white',
+                whiteId: 'white-user',
+                blackId: 'black-user',
+                timeControl: expect.anything(),
+                isRated: expect.any(Boolean),
+                moveLog: expect.any(Array),
+                attempts: 0,
+                firstFailedAt: NOW,
+                lastError: 'db down',
+            },
+        ]);
         expect(ctx.ratingService.processGameEnd).not.toHaveBeenCalled();
         // The players were told: the game IS over (Redis is committed); only the record is missing.
         expect(ctx.emitter.named('game_end')).toHaveLength(1);
+    });
+
+    test('if the outbox cannot take it either, the loss is logged at fatal and reported [ERRORS] (SEC-12)', async () => {
+        const ctx = setup();
+        const report = jest.fn(async () => {});
+        setErrorReporter({ report });
+        try {
+            ctx.gamesRepo.finishIfActive.mockReturnValue(result(null, { message: 'db down' }));
+            ctx.resultOutbox.enqueue = jest.fn(async () => Promise.reject(new Error('redis down')));
+            expect(await ctx.finalizer.endGame('g', verdict)).toBe(true);
+            expect(log.fatal).toHaveBeenCalledWith(
+                '[finalizer] game g: result not persisted after 3 attempts and could not be queued for re-drive:',
+                'redis down',
+            );
+            expect(report).toHaveBeenCalledWith(expect.any(Error), { level: 'fatal', where: 'finalizer', gameId: 'g' });
+        } finally {
+            setErrorReporter(undefined);
+        }
+    });
+
+    test('without an outbox (older wiring) the failure is only logged, as before', async () => {
+        const ctx = setup();
+        const finalizer = createGameFinalizer({ ...ctx, resultOutbox: undefined, now: () => NOW, sleep: async () => {} });
+        ctx.gamesRepo.finishIfActive.mockReturnValue(result(null, { message: 'db down' }));
+        expect(await finalizer.endGame('g', verdict)).toBe(true);
+        expect(log.error).toHaveBeenCalledWith('[finalizer] game g: result not persisted after 3 attempts:', 'db down');
     });
 
     test('a thrown database call is retried like an error result', async () => {

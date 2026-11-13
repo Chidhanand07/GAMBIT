@@ -8,13 +8,17 @@
  * transition, so of any number of concurrent callers only one proceeds to
  * broadcast. The database update is guarded the same way (`status = 'active'`),
  * so the rating and the review run once even if the clock path got there first.
+ *
+ * A row that still cannot be written after the retries goes to the result
+ * outbox; a worker writes it later and then rates the game (ADR F-066).
  */
 const { clocksAt } = require('../domain/clock');
 const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
+const { resultJob, applyResultEffects } = require('./gameResultEffects');
+const { backoffMs, DEFAULT_REDRIVE_POLICY } = require('../domain/redrivePolicy');
 const { log } = require('../observability/log');
-
-const DEFAULT_TIME_CONTROL = '10';
+const { reportError } = require('../observability/errorReporter');
 /** How often the finished row is written before giving up, and the pauses in between. */
 const PERSIST_ATTEMPTS = 3;
 const PERSIST_BACKOFF_MS = Object.freeze([200, 800]);
@@ -32,6 +36,8 @@ const PERSIST_BACKOFF_MS = Object.freeze([200, 800]);
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {{ clearGame: (gameId: string) => void }} sessions
  * @property {import('./emitter').Emitter} emitter
+ * @property {Pick<import('../repositories/gameResultOutboxRepository').ResultOutbox, 'enqueue'>} [resultOutbox]
+ *   where a row that cannot be written goes (without it, the failure is only logged)
  * @property {() => number} [now]
  * @property {(ms: number) => Promise<unknown>} [sleep] waits between database retries (injected in tests)
  */
@@ -58,15 +64,12 @@ function finishedRow(game, outcome) {
 
 /**
  * Write the finished row, retrying a failed write a bounded number of
- * times with growing pauses. A result that still cannot be written is
- * logged with the game id; the game stays finished for the players (Redis
- * is committed) but is not rated, because the rating must not run without
- * the row that makes it idempotent.
+ * times with growing pauses.
  * @param {{ gamesRepo: { finishIfActive: Function }, sleep: (ms: number) => Promise<unknown> }} deps
  * @param {string} gameId
  * @param {object} row
- * @returns {Promise<unknown>} the updated row when this call won the transition; null when the
- *   game was already finalized or could not be persisted
+ * @returns {Promise<{ written: true, updated: unknown } | { written: false, error: string }>} `updated`:
+ *   the row when this call won the transition, null when the game was already finalized
  */
 async function writeResult({ gamesRepo, sleep }, gameId, row) {
     let lastError = '';
@@ -74,14 +77,41 @@ async function writeResult({ gamesRepo, sleep }, gameId, row) {
         if (attempt > 0) await sleep(PERSIST_BACKOFF_MS[attempt - 1]);
         try {
             const { data, error } = await gamesRepo.finishIfActive(gameId, row);
-            if (!error) return data;
+            if (!error) return { written: true, updated: data };
             lastError = error.message;
         } catch (e) {
             lastError = /** @type {Error} */ (e).message;
         }
     }
-    log.error(`[finalizer] game ${gameId}: result not persisted after ${PERSIST_ATTEMPTS} attempts:`, lastError);
-    return null;
+    return { written: false, error: lastError };
+}
+
+/**
+ * A result that could not be written: the game stays finished for the players (Redis is
+ * committed) and is not rated now, because the rating must not run without the row that makes
+ * it idempotent. It goes to the outbox, whose worker writes and rates it later (F-066). If even
+ * that fails the result exists only in Redis: logged at fatal and reported (SEC-12).
+ * @param {{ resultOutbox?: Pick<import('../repositories/gameResultOutboxRepository').ResultOutbox, 'enqueue'>,
+ *   now: () => number }} deps
+ * @param {import('./gameResultEffects').ResultJob} job
+ * @param {object} row
+ * @param {string} lastError
+ */
+async function queueForRedrive({ resultOutbox, now }, job, row, lastError) {
+    const prefix = `[finalizer] game ${job.gameId}: result not persisted after ${PERSIST_ATTEMPTS} attempts`;
+    if (!resultOutbox) {
+        log.error(`${prefix}:`, lastError);
+        return;
+    }
+    const at = now();
+    const item = { ...job, row, attempts: 0, firstFailedAt: at, lastError };
+    try {
+        await resultOutbox.enqueue(item, at + backoffMs(0, DEFAULT_REDRIVE_POLICY));
+        log.error(`${prefix}, queued for re-drive:`, lastError);
+    } catch (e) {
+        log.fatal(`${prefix} and could not be queued for re-drive:`, /** @type {Error} */ (e).message);
+        await reportError(e, { level: 'fatal', where: 'finalizer', gameId: job.gameId });
+    }
 }
 
 /**
@@ -121,6 +151,7 @@ function createGameFinalizer({
     reviewService,
     sessions,
     emitter,
+    resultOutbox,
     now = () => Date.now(),
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
@@ -132,18 +163,13 @@ function createGameFinalizer({
      * @param {Outcome} outcome
      */
     async function persist(gameId, game, outcome) {
-        const updated = await writeResult({ gamesRepo, sleep }, gameId, finishedRow(game, outcome));
-        // An aborted game was never played: nothing to review, nothing to rate.
-        if (!updated || outcome === 'aborted') return;
-
-        const timeControl = game.timeControl ?? DEFAULT_TIME_CONTROL;
-        // Full Game Review in the engine (depth-18 Stockfish per move); fire-and-forget.
-        reviewService.triggerGameReview(gameId, game.moveLog, timeControl);
-
-        const { whiteId, blackId } = game;
-        const isRated = game.isRated ?? false;
-        const changes = await ratingService.processGameEnd(gameId, whiteId, blackId, outcome, timeControl, isRated);
-        if (changes) emitter.toRoom(gameRoom(gameId), 'rating_updated', changes);
+        const row = finishedRow(game, outcome);
+        const job = resultJob(gameId, game, outcome);
+        const write = await writeResult({ gamesRepo, sleep }, gameId, row);
+        if (!write.written) return queueForRedrive({ resultOutbox, now }, job, row, write.error);
+        // Already finalized by someone else: they reviewed and rated it.
+        if (!write.updated) return;
+        await applyResultEffects({ ratingService, reviewService, emitter }, job, { review: true });
     }
 
     /**

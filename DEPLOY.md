@@ -201,6 +201,26 @@ replica count, **after** all of the following:
    deploy the frontend first, then scale.
 4. Start with 2 replicas, run the two-replica manual test in section 6, then scale further.
 
+### 4b-3. Game results the database did not take (result outbox)
+If Supabase is unreachable when a game ends, the server retries the `games` row 3 times, then
+keeps it in Redis (`{outbox}:item:<gameId>`) and a worker on one replica writes it later (every
+5 s, backoff 5 s doubling to 5 min) and then rates the game. Each try is logged
+(`[outbox] game <id>: ...`). After 12 failed tries, or one hour, the item is **parked**: a
+`fatal` log line `[outbox] game <id>: result still not persisted after N re-drives; parked for an
+operator` (and an error report if `ERROR_WEBHOOK_URL` is set). Parked items are kept until
+someone acts:
+
+```
+redis-cli -u "$REDIS_URL" ZRANGE '{outbox}:parked' 0 -1          # which games
+redis-cli -u "$REDIS_URL" GET '{outbox}:item:<gameId>'            # the row, last error, attempts
+# Fix the cause, then queue it again (one more try; it parks again if it still fails):
+redis-cli -u "$REDIS_URL" ZREM '{outbox}:parked' '<gameId>'
+redis-cli -u "$REDIS_URL" ZADD '{outbox}:due' 0 '<gameId>'
+```
+
+Re-driving is safe to repeat: the row is written only while it is still `active`, and the rating
+function applies a game once.
+
 ### 4c. Get the URL
 After deploy → **Settings → Domains** → generate a Railway domain e.g. `https://gambit-server.up.railway.app`
 This becomes `NEXT_PUBLIC_SOCKET_URL` in the frontend.

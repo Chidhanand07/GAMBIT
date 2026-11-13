@@ -23,9 +23,11 @@ src/domain/          pure functions: timeControl, clock, gameState, result, pgn,
                      rating/glicko, matchmaking/pairing  (no I/O, 100% unit-tested)
 src/clients/         engineClient (fetch), supabaseClient, redisClient
 src/repositories/    gameState (Redis + per-game lock, atomic mutateGame), pendingRequests
-                     (Redis, 60 s TTL), games, moves, messages, profiles, notifications
+                     (Redis, 60 s TTL), games, moves, messages, profiles, notifications,
+                     gameResultOutbox (Redis: results waiting for a database write)
 src/services/        game, moveRecorder, gameFinalizer, tokenVerifier, clock, matchmaking,
-                     rating, privateGame, social, chat, review, analysis, profile;
+                     rating, privateGame, social, chat, review, analysis, profile,
+                     resultOutboxWorker (re-drives results the database refused);
                      emitter port over io
 src/http/            app.js (express + cors), routes/*, middleware/requireUser.js
 src/sockets/         index.js, auth.js (handshake token → socket.data.userId),
