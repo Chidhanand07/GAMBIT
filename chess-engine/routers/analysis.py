@@ -41,6 +41,10 @@ def build_router(seams: EngineSeams) -> APIRouter:
 
     @router.post("/analyse-game")
     def analyse_game(req: GameAnalysisReq, bg_tasks: BackgroundTasks):
+        # Nothing to review (empty, not PGN, no legal move): refuse instead of queueing.
+        if review_service.parse_game_with_moves(req.pgn) is None:
+            raise HTTPException(status_code=422, detail="PGN has no moves")
+
         # Quick check engine is available without holding a pool slot
         sf_check = seams.get_stockfish_instance(1)
         if not sf_check:

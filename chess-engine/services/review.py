@@ -21,7 +21,6 @@ BOOK_MAX_PLY = 8
 BOOK_MAX_LOSS = 40
 BOOK_CLASSES = ("Best", "Excellent", "Good")
 CRITICAL_CLASSES = ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]
-NO_MOVES_ACCURACY = 100.0
 
 # Outcomes of `game_review_status`.
 COMPLETED_STATUS = "completed"
@@ -29,6 +28,26 @@ REVIEW_OK = "ok"
 REVIEW_GAME_NOT_FOUND = "not_found"
 REVIEW_GAME_NOT_COMPLETED = "not_completed"
 REVIEW_UNAVAILABLE = "unavailable"
+
+# Outcomes of `run_full_game_analysis`. Only ANALYSIS_SAVED means a review was written.
+ANALYSIS_SAVED = "saved"
+ANALYSIS_NO_MOVES = "no_moves"
+ANALYSIS_ENGINE_UNAVAILABLE = "engine_unavailable"
+ANALYSIS_NOT_SAVED = "not_saved"
+
+
+def parse_game_with_moves(pgn: str) -> chess.pgn.Game | None:
+    """
+    The game in `pgn`, or None when there is not a single move to review.
+
+    python-chess is lenient: text that is not PGN at all still parses to an
+    empty game. Empty input, non-PGN input, headers without moves and a game
+    whose first move is illegal all answer None, so no review is made up for them.
+    """
+    game = chess.pgn.read_game(io.StringIO(pgn))
+    if game is None or game.next() is None:
+        return None
+    return game
 
 
 def _score_ply(sf: Any, board: chess.Board, move: chess.Move, ply: int) -> dict:
@@ -67,8 +86,9 @@ def _critical_moment(entry: dict, player_color: chess.Color) -> dict:
     }
 
 
-def _average_accuracy(accuracies: list) -> float:
-    return round(sum(accuracies) / len(accuracies), 1) if accuracies else NO_MOVES_ACCURACY
+def _average_accuracy(accuracies: list) -> float | None:
+    """Mean per-move accuracy; None (not a perfect 100) for a side that made no move."""
+    return round(sum(accuracies) / len(accuracies), 1) if accuracies else None
 
 
 def _review_game(sf: Any, game: chess.pgn.Game) -> dict:
@@ -122,29 +142,41 @@ def game_review_status(seams: EngineSeams, game_id: str) -> str:
     return REVIEW_OK if rows[0].get("status") == COMPLETED_STATUS else REVIEW_GAME_NOT_COMPLETED
 
 
-def _save_review(seams: EngineSeams, game_id: str, update: dict) -> None:
+def _save_review(seams: EngineSeams, game_id: str, update: dict) -> bool:
+    """Write the review; True only when the update was sent without an error."""
     db = seams.supabase
-    if db:
-        try:
-            # The status filter repeats the pre-check: a review never lands on an unfinished game.
-            db.table("games").update(update).eq("id", game_id).eq("status", COMPLETED_STATUS).execute()
-            # Note: the eval graph is derived client-side from each move entry's
-            # `eval_white`, so no separate `eval_graph` column is required.
-        except Exception as e:
-            print("Failed to save analysis to supabase:", e)
+    if not db:
+        return False
+    try:
+        # The status filter repeats the pre-check: a review never lands on an unfinished game.
+        db.table("games").update(update).eq("id", game_id).eq("status", COMPLETED_STATUS).execute()
+        # Note: the eval graph is derived client-side from each move entry's
+        # `eval_white`, so no separate `eval_graph` column is required.
+    except Exception as e:
+        print("Failed to save analysis to supabase:", e)
+        return False
+    return True
 
 
-def run_full_game_analysis(game_id: str, pgn: str, seams: EngineSeams) -> None:
-    """Analyse every move of `pgn` and write the review to `games` (id = game_id)."""
+def run_full_game_analysis(game_id: str, pgn: str, seams: EngineSeams) -> str:
+    """
+    Analyse every move of `pgn` and write the review to `games` (id = game_id).
+
+    Returns one of the ANALYSIS_* values. A game without moves is never
+    written: there is nothing to score, and an empty review used to store
+    100 / 100 accuracy (G21).
+    """
     sf = seams.get_stockfish_instance(depth=REVIEW_DEPTH)
     if not sf:
         print(f"Skipping analysis for {game_id}, engine unavailable")
-        return
+        return ANALYSIS_ENGINE_UNAVAILABLE
     # Note: sf is already acquired from pool; release in finally below
     try:
-        game = chess.pgn.read_game(io.StringIO(pgn))
-        if not game:
-            return
-        _save_review(seams, game_id, _review_game(sf, game))
+        game = parse_game_with_moves(pgn)
+        if game is None:
+            print(f"Skipping analysis for {game_id}, PGN has no moves")
+            return ANALYSIS_NO_MOVES
+        saved = _save_review(seams, game_id, _review_game(sf, game))
+        return ANALYSIS_SAVED if saved else ANALYSIS_NOT_SAVED
     finally:
         seams.release_stockfish_instance(sf)

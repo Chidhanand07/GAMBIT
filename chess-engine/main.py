@@ -38,9 +38,9 @@ if SUPABASE_URL and SUPABASE_KEY:
 _seams: EngineSeams = sys.modules[__name__]  # type: ignore[assignment]
 
 
-def run_full_game_analysis(game_id: str, pgn: str) -> None:
-    """Background task for POST /analyse-game (see services/review.py)."""
-    review.run_full_game_analysis(game_id, pgn, _seams)
+def run_full_game_analysis(game_id: str, pgn: str) -> str:
+    """Background task for POST /analyse-game (see services/review.py); returns its ANALYSIS_* outcome."""
+    return review.run_full_game_analysis(game_id, pgn, _seams)
 
 
 # No /docs, /redoc or /openapi.json: the engine is a private backend (ENG-AUTH).
