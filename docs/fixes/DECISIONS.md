@@ -64,6 +64,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
 | [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
 | [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
+| [F-044](#f-044) | Stale-game detection reads the last move from `moves`, lazily; a failed read keeps the game | M2 | G22 |
 
 ---
 
@@ -1570,3 +1571,31 @@ instead of one file per ADR under `docs/refactor/adr/`.
   challenge page and the challenge banner (`challenge_request` / `_accept` / `_decline`) and the
   lobby's automatic re-queue after a reconnect still emit without an ack. No timeout is set on
   acks: if the server never answers, nothing is shown (as before).
+
+## F-044
+
+**Stale-game detection uses the time of the last move, read from `moves` only when needed; a failed read keeps the game (G22).**
+
+- **Context.** `GET /api/games/active` closes an "active" game that is evidently dead. "Has
+  moves" was read from `white_time_ms` / `black_time_ms`, which were only written at a
+  disconnect and are not written at all since F-028, so every active game older than two hours
+  was auto-abandoned, mid-play included.
+- **Options.** (a) infer "has moves" from `white_clock_ms` / `black_clock_ms` being non-null:
+  says a move happened, not when; (b) the newest `moves.created_at`, queried always; (c) the
+  same, queried only when the game started more than 2 h ago.
+- **Decision.** (c). `lib/server/games.ts` `findLastMove(admin, gameId)`; `isStaleActiveGame`
+  is async. Last activity = the newest move, else `started_at`; stale when that is older than
+  the existing 2 h threshold. The `clock_deadline` branch is unchanged. A failed moves read
+  keeps the game (abandonment is irreversible, SEC-09). No migration.
+- **Why.** A game younger than the threshold cannot be stale, so the common path costs no
+  extra query and the worst case one.
+- **Consequences.** A game whose last move is more than 2 h old is now closed by this route
+  (before, in intent, a game with any move was kept forever). The legacy fields are removed
+  from the column list and the `Game` type.
+- **Not verified.** The `moves` query shape is asserted against the mock only; whether
+  `(game_id, created_at)` is indexed in production was not checked. The server's move insert
+  is fire-and-forget (it logs on failure), so a game whose move rows failed to insert can look
+  idle.
+- *Implemented on a side branch by a helper agent (`wip/medium-web`, commit `44cfb7f`) and
+  cherry-picked here; tests updated: three `GET /api/games/active` fixtures now express "has
+  moves" as a `moves` row instead of `*_time_ms`.*
