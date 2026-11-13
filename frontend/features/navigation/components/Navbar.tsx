@@ -54,10 +54,9 @@ export default function Navbar() {
     const router = useRouter();
     const pathname = usePathname();
     const menus = useNavbarMenus();
-    const notifs = useNotifications();
-
     // Use shared profile context — keeps auth state in sync with ProfileProvider
     const { profile, loading: authLoading } = useProfile();
+    const notifs = useNotifications(profile?.id);
     const user = profile ? { id: profile.id } : null;
     const challenge = useChallengeBanner(profile);
 
@@ -82,6 +81,7 @@ export default function Navbar() {
                 onToggle={toggleNotifications}
                 notifications={notifs.notifications}
                 loading={notifs.loading}
+                error={notifs.error}
                 hasUnread={notifs.hasUnread}
                 onMarkAllRead={() => void notifs.markAllRead()}
             />
