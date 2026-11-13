@@ -1887,3 +1887,51 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **The Dockerfile runs `node server.js` directly** (M1), so SIGTERM reaches Node rather than
   stopping at `npm`.
 - **Not verified.** No real Railway deploy; Railway's drain window was not measured.
+
+## F-057
+
+**Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list (SUPPLY-CHAIN).**
+
+- **Dependabot** (`.github/dependabot.yml`): npm `/server`, npm `/frontend`, pip `/chess-engine`,
+  github-actions `/`; weekly (Mondays 06:00 UTC); one grouped minor+patch PR per ecosystem,
+  majors individually; at most 5 open PRs per npm/pip entry, 3 for actions; target `preprod`.
+  Security-update PRs ignore `target-branch` and open against the default branch: retarget them
+  by hand.
+- **CodeQL** (`.github/workflows/codeql.yml`): `javascript-typescript` and `python`,
+  `build-mode: none`, `security-extended` queries, on PRs, pushes to `main`/`preprod` and weekly;
+  `security-events: write` on that job only. *Deviation from GIT-06* ("default setup"): a
+  workflow file keeps triggers and queries reviewable in the repo; default setup and a workflow
+  cannot both be on, so keep the repository on advanced setup.
+- **Dependency audit** (`.github/workflows/dependency-audit.yml`, job `Dependency audit`):
+  `npm audit --omit=dev --audit-level=high` (server, frontend) and `pip-audit -r requirements.txt`
+  (engine), through `scripts/dependency-audit.js`, which subtracts approved exceptions from
+  `.github/dependency-audit-allowlist.json`. An exception needs `id`, `scope`, a reason of at
+  least 20 characters, `approvedBy` and an `expires` date at most 90 days ahead; an invalid or
+  expired entry fails the job; an audit that cannot run fails closed. pip-audit reports no
+  severity, so the engine gate fails on **any** known vulnerability (stricter than SEC-11).
+  Runs on every PR, pushes, Mondays and on demand; it is a separate workflow so it does not
+  lengthen the test jobs (TEST-10).
+- **State at the time of writing.** The audit is **red**: the server lockfile had 29 blocking
+  advisories (28 high, 1 critical), the frontend 4 high, all transitive (ws, socket.io-parser,
+  axios, body-parser, qs, …). Some are fixed by this phase's upgrades (Express 5, Next 16), the
+  rest need dependency bumps that Dependabot will propose. Re-run after merging and either
+  upgrade or add dated exceptions.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-058
+
+**Schema drift is checked against the linked Supabase project on a schedule, not on every PR (SCHEMA-DRIFT).**
+
+- `scripts/schema-drift.sh` runs `supabase db diff` against the remote project for schema
+  `public` (`--remote` on CLI v3+, where `--linked` is deprecated; `--linked` on 2.x; overridable
+  with `SCHEMA_DRIFT_TARGET` / `SCHEMA_DRIFT_SCHEMAS`). Any non-comment line in the diff is drift:
+  exit 1 and the SQL is printed; exit 2 when the check cannot run. `supabase migration list` is
+  printed for information.
+- `.github/workflows/schema-drift.yml` (job `Schema drift (Supabase)`): daily and on manual
+  dispatch only, because it needs `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
+  `SUPABASE_PROJECT_REF`; without them it passes with a "skipped" notice. Do not make it a
+  required check. The manual command is in DEPLOY.md.
+- **Not verified.** The real CLI never ran here (no Docker, CLI download not permitted); flags
+  were taken from the CLI v3.1 reference. `supabase link` writes `supabase/.temp/`, which is not
+  git-ignored. Run the workflow once by hand after adding the secrets.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
