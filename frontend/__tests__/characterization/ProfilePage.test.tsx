@@ -184,17 +184,27 @@ describe('header and overview tab', () => {
         expect(screen.queryByText('Win rate')).not.toBeInTheDocument()
     })
 
-    test('rating cards show rounded ratings, "—" for missing, and Peak = CURRENT rating (peak_* ignored)', async () => {
+    // F12 (was: 'Peak = CURRENT rating (peak_* ignored)', asserting 'Peak 1100/1251/1400/—'):
+    // Peak reads peak_<category>, never below the current rating, and is hidden when unknown.
+    test('rating cards show rounded ratings, "—" for missing, and Peak from peak_*', async () => {
         await renderProfile()
         expect(screen.getByText('1100')).toBeInTheDocument()
         expect(screen.getByText('1251')).toBeInTheDocument()
         expect(screen.getByText('1400')).toBeInTheDocument()
-        // LEGACY: "Peak" renders tc.rating, not tc.peak
+        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1350')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1500')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1600')).toBeInTheDocument()
+        expect(screen.queryByText('Peak 1100')).not.toBeInTheDocument()
+    })
+
+    test('F12: Peak is never below the current rating and is hidden when the profile has no peak', async () => {
+        routes['/api/profile/bob'] = {
+            ...BOB, peak_bullet: 900, peak_blitz: null, peak_rapid: undefined, peak_classical: undefined,
+        }
+        await renderProfile()
         expect(screen.getByText('Peak 1100')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1251')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1400')).toBeInTheDocument()
-        expect(screen.getByText('Peak —')).toBeInTheDocument()
-        expect(screen.queryByText('Peak 1300')).not.toBeInTheDocument()
+        expect(screen.getAllByText(/^Peak/)).toHaveLength(1)
     })
 
     test('record shows wins / losses / draws and rounded win rate', async () => {
