@@ -80,11 +80,12 @@ test('a match sends the player to the game page', async () => {
     expect(push).toHaveBeenCalledWith('/game/game-77')
 })
 
-test('signed-out visitors are sent to log in instead of queueing', async () => {
+test('signed-out visitors are sent to log in, and back to the lobby afterwards, instead of queueing [F10]', async () => {
     profile = null
     render(<LobbyPage />)
     await userEvent.click(screen.getByText('Play Online'))
-    expect(push).toHaveBeenCalledWith('/login')
+    // Was: '/login' with no redirect, so signing in landed on the default page.
+    expect(push).toHaveBeenCalledWith('/login?redirect=%2Flobby')
     expect(joinQueueCalls()).toHaveLength(0)
 })
 

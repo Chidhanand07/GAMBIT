@@ -21,6 +21,9 @@ import { useMatchFailedToast, useQueueRefusedToast } from '@/features/lobby/hook
 import { useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
 import { usePrivateGame } from '@/features/lobby/hooks/usePrivateGame';
 import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSelection';
+import { loginHref } from '@/features/lobby/loginRedirect';
+
+const LOBBY_PATH = '/lobby';
 
 const KnightBackground = dynamic(() => import('@/components/ui/KnightBackground'), { ssr: false });
 
@@ -57,7 +60,7 @@ export default function LobbyPage() {
     // Play Online queues the selected control ("<min>+<inc>"); useMatchmaking builds the payload.
     const handlePlayOnline = () => {
         if (!myProfile || !socket) {
-            router.push('/login');
+            router.push(loginHref(LOBBY_PATH));
             return;
         }
         if (activeGame) {
