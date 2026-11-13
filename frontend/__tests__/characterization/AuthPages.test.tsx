@@ -228,6 +228,21 @@ describe('login', () => {
         expect(screen.getByText('Google sign-in failed. Please try again.')).toBeInTheDocument()
     })
 
+    test.each([
+        ['oauth_failed', 'Google sign-in failed. Please try again.'],
+        ['no_code', 'Google sign-in failed. Please try again.'],
+        ['Some <b>raw</b> provider text', 'Sign-in failed. Please try again.'],
+    ])('F17: ?error=%j from the OAuth callback is shown, not dropped', (code, message) => {
+        searchParams = new URLSearchParams({ error: code, redirect: '/game/1' })
+        window.history.replaceState(null, '', `/login?${searchParams}`)
+        const { container } = render(<LoginPage />)
+        expect(screen.getByText(message)).toBeInTheDocument()
+        expect(window.location.search).toBe('?redirect=%2Fgame%2F1')
+        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: 'a' } })
+        expect(screen.queryByText(message)).not.toBeInTheDocument()
+        window.history.replaceState(null, '', '/')
+    })
+
     test('static content and links', () => {
         render(<LoginPage />)
         expect(screen.getByText('Welcome Back')).toBeInTheDocument()
