@@ -127,6 +127,14 @@ describe('settings page', () => {
         expect(push.mock.calls).toEqual([['/login']])
     })
 
+    test('F17: the signed-out redirect runs once, from an effect, not on every render', () => {
+        profileState = { profile: null, loading: false, refetch: jest.fn() }
+        const { rerender } = render(<SettingsPage />)
+        rerender(<SettingsPage />)
+        rerender(<SettingsPage />)
+        expect(push.mock.calls).toEqual([['/login']])
+    })
+
     test('form is prefilled from the profile and saves trimmed values with PATCH', async () => {
         jest.useFakeTimers()
         render(<SettingsPage />)
