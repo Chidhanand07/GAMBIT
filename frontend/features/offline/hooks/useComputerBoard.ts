@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { Move } from 'chess.js';
 import { playGameEndSound } from '@/lib/sounds';
-import { playSoundForMove, undoToPlayerTurn } from '../game';
+import { playerMoveCount, playSoundForMove, undoToPlayerTurn } from '../game';
 import { handleSquareClick } from '../squareClick';
 import type { Difficulty, Side } from '../types';
 import { useChessPosition } from './useChessPosition';
@@ -19,13 +19,11 @@ export function useComputerBoard(difficulty: Difficulty) {
     const [resigned, setResigned] = useState(false);
 
     const selection = usePieceSelection(game, playerColor);
-    const { thinking, engineError, setEngineError, maverickMove } = useMaverickMove({
-        game,
-        difficulty,
-        refresh,
-        setLastMove,
-    });
+    const engine = useMaverickMove({ game, difficulty, refresh, setLastMove });
+    const { thinking, engineError, clearEngineError, maverickMove } = engine;
     const gameOver = game.isGameOver() || resigned;
+    /** Takeback needs a move of the player's to undo (F13). */
+    const canTakeBack = playerMoveCount(game, playerColor) > 0 && !thinking;
 
     const onPlayerMove = (result: Move) => {
         selection.clearSelection();
@@ -39,10 +37,11 @@ export function useComputerBoard(difficulty: Difficulty) {
         handleSquareClick({ game, playerColor, blocked: gameOver || thinking, selection, onPlayerMove }, square);
 
     const undoMove = () => {
-        if (thinking) return;
+        if (!canTakeBack) return;
         // Undo both MAVERICK's reply and your move so it's your turn again.
         const last = undoToPlayerTurn(game, playerColor);
         selection.clearSelection();
+        clearEngineError();
         setResigned(false);
         setLastMove(last);
         refresh();
@@ -64,13 +63,21 @@ export function useComputerBoard(difficulty: Difficulty) {
             clearSelection();
             setLastMove(null);
             setResigned(false);
-            setEngineError(null);
+            clearEngineError();
             refresh();
         },
-        [game, clearSelection, setLastMove, setEngineError, refresh],
+        [game, clearSelection, setLastMove, clearEngineError, refresh],
     );
 
-    const state = { game, playerColor, moveHistory, lastMove, resigned, thinking, engineError, gameOver };
+    const state = { game, playerColor, moveHistory, lastMove, resigned, thinking, engineError, gameOver, canTakeBack };
     const actions = { maverickMove, handleSquareClick: onSquareClick, undoMove, resign, resetBoard };
-    return { ...state, selectedSquare: selection.selectedSquare, legalMoves: selection.legalMoves, ...actions };
+    const { selectedSquare, legalMoves } = selection;
+    return {
+        ...state,
+        ...actions,
+        canRetryEngine: engine.canRetry,
+        retryEngine: engine.retry,
+        selectedSquare,
+        legalMoves,
+    };
 }

@@ -7,7 +7,7 @@ jest.mock('@/lib/sounds', () => ({
     playGameEndSound: jest.fn(),
 }))
 import * as sounds from '@/lib/sounds'
-import { playSoundForMove, resolveColor, resultText, tryMove, undoToPlayerTurn } from '@/features/offline/game'
+import { playerMoveCount, playSoundForMove, resolveColor, resultText, tryMove, undoToPlayerTurn } from '@/features/offline/game'
 import { handleSquareClick, type SquareClickContext } from '@/features/offline/squareClick'
 import { requestMaverickMove } from '@/lib/api/offline'
 
@@ -68,6 +68,37 @@ describe('undoToPlayerTurn', () => {
         expect(undoToPlayerTurn(g, 'w')).toEqual({ from: 'e7', to: 'e5' })
         const empty = new Chess()
         expect(undoToPlayerTurn(empty, 'w')).toBeNull()
+    })
+})
+
+describe('undoToPlayerTurn as Black [F13]', () => {
+    test('with only MAVERICK\'s opening move there is nothing of mine to take back: no-op', () => {
+        const g = new Chess()
+        g.move('e4')
+        // Was: undid e4 and left White (MAVERICK) to move with nobody asking it to: stuck.
+        expect(undoToPlayerTurn(g, 'b')).toEqual({ from: 'e2', to: 'e4' })
+        expect(g.history()).toEqual(['e4'])
+        expect(g.turn()).toBe('b')
+    })
+
+    test('after MAVERICK replied: back to my turn, its opening move kept', () => {
+        const g = new Chess()
+        g.move('e4'); g.move('e5'); g.move('Nf3')
+        expect(undoToPlayerTurn(g, 'b')).toEqual({ from: 'e2', to: 'e4' })
+        expect(g.history()).toEqual(['e4'])
+        g.move('e5')
+        expect(undoToPlayerTurn(g, 'b')).toEqual({ from: 'e2', to: 'e4' }) // reply never came
+        expect(g.turn()).toBe('b')
+    })
+
+    test('playerMoveCount counts only my moves', () => {
+        const g = new Chess()
+        expect(playerMoveCount(g, 'b')).toBe(0)
+        g.move('e4')
+        expect(playerMoveCount(g, 'b')).toBe(0)
+        expect(playerMoveCount(g, 'w')).toBe(1)
+        g.move('e5')
+        expect(playerMoveCount(g, 'b')).toBe(1)
     })
 })
 

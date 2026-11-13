@@ -24,9 +24,10 @@ function makeCtx(over: Partial<SocketHandlerContext> = {}) {
         markReconnected: jest.fn(),
         ...over,
     }
-    const handlers = new Map(createGameSocketHandlers(ctx))
+    const subscription = createGameSocketHandlers(ctx)
+    const handlers = new Map(subscription.handlers)
     const fire = (event: string, payload?: unknown) => (handlers.get(event) as (p?: unknown) => void)(payload)
-    return { ctx, handlers, fire, dispatched: () => (ctx.dispatch as jest.Mock).mock.calls.map(([a]) => a) }
+    return { ctx, handlers, subscription, fire, dispatched: () => (ctx.dispatch as jest.Mock).mock.calls.map(([a]) => a) }
 }
 
 beforeEach(() => jest.clearAllMocks())
@@ -107,6 +108,23 @@ test('rematch_request shows the toast and expires it after exactly 30 s', () => 
     expect(dispatched()).toEqual([{ type: 'rematchReceived', fromUsername: 'Bob' }])
     jest.advanceTimersByTime(1)
     expect(dispatched()[1]).toEqual({ type: 'rematchExpired' })
+    jest.useRealTimers()
+})
+
+test('a second rematch_request restarts the 30 s expiry; dispose clears it [F3]', () => {
+    jest.useFakeTimers()
+    const { fire, dispatched, subscription } = makeCtx()
+    fire('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+    jest.advanceTimersByTime(20_000)
+    fire('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+    jest.advanceTimersByTime(29_999)
+    expect(dispatched().filter((a) => a.type === 'rematchExpired')).toEqual([])
+    jest.advanceTimersByTime(1)
+    expect(dispatched().filter((a) => a.type === 'rematchExpired')).toHaveLength(1)
+    fire('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+    subscription.dispose()
+    jest.advanceTimersByTime(30_000)
+    expect(dispatched().filter((a) => a.type === 'rematchExpired')).toHaveLength(1)
     jest.useRealTimers()
 })
 

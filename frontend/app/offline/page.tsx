@@ -5,6 +5,7 @@ import { resultText } from '@/features/offline/game';
 import { SetupScreen } from '@/features/offline/components/SetupScreen';
 import { ComputerBoard } from '@/features/offline/components/ComputerBoard';
 import {
+    EngineErrorBanner,
     GameActions,
     GameOverOverlay,
     MaverickHeader,
@@ -58,13 +59,15 @@ export default function ComputerPage() {
                     <PlayerFooter playerColor={playerColor} yourMove={game.turn() === playerColor && !gameOver} />
 
                     {engineError && (
-                        <div className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                            {engineError}
-                        </div>
+                        <EngineErrorBanner
+                            error={engineError}
+                            canRetry={board.canRetryEngine}
+                            onRetry={board.retryEngine}
+                        />
                     )}
 
                     <GameActions
-                        undoDisabled={moveHistory.length === 0 || thinking || gameOver}
+                        undoDisabled={!board.canTakeBack || gameOver}
                         gameOver={gameOver}
                         onUndo={board.undoMove}
                         onResign={board.resign}

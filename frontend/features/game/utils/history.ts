@@ -9,15 +9,20 @@ export interface StoredHistory {
 
 export const historyStorageKey = (gameId: string) => `gambit-game-${gameId}`;
 
-/** One step back from the viewed index (or from the live end); clamps at 0. */
+// Snapshots hold post-move FENs, so the last one is the live board (F6): stepping back from live
+// starts at the one before it, and stepping forward onto the last one returns to live.
+
+/** One step back from the viewed index (from live: the position before the last move); clamps at 0. */
 export function stepBackIndex(viewIndex: number | null, length: number): number {
-    return Math.max(0, (viewIndex ?? length) - 1);
+    const liveIndex = length - 1;
+    return Math.max(0, (viewIndex ?? liveIndex) - 1);
 }
 
-/** One step forward; past the last snapshot returns null (live). */
+/** One step forward; reaching the last snapshot (or already being live) returns null (live). */
 export function stepForwardIndex(viewIndex: number | null, length: number): number | null {
-    const next = (viewIndex ?? -1) + 1;
-    return next >= length ? null : next;
+    if (viewIndex === null) return null;
+    const next = viewIndex + 1;
+    return next >= length - 1 ? null : next;
 }
 
 export function saveHistory(key: string, history: Required<StoredHistory>): void {

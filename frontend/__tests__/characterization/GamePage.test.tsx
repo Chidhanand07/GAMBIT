@@ -101,15 +101,35 @@ describe('mount', () => {
         expect(fetchMock.mock.calls[0]).toEqual(['/api/games/g1'])
     })
 
-    test('emits join_game (never authenticate) on mount and AGAIN when my colour resolves (effect deps include myColor)', async () => {
+    test('emits join_game (never authenticate) exactly once per game, even after my colour resolves [F2]', async () => {
         await renderGame()
-        // LEGACY: the socket effect depends on myColor, so it re-runs once the
-        // game row says we are white, re-emitting the join.
+        // Was (LEGACY): the socket effect depended on myColor, so resolving the seat re-emitted the join.
         // S2: identity travels in the socket handshake, so no `authenticate` is emitted.
-        expect(socket.emit.mock.calls).toEqual([
-            ['join_game', 'g1'],
-            ['join_game', 'g1'],
-        ])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
+    })
+
+    test('a refreshed profile object (same user) does not re-join or re-register handlers [F2]', async () => {
+        const { rerender } = await renderGame()
+        const registrations = socket.on.mock.calls.length
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
+    })
+
+    test('a socket that is still connecting joins once, on connect, not twice [F2]', async () => {
+        socket.connected = false
+        await renderGame()
+        expect(socket.emitted('join_game')).toEqual([])
+        socket.connected = true
+        socket.serverSends('connect')
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+    })
+
+    test('handlers read the current seat: game_end after the seat resolved plays the win sound for white [F2]', async () => {
+        await renderGame()
+        socket.serverSends('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate' })
+        expect(sounds.playGameEndSound).toHaveBeenCalledWith(true)
     })
 
     test('signed-out viewer: no socket emits, but the game still loads as spectator', async () => {
@@ -160,6 +180,19 @@ describe('mount', () => {
         expect(screen.getByText('No moves yet')).toBeInTheDocument()
     })
 
+    test('spectators see no "You" badge on either strip [F4]', async () => {
+        profile = { ...ME, id: 'spectator-id' }
+        await renderGame()
+        expect(screen.queryByText('You')).not.toBeInTheDocument()
+    })
+
+    test('the "You" badge follows my strip when I flip the board [F4]', async () => {
+        await renderGame()
+        click(screen.getAllByTitle('Flip board')[0])
+        const badge = screen.getByText('You')
+        expect(badge.parentElement).toHaveTextContent('Alice')
+    })
+
     test('black player: board flipped, white on top', async () => {
         profile = { ...ME, id: 'opp' }
         await renderGame()
@@ -186,6 +219,44 @@ describe('mount', () => {
     test('start sound plays once for a fresh game', async () => {
         await renderGame()
         expect(sounds.playGameStartSound).toHaveBeenCalledTimes(1)
+    })
+
+    test('the game loads once per id: a refreshed profile object does not refetch it', async () => {
+        const { rerender } = await renderGame()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        await act(async () => {})
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    test('the loaded game reads the CURRENT sound setting: muted before the fetch resolves, no start sound', async () => {
+        let resolve!: (r: unknown) => void
+        fetchMock.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        await act(async () => { resolve(jsonResponse(gameRow)) })
+        await screen.findAllByText(/Alice|Bob/)
+        // Was: the fetch callback closed over the first render's soundOn (true) and played it.
+        expect(sounds.playGameStartSound).not.toHaveBeenCalled()
+    })
+
+    test('a profile that arrives after the game loaded still resolves my seat', async () => {
+        profile = null
+        const { rerender } = await renderGame()
+        expect(screen.getByText('Spectating')).toBeInTheDocument()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(screen.getByText('Your turn')).toBeInTheDocument()
+    })
+
+    test('restored history is read once per game id, not on every render', async () => {
+        const spy = jest.spyOn(Storage.prototype, 'getItem')
+        const { rerender } = await renderGame()
+        const reads = spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        expect(spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length).toBe(reads)
+        expect(reads).toBe(1)
     })
 
     test('a resumed game (non-start FEN) loads the position and skips the start sound', async () => {
@@ -549,21 +620,20 @@ describe('history navigation', () => {
         socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
     }
 
-    test('ArrowLeft steps into history (first press lands on the LAST snapshot = live position); ArrowRight past the end returns live', async () => {
+    test('the first ArrowLeft from live shows the position before the last move; ArrowRight returns live [F6]', async () => {
         await twoMoves()
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
-        // LEGACY: snapshots hold post-move FENs, so "move 2 of 2" is the live board
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        expect(pieceOn('e5')).toBe('bp')
-        fireEvent.keyDown(document, { key: 'ArrowLeft' })
+        // Was (LEGACY): snapshots hold post-move FENs, so the first press showed "move 2 of 2" = the live board.
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument()
         expect(pieceOn('e5')).toBeNull()
+        expect(pieceOn('e4')).toBe('wp')
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument() // clamps at 0
         fireEvent.keyDown(document, { key: 'ArrowRight' })
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        fireEvent.keyDown(document, { key: 'ArrowRight' })
         expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument()
+        expect(pieceOn('e5')).toBe('bp')
+        fireEvent.keyDown(document, { key: 'ArrowRight' })
+        expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument() // already live
     })
 
     test('arrow keys are ignored while typing in an input', async () => {
@@ -795,6 +865,28 @@ describe('game-over modal and rematch', () => {
         act(() => { jest.advanceTimersByTime(1) })
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
+
+    test('a second rematch request restarts the 30 s window instead of inheriting the first timer [F3]', async () => {
+        jest.useFakeTimers()
+        await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(20_000) })
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(10_000) }) // the first request's 30 s are up
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(19_999) })
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(1) })
+        expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
+    })
+
+    test('unmounting clears the pending rematch timer [F3]', async () => {
+        jest.useFakeTimers()
+        const { unmount } = await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        unmount()
+        expect(jest.getTimerCount()).toBe(0)
+    })
 })
 
 // ── Board controls ──────────────────────────────────────────────────────────
@@ -808,12 +900,17 @@ describe('board controls', () => {
         expect(names).toEqual(['Alice', 'Bob'])
     })
 
-    test('toggling sound off silences move sounds (and re-runs the socket effect)', async () => {
+    test('toggling sound off silences move sounds without re-joining the game [F2]', async () => {
         await renderGame()
+        const registrations = socket.on.mock.calls.length
         click(screen.getAllByTitle('Toggle sound')[0])
-        // LEGACY: soundOn is a dependency of the socket effect, so it re-joins
-        expect(socket.emit.mock.calls.slice(-1)).toEqual([['join_game', 'g1']])
+        // Was (LEGACY): soundOn was a dependency of the socket effect, so toggling re-emitted join_game.
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         expect(sounds.playMoveSound).not.toHaveBeenCalled()
+        click(screen.getAllByTitle('Toggle sound')[0])
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
+        expect(sounds.playMoveSound).toHaveBeenCalledTimes(1)
     })
 })

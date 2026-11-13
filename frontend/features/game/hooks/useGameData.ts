@@ -1,7 +1,7 @@
 'use client';
 
 // Loads GET /api/games/<id> once per id and resolves the viewer's seat (colour + orientation).
-import { useEffect, type Dispatch, type MutableRefObject } from 'react';
+import { useEffect, useEffectEvent, type Dispatch, type MutableRefObject } from 'react';
 import type { Chess } from 'chess.js';
 import { playGameStartSound } from '@/lib/sounds';
 import { parseBaseMinutes } from '@/lib/chess/timeControl';
@@ -31,33 +31,42 @@ interface Options {
 }
 
 export function useGameData({ gameId, myProfile, gameData, soundOn, router, refs, dispatch }: Options): void {
-    // LEGACY stale closure: myProfile/soundOn/router are read from the render that started the fetch.
+    // Applied when the fetch resolves, with that moment's profile, sound setting and router.
+    const onLoaded = useEffectEvent((gd: GameWithPlayers | null) => {
+        if (!gd) {
+            router.push('/lobby');
+            return;
+        }
+        dispatch({ type: 'gameLoaded', game: gd });
+        refs.gameDataRef.current = gd;
+        if (myProfile) dispatch({ type: 'seatResolved', myColor: seatFor(gd, myProfile.id) });
+        const isResume = !!(gd.fen && gd.fen !== STARTING_FEN);
+        if (gd.fen) {
+            refs.chessRef.current.load(gd.fen);
+            dispatch({ type: 'positionSet', fen: gd.fen });
+        }
+        const mins = parseBaseMinutes(gd.time_control);
+        if (!refs.clockSyncedRef.current) dispatch({ type: 'clockPreset', seconds: mins * SECONDS_PER_MINUTE });
+        if (soundOn && !isResume) playGameStartSound();
+    });
+
+    // One fetch per game id; a response for a game we already left is dropped.
     useEffect(() => {
+        let current = true;
         void fetch(`/api/games/${gameId}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((gd: GameWithPlayers | null) => {
-                if (!gd) {
-                    router.push('/lobby');
-                    return;
-                }
-                dispatch({ type: 'gameLoaded', game: gd });
-                refs.gameDataRef.current = gd;
-                if (myProfile) dispatch({ type: 'seatResolved', myColor: seatFor(gd, myProfile.id) });
-                const isResume = !!(gd.fen && gd.fen !== STARTING_FEN);
-                if (gd.fen) {
-                    refs.chessRef.current.load(gd.fen);
-                    dispatch({ type: 'positionSet', fen: gd.fen });
-                }
-                const mins = parseBaseMinutes(gd.time_control);
-                if (!refs.clockSyncedRef.current) dispatch({ type: 'clockPreset', seconds: mins * SECONDS_PER_MINUTE });
-                if (soundOn && !isResume) playGameStartSound();
+                if (current) onLoaded(gd);
             });
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: legacy effect re-runs only when the game id changes (ADR 0212)
+        return () => {
+            current = false;
+        };
     }, [gameId]);
 
+    // Keyed on the profile id, not the profile object, so a refreshed profile does not re-resolve.
+    const myId = myProfile?.id;
     useEffect(() => {
-        if (!gameData || !myProfile) return;
-        dispatch({ type: 'seatResolved', myColor: seatFor(gameData, myProfile.id) });
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: keyed on the profile id, not the profile object (ADR 0212)
-    }, [myProfile?.id, gameData]);
+        if (!gameData || !myId) return;
+        dispatch({ type: 'seatResolved', myColor: seatFor(gameData, myId) });
+    }, [myId, gameData, dispatch]);
 }

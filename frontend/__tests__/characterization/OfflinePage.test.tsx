@@ -223,6 +223,49 @@ describe('engine errors', () => {
     })
 })
 
+describe('engine error retry [F13]', () => {
+    const failOnce = () => fetchMock.mockImplementationOnce(async () => ({ ok: false, status: 503, json: async () => ({ detail: 'Engine down' }) }))
+
+    test('an engine error shows Retry; retrying asks again and plays the reply', async () => {
+        failOnce()
+        const { container } = start()
+        click(square(container, 'e2')); click(square(container, 'e4'))
+        await flush(250)
+        expect(screen.getByText('Engine down')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await flush(400)
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body).fen).toBe(AFTER_E4)
+        expect(screen.queryByText('Engine down')).toBeNull()
+        expect(screen.getByText('Your move')).toBeInTheDocument()
+    })
+
+    test('as Black, a failed opening move can be retried (nothing else could restart MAVERICK)', async () => {
+        failOnce()
+        replies = ['e2e4']
+        start({ color: 'Black' })
+        await flush(500)
+        expect(screen.getByText('Engine down')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await flush(400)
+        expect(screen.getByText('Your move')).toBeInTheDocument()
+    })
+
+    test('retries are bounded: after 3 failed retries Retry is replaced by a hint', async () => {
+        fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({ detail: 'Engine down' }) }))
+        const { container } = start()
+        click(square(container, 'e2')); click(square(container, 'e4'))
+        await flush(250)
+        for (let i = 0; i < 3; i++) {
+            click(screen.getByRole('button', { name: 'Retry' }))
+            await flush(0)
+        }
+        expect(fetchMock).toHaveBeenCalledTimes(4)
+        expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+        expect(screen.getByText(/Start a new game/)).toBeInTheDocument()
+    })
+})
+
 describe('playing as black', () => {
     test('board is flipped and MAVERICK moves first after 500 ms with the start FEN', async () => {
         replies = ['e2e4']
@@ -235,6 +278,24 @@ describe('playing as black', () => {
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ fen: START_FEN, difficulty: 'easy' })
         await flush(400)
         expect(screen.getByText('Your move')).toBeInTheDocument()
+    })
+
+    test('Takeback after only MAVERICK\'s opening move is disabled and the game goes on [F13]', async () => {
+        replies = ['e2e4', 'g1f3']
+        const { container } = start({ color: 'Black' })
+        await flush(900)
+        expect(screen.getByText('Your move')).toBeInTheDocument()
+        const takeback = screen.getByRole('button', { name: /Takeback/ })
+        // Was: enabled, and undid e4, leaving White to move with nobody to move it: stuck.
+        expect(takeback).toBeDisabled()
+        click(takeback)
+        expect(screen.getByText('Your move')).toBeInTheDocument()
+        click(square(container, 'e7', true)); click(square(container, 'e5', true))
+        await flush(650)
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        click(screen.getByRole('button', { name: /Takeback/ }))
+        expect(screen.getByText('Your move')).toBeInTheDocument()
+        expect(within(moveLog()).getByText('e4')).toBeInTheDocument()
     })
 
     test('random colour resolves with Math.random (< 0.5 → white)', () => {

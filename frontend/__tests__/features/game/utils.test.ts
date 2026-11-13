@@ -46,12 +46,18 @@ describe('moveEffects', () => {
 })
 
 describe('history', () => {
-    test('step indexes (snapshots are post-move FENs; first back from live lands on the last one)', () => {
-        expect(stepBackIndex(null, 2)).toBe(1)
+    test('step indexes: snapshots are post-move FENs, so the last one IS the live board [F6]', () => {
+        // Was: back from live landed on index 1 of 2 (the live position) and forward from live jumped to 0.
+        expect(stepBackIndex(null, 2)).toBe(0)
+        expect(stepBackIndex(null, 3)).toBe(1)
+        expect(stepBackIndex(null, 1)).toBe(0)
+        expect(stepBackIndex(1, 3)).toBe(0)
         expect(stepBackIndex(0, 2)).toBe(0)
-        expect(stepForwardIndex(0, 2)).toBe(1)
+        expect(stepForwardIndex(0, 3)).toBe(1)
+        expect(stepForwardIndex(1, 3)).toBeNull()
+        expect(stepForwardIndex(0, 2)).toBeNull()
         expect(stepForwardIndex(1, 2)).toBeNull()
-        expect(stepForwardIndex(null, 2)).toBe(0)
+        expect(stepForwardIndex(null, 2)).toBeNull()
     })
 
     test('saveHistory writes the legacy JSON under gambit-game-<id> and swallows storage errors', () => {
@@ -98,6 +104,17 @@ describe('deriveGameView', () => {
         expect(v.top).toMatchObject({ time: 10, isActive: false })
         expect(v.bottom.isActive).toBe(false)
         expect(v.turnIndicator).toBeNull()
+    })
+
+    test('isMe marks only the strip of my own colour; a spectator has none [F4]', () => {
+        const strips = (over: object) => {
+            const v = deriveGameView({ ...state(), ...over }, { turn: () => 'w' }, false)
+            return [v.top.isMe, v.bottom.isMe]
+        }
+        expect(strips({ myColor: 'spectator' })).toEqual([false, false])
+        expect(strips({ myColor: 'white' })).toEqual([false, true])
+        expect(strips({ myColor: 'black', flipped: true })).toEqual([false, true])
+        expect(strips({ myColor: 'white', flipped: true })).toEqual([true, false])
     })
 
     test('label falls back to username then colour; my turn wins', () => {

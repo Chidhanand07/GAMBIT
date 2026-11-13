@@ -2,6 +2,7 @@ import { clockStyle, getFormatRating } from '@/features/game/components/PlayerSt
 import { squareBackground } from '@/features/game/components/Square'
 import { render, screen } from '@testing-library/react'
 import GameOverModal, { outcomeFlags } from '@/features/game/components/GameOverModal'
+import HistoryControls from '@/features/game/components/HistoryControls'
 
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children }: any) => children }))
 
@@ -63,4 +64,16 @@ describe('an aborted game is nobody\'s loss [FIRST-MOVE]', () => {
         expect(screen.queryByText('You Lost')).not.toBeInTheDocument()
         expect(screen.queryByText(/^by /)).not.toBeInTheDocument()
     })
+})
+
+test('HistoryControls: at live the forward button is disabled (it would stay live); in history it steps [F6]', () => {
+    const goToMove = jest.fn()
+    const { rerender } = render(<HistoryControls viewIndex={null} snapshotCount={3} isLive goToMove={goToMove} />)
+    const buttons = () => screen.getAllByRole('button')
+    expect(buttons()[2]).toBeDisabled()
+    buttons()[1].click()
+    expect(goToMove).toHaveBeenLastCalledWith(1)
+    rerender(<HistoryControls viewIndex={0} snapshotCount={3} isLive={false} goToMove={goToMove} />)
+    buttons()[2].click()
+    expect(goToMove).toHaveBeenLastCalledWith(1)
 })

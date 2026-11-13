@@ -92,6 +92,11 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-070](#f-070) | Drop the legacy `*_time_ms` clock columns | L1 | SCHEMA-CLEANUP |
 | [F-071](#f-071) | Railway healthcheck on `/readyz` | L1 | OBSERVABILITY |
 | [F-072](#f-072) | Server analysis depth limit matches the engine (20) | L1 | ENG-DEPTH-BOUND |
+| [F-075](#f-075) | Socket and fetch callbacks read state via `useEffectEvent`; one join per connection | L2 | F2 |
+| [F-076](#f-076) | History steps: live is the last snapshot | L2 | F6 |
+| [F-077](#f-077) | One queue request; reconnect re-sends it with an ack | L2 | F8 |
+| [F-078](#f-078) | Offline engine errors: bounded manual retry | L2 | F13 |
+| [F-079](#f-079) | Disconnect countdown keyed on "counting" | L2 | EXHAUSTIVE-DEPS |
 
 ---
 
@@ -2189,3 +2194,46 @@ stays for existing monitors.
 **The game server's analysis depth limit is 20, the engine's maximum (F-063).** The server allowed 30
 and forwarded 21–30, which the engine refused (422 → `engine_rejected`). The boundary schema now
 refuses them with the same 400 as other invalid input.
+
+## F-075
+
+**Socket and fetch callbacks read render state through `useEffectEvent` (F2).** The game page's
+socket effect listed the colour, the sound setting and the profile as dependencies so its handlers
+would not go stale, which re-ran `join_game` (and the resync it triggers) on seat resolve, sound
+toggle and profile refresh. Effects that subscribe or fetch are now keyed only on identity (socket,
+signed-in, game id); everything else is read when the event fires, through React 19's
+`useEffectEvent` (for the handler context via getters, so `SocketHandlerContext` keeps its shape). The
+join on mount is sent only when `socket.connected`; otherwise the `connect` handler sends it: one join
+per connection. Removes the `exhaustive-deps` disables in the game hooks.
+
+## F-076
+
+**History steps: live is the last snapshot (F6).** `fenSnapshots` hold post-move positions, so index
+length−1 is the live board. ← from live goes to length−2 (clamped at 0); → onto length−1, or from live,
+returns to live; the forward button is disabled while live. With a single move the start position is
+not stored, so the first ← shows move 1 (storing the initial FEN was out of scope).
+
+## F-077
+
+**One matchmaking queue request; a reconnect re-sends exactly it and reads the ack (F8).**
+`queuePayload(userId, terms)` is the only builder (`{ user: { id }, time_control, increment, is_rated }`,
+rated by default). The hook keeps the queued terms (searching = terms present); a reconnect re-sends
+them through `emitWithAck` (F-065); a refusal or timeout clears the search and shows
+`rejectionMessage(code)`. Leaving the lobby while searching sends `leave_queue`; `match_found` is
+ignored unless searching. A refused first join is reported as a refusal, not as "found an opponent but
+could not start".
+
+## F-078
+
+**The offline opponent's engine errors get a bounded manual retry (F13).** No automatic retries (they
+would change timing and hammer a down engine). The error banner offers Retry for the same position, up
+to `MAX_ENGINE_RETRIES = 3` consecutive failures, then "Start a new game to try again." A successful
+move, a takeback or a new game resets the count. Takeback is disabled while the player has no move of
+their own to undo, which removes the stuck-as-Black case.
+
+## F-079
+
+**The opponent-disconnect countdown is keyed on "counting", not on its value.** The effect depended
+on nothing (behind a disable) to keep one interval per disconnect, so a second disconnect after a
+countdown had run out never ticked. `counting = opponentDisconnected && countdown > 0` is the only
+dependency; the interval decrements (clamped at 0) and stops when counting turns false.
