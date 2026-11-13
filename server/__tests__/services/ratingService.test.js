@@ -86,3 +86,24 @@ test('_ratingField follows the time control', () => {
     expect(svc._ratingField('1+0')).toBe('rating_bullet');
     expect(svc._ratingField('90')).toBe('rating_classical');
 });
+
+test('rating function errors raise an alert in the error tracker (SEC-12) [OBSERVABILITY]', async () => {
+    const { setErrorReporter } = require('../../src/observability/errorReporter');
+    const report = jest.fn(async () => {});
+    setErrorReporter({ report });
+    try {
+        const repo = repoWith([profile('w'), profile('b')]);
+        repo.applyGameResult.mockReturnValueOnce(result(null, { message: 'rls' }));
+        await serviceOn(repo).processGameEnd('g', 'w', 'b', 'white', '10');
+        repo.findRatingsByIds.mockImplementation(() => {
+            throw new Error('down');
+        });
+        await serviceOn(repo).processGameEnd('g2', 'w', 'b', 'white', '10');
+        expect(report.mock.calls).toEqual([
+            [{ message: 'rls' }, { where: 'rating', gameId: 'g' }],
+            [new Error('down'), { where: 'rating', gameId: 'g2' }],
+        ]);
+    } finally {
+        setErrorReporter(undefined);
+    }
+});

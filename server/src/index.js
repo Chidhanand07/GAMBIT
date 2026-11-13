@@ -60,6 +60,20 @@ const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
 const { createShutdown } = require('./shutdown');
 const { log } = require('./observability/log');
+const { setErrorReporter } = require('./observability/errorReporter');
+const { createWebhookErrorReporter } = require('./clients/webhookErrorReporter');
+
+// SEC-12: fatal errors, 500s, internal_error acks and rating failures are reported; with
+// ERROR_WEBHOOK_URL to that webhook, otherwise nowhere but the logs (ADR F-069).
+const errorWebhookUrl = env.errorWebhookUrl();
+if (errorWebhookUrl) {
+    setErrorReporter(
+        createWebhookErrorReporter({
+            url: errorWebhookUrl,
+            origin: { service: 'gambit-server', release: env.release(), hostname: require('node:os').hostname() },
+        }),
+    );
+}
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);

@@ -17,6 +17,8 @@ const KEYS = [
     'SUPABASE_SECRET_KEY',
     'SUPABASE_SERVICE_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
+    'ERROR_WEBHOOK_URL',
+    'RAILWAY_GIT_COMMIT_SHA',
 ];
 const saved = {};
 
@@ -154,6 +156,47 @@ describe('engine shared secret [ENG-AUTH]', () => {
         env.engineSharedSecret();
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls[0][0]).toMatch(/ENGINE_SHARED_SECRET is not set/);
+    });
+});
+
+describe('ERROR_WEBHOOK_URL [OBSERVABILITY] (SEC-12)', () => {
+    let env;
+    let warn;
+    beforeEach(() => {
+        jest.isolateModules(() => {
+            env = require('../../src/config/env');
+            warn = jest.spyOn(require('../../src/observability/log').log, 'warn');
+        });
+    });
+    afterEach(() => warn.mockRestore());
+
+    test('unset → no webhook', () => {
+        expect(env.errorWebhookUrl()).toBeUndefined();
+    });
+
+    test.each(['https://hooks.example.com/T1/abc', 'http://localhost:9999/hook', 'http://127.0.0.1:9999/hook'])(
+        '%s is accepted',
+        (url) => {
+            process.env.ERROR_WEBHOOK_URL = url;
+            expect(env.errorWebhookUrl()).toBe(url);
+            expect(warn).not.toHaveBeenCalled();
+        },
+    );
+
+    test.each(['http://hooks.example.com/T1/abc', 'not a url', 'ftp://hooks.example.com/x'])(
+        '%s is ignored with a warning that does not contain the URL',
+        (url) => {
+            process.env.ERROR_WEBHOOK_URL = url;
+            expect(env.errorWebhookUrl()).toBeUndefined();
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).not.toContain(url);
+        },
+    );
+
+    test('the release is the deployed commit Railway sets', () => {
+        expect(env.release()).toBeUndefined();
+        process.env.RAILWAY_GIT_COMMIT_SHA = 'abc123';
+        expect(env.release()).toBe('abc123');
     });
 });
 

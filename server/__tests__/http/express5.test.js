@@ -82,3 +82,26 @@ test('X-Powered-By is not sent', async () => {
     const res = await (await loopbackRequest(appWith((a) => a.get('/x', (req, res) => res.json({}))))).get('/x');
     expect(res.headers['x-powered-by']).toBeUndefined();
 });
+
+test('an unexpected 500 is reported to the error tracker; an AppError is not (SEC-12) [OBSERVABILITY]', async () => {
+    const { setErrorReporter } = require('../../src/observability/errorReporter');
+    const report = jest.fn(async () => {});
+    setErrorReporter({ report });
+    try {
+        const failure = new Error('db password is hunter2');
+        const app = appWith((a) => {
+            a.get('/boom', async () => {
+                throw failure;
+            });
+            a.get('/busy', async () => {
+                throw new AppError('engine_busy', 503);
+            });
+        });
+        const client = await loopbackRequest(app);
+        expect((await client.get('/boom')).status).toBe(500);
+        expect((await client.get('/busy')).status).toBe(503);
+        expect(report.mock.calls).toEqual([[failure, { where: 'http', route: 'GET /boom' }]]);
+    } finally {
+        setErrorReporter(undefined);
+    }
+});

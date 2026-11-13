@@ -98,3 +98,27 @@ describe('the logger a failure is written to [OBSERVABILITY]', () => {
         expect(log.error).not.toHaveBeenCalled();
     });
 });
+
+describe('error tracking (SEC-12) [OBSERVABILITY]', () => {
+    const { setErrorReporter } = require('../../src/observability/errorReporter');
+    let report;
+    beforeEach(() => {
+        report = jest.fn(async () => {});
+        setErrorReporter({ report });
+    });
+    afterEach(() => setErrorReporter(undefined));
+
+    test('an internal_error is reported with the event; a handler refusal and a bad payload are not', async () => {
+        const failure = new Error('boom');
+        await wrap('make_move', schema, async () => Promise.reject(failure))({ game_id: 'g1' });
+        await wrap('make_move', schema, async () => ({ ok: false, error: 'illegal_move' }))({ game_id: 'g1' });
+        await wrap('make_move', schema, async () => {})({ game_id: 7 });
+        expect(report.mock.calls).toEqual([[failure, { where: 'socket:make_move' }]]);
+    });
+
+    test('a failing guarded handler is reported too', async () => {
+        const failure = new Error('redis down');
+        await guard('disconnect', () => Promise.reject(failure))();
+        expect(report).toHaveBeenCalledWith(failure, { where: 'socket:disconnect' });
+    });
+});

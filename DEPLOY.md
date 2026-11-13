@@ -181,6 +181,7 @@ Go to your service → **Variables** tab and add:
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Sent to the engine as `X-Engine-Key`; without it the server does not call the engine (no analysis, no game review). |
 | `SOCKET_ADAPTER` | Optional. `redis` (default): Socket.IO rooms and broadcasts span every replica through Redis Streams. `none`: in-process only, for a single local instance. |
+| `ERROR_WEBHOOK_URL` | Optional (SEC-12). An `https://` webhook that gets one JSON POST per fatal error, HTTP 500, socket `internal_error`, failed token verification, rating-function error and stuck game result (`text`/`content` summary for Slack/Discord, plus `error`, `context`, `release`). At most 20 a minute; credential-like context keys are redacted. A secret: store it as a Railway variable. Unset: errors are only logged. The release tag comes from Railway's `RAILWAY_GIT_COMMIT_SHA` (set automatically). |
 | `PORT` | **do not set** — Railway injects this automatically |
 
 ### 4b-2. Running more than one replica

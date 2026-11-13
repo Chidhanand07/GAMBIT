@@ -4,6 +4,7 @@
  */
 const { AppError } = require('../services/errors');
 const { log } = require('../observability/log');
+const { reportError } = require('../observability/errorReporter');
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_INTERNAL_ERROR = 500;
@@ -50,6 +51,7 @@ function sendError(res, route, error) {
         return;
     }
     log.error(`[http] ${route} failed:`, /** @type {Error} */ (error)?.message ?? error);
+    void reportError(error, { where: 'http', route });
     res.status(HTTP_INTERNAL_ERROR).json(INTERNAL_ERROR);
 }
 

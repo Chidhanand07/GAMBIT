@@ -9,6 +9,7 @@
  * process exits 1 so the platform restarts a clean one (NODE-07).
  */
 const { log } = require('./observability/log');
+const { reportError } = require('./observability/errorReporter');
 
 /** Railway sends SIGTERM and kills after its drain window (30 s unless configured); stay well inside. */
 const DEFAULT_DRAIN_MS = 20_000;
@@ -82,6 +83,8 @@ function createShutdown(deps) {
          */
         async fatal(error) {
             log.fatal('[process] fatal error, exiting for a restart:', error instanceof Error ? error.stack : error);
+            // Awaited (bounded by the reporter's own timeout): the process exits right after.
+            await reportError(error, { level: 'fatal', where: 'process' });
             await attempt('flush logs', deps.flushLogs);
             deps.exit(1);
         },

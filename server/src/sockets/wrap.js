@@ -13,6 +13,7 @@
  * to its socket. The process logger is only the default.
  */
 const { log } = require('../observability/log');
+const { reportError } = require('../observability/errorReporter');
 
 const INVALID_PAYLOAD = Object.freeze({ ok: false, error: 'invalid_payload' });
 const INTERNAL_ERROR = Object.freeze({ ok: false, error: 'internal_error' });
@@ -47,6 +48,8 @@ function acknowledge(ack, result) {
 function logFailure(logger, event, error) {
     const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
     logger.error(`[socket] ${event} failed:`, message ?? error);
+    // An internal_error ack is the socket's 500 (SEC-12).
+    void reportError(error, { where: `socket:${event}` });
 }
 
 /** @param {unknown} result */

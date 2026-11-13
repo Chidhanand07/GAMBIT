@@ -72,3 +72,18 @@ test('no deadline is computed for a token that was not verified', async () => {
     expect(tokenDeadline).not.toHaveBeenCalled();
     expect(socket.data.tokenExpiresAt).toBeUndefined();
 });
+
+test('a verifier failure (not a bad token) raises an alert (SEC-12) [OBSERVABILITY]', async () => {
+    const { setErrorReporter } = require('../../src/observability/errorReporter');
+    const report = jest.fn(async () => {});
+    setErrorReporter({ report });
+    try {
+        const failure = new Error('supabase unreachable');
+        await run(createHandshakeAuth({ verifyToken: async () => Promise.reject(failure) }), socketWith({ token: 't' }));
+        await run(createHandshakeAuth({ verifyToken: async () => null }), socketWith({ token: 'forged' }));
+        // Only the outage is reported; a forged token is an ordinary refusal.
+        expect(report.mock.calls).toEqual([[failure, { where: 'socket:handshake' }]]);
+    } finally {
+        setErrorReporter(undefined);
+    }
+});

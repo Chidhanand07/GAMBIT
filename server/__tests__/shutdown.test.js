@@ -74,3 +74,15 @@ test('a fatal error (uncaught exception, unhandled rejection) logs and exits 1 f
     expect(deps.flushLogs).toHaveBeenCalled();
     expect(deps.exit).toHaveBeenCalledWith(1);
 });
+
+test('a fatal error is reported to the error tracker before the logs are flushed and the process exits (SEC-12)', async () => {
+    const { setErrorReporter } = require('../src/observability/errorReporter');
+    const { calls, shutdown } = setup();
+    setErrorReporter({ report: jest.fn(async (error, context) => calls.push(`report ${context.level} ${error.message}`)) });
+    try {
+        await shutdown.fatal(new Error('boom'));
+        expect(calls).toEqual(['report fatal boom', 'flush logs', 'exit 1']);
+    } finally {
+        setErrorReporter(undefined);
+    }
+});
