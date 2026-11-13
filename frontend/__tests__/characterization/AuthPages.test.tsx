@@ -98,6 +98,7 @@ describe('auth/exchange', () => {
         render(<ExchangePage />)
         await flush()
         expect(screen.getByText('Sign-in error: bad code')).toBeInTheDocument()
+        expect(console.error).not.toHaveBeenCalled() // S14
         expect(replace).not.toHaveBeenCalled()
         act(() => { jest.advanceTimersByTime(2000) })
         expect(replace.mock.calls).toEqual([['/login?error=oauth_failed']])
@@ -328,6 +329,10 @@ describe('signup', () => {
         submit()
         await flush()
         expect(screen.getByText('Connection failed. Please check your internet connection.')).toBeInTheDocument()
+        // S14: the failure is shown to the user, not written to the browser console.
+        expect(console.error).not.toHaveBeenCalled()
+        expect(console.log).not.toHaveBeenCalled()
+        expect(console.warn).not.toHaveBeenCalled()
     })
 
     test('Google button calls OAuth with the callback redirect', async () => {

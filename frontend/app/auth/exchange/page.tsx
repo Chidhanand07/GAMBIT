@@ -20,7 +20,6 @@ function ExchangeHandler() {
             const supabase = createClient()
             void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
                 if (error) {
-                    console.error('[auth/exchange] PKCE exchange failed:', error.message)
                     setErrMsg(error.message)
                     setTimeout(() => router.replace('/login?error=oauth_failed'), 2000)
                     return

@@ -1,18 +1,12 @@
 import type { GameWithPlayers } from '@/types/game';
 import type { Profile } from '@/types/profile';
 
-/** GET {socketUrl}/api/games/join/{token}; null when missing/expired or on a network error (logged). */
+/** GET {socketUrl}/api/games/join/{token}; null when missing/expired or on a network error. */
 export async function fetchInviteGame(socketUrl: string, token: string): Promise<GameWithPlayers | null> {
     try {
         const res = await fetch(`${socketUrl}/api/games/join/${token}`);
-        if (!res.ok) {
-            const d: { error?: string } = await res.json().catch(() => ({}));
-            console.warn('[JoinPage] Game fetch failed:', res.status, d.error);
-            return null;
-        }
-        return await res.json();
-    } catch (err) {
-        console.error('[JoinPage] Game fetch network error:', err);
+        return res.ok ? await res.json() : null;
+    } catch {
         return null;
     }
 }

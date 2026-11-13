@@ -53,8 +53,7 @@ function SignupForm() {
         try {
             const message = await registerAndSignIn({ email, password, username });
             if (message) setError(message);
-        } catch (err) {
-            console.error('[signup] unexpected error:', err);
+        } catch {
             setError("Connection failed. Please check your internet connection.");
         } finally {
             setLoading(false);
