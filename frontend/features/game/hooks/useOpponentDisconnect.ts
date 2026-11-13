@@ -1,7 +1,6 @@
 'use client';
 
-// Opponent-disconnect banner state and its 1 s countdown. Kept outside the reducer because the
-// legacy countdown clears its own interval from inside the state updater (ADR 0211).
+// Opponent-disconnect banner state and its 1 s countdown (kept outside the reducer, ADR 0211).
 import { useCallback, useEffect, useState } from 'react';
 
 const TICK_MS = 1000;
@@ -26,20 +25,15 @@ export function useOpponentDisconnect(): OpponentDisconnect {
         setDisconnectCountdown(0);
     }, []);
 
+    // Keyed on "is a countdown running", not on its value: one interval per countdown, which
+    // stops when it reaches 0 and starts again for a new disconnect (even one that follows a
+    // countdown that already ran out while the opponent stayed away).
+    const counting = opponentDisconnected && disconnectCountdown > 0;
     useEffect(() => {
-        if (!opponentDisconnected || disconnectCountdown <= 0) return;
-        const id = setInterval(() => {
-            setDisconnectCountdown((prev) => {
-                if (prev <= 1) {
-                    clearInterval(id);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, TICK_MS);
+        if (!counting) return;
+        const id = setInterval(() => setDisconnectCountdown((prev) => Math.max(0, prev - 1)), TICK_MS);
         return () => clearInterval(id);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: omitting disconnectCountdown keeps one interval per disconnect instead of restarting each tick
-    }, [opponentDisconnected]);
+    }, [counting]);
 
     return { opponentDisconnected, disconnectCountdown, markDisconnected, markReconnected };
 }

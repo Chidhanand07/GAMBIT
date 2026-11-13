@@ -221,6 +221,44 @@ describe('mount', () => {
         expect(sounds.playGameStartSound).toHaveBeenCalledTimes(1)
     })
 
+    test('the game loads once per id: a refreshed profile object does not refetch it', async () => {
+        const { rerender } = await renderGame()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        await act(async () => {})
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    test('the loaded game reads the CURRENT sound setting: muted before the fetch resolves, no start sound', async () => {
+        let resolve!: (r: unknown) => void
+        fetchMock.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        await act(async () => { resolve(jsonResponse(gameRow)) })
+        await screen.findAllByText(/Alice|Bob/)
+        // Was: the fetch callback closed over the first render's soundOn (true) and played it.
+        expect(sounds.playGameStartSound).not.toHaveBeenCalled()
+    })
+
+    test('a profile that arrives after the game loaded still resolves my seat', async () => {
+        profile = null
+        const { rerender } = await renderGame()
+        expect(screen.getByText('Spectating')).toBeInTheDocument()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(screen.getByText('Your turn')).toBeInTheDocument()
+    })
+
+    test('restored history is read once per game id, not on every render', async () => {
+        const spy = jest.spyOn(Storage.prototype, 'getItem')
+        const { rerender } = await renderGame()
+        const reads = spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        expect(spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length).toBe(reads)
+        expect(reads).toBe(1)
+    })
+
     test('a resumed game (non-start FEN) loads the position and skips the start sound', async () => {
         gameRow.fen = AFTER_E4
         await renderGame()
