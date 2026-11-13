@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useProfile } from '@/components/ProfileProvider';
 
@@ -23,13 +23,20 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
     const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(NO_ONE_ONLINE);
     const { profile } = useProfile();
 
+    const profileId = profile?.id;
+    // Read when the channel subscribes; a rename alone must not re-subscribe.
+    const usernameRef = useRef(profile?.username);
     useEffect(() => {
-        if (!profile?.id) return;
+        usernameRef.current = profile?.username;
+    });
+
+    useEffect(() => {
+        if (!profileId) return;
         let mounted = true;
         const supabase = createClient();
 
         const channel = supabase.channel('gambit-online-users', {
-            config: { presence: { key: profile.id } },
+            config: { presence: { key: profileId } },
         });
 
         const updateCount = () => {
@@ -45,7 +52,7 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
 
         channel.subscribe(async (status: string) => {
             if (status === 'SUBSCRIBED' && mounted) {
-                await channel.track({ user_id: profile.id, username: profile.username || 'unknown' });
+                await channel.track({ user_id: profileId, username: usernameRef.current || 'unknown' });
             }
         });
 
@@ -53,11 +60,10 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
             mounted = false;
             channel.untrack().then(() => supabase.removeChannel(channel)).catch(() => {});
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: re-subscribe only when the user id changes; the username is read once per subscription
-    }, [profile?.id]);
+    }, [profileId]);
 
     // A signed-out viewer has no subscription, so whatever the last one saw no longer applies.
-    const visibleIds = profile?.id ? onlineUserIds : NO_ONE_ONLINE;
+    const visibleIds = profileId ? onlineUserIds : NO_ONE_ONLINE;
     const value = useMemo(
         () => ({ onlineCount: Math.max(1, visibleIds.size), onlineUserIds: visibleIds }),
         [visibleIds],

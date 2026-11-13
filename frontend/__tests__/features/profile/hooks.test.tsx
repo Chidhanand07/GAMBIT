@@ -36,8 +36,8 @@ describe('useGameHistory', () => {
     const page = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}` }));
 
     test('does nothing until the games tab is active with a profile', async () => {
-        renderHook(() => useGameHistory({ username: 'bob', activeTab: 'overview', profile: PROFILE }));
-        renderHook(() => useGameHistory({ username: 'bob', activeTab: 'games', profile: null }));
+        renderHook(() => useGameHistory({ activeTab: 'overview', profile: PROFILE }));
+        renderHook(() => useGameHistory({ activeTab: 'games', profile: null }));
         await flush();
         expect(fetchMock).not.toHaveBeenCalled();
     });
@@ -45,7 +45,7 @@ describe('useGameHistory', () => {
     test('loads the first page, then appends by offset until a short page', async () => {
         routes['/api/profile/bob/games?limit=15&offset=0'] = { games: page(15, 'a') };
         routes['/api/profile/bob/games?limit=15&offset=15'] = { games: page(2, 'b') };
-        const { result } = renderHook(() => useGameHistory({ username: 'bob', activeTab: 'games', profile: PROFILE }));
+        const { result } = renderHook(() => useGameHistory({ activeTab: 'games', profile: PROFILE }));
         await flush();
         expect(result.current.games).toHaveLength(15);
         expect(result.current.hasMoreGames).toBe(true);
@@ -59,7 +59,7 @@ describe('useGameHistory', () => {
     test('does not refetch when re-rendered with the same tab and profile id', async () => {
         routes['/api/profile/bob/games?limit=15&offset=0'] = { games: [] };
         const { rerender } = renderHook(
-            ({ profile }) => useGameHistory({ username: 'bob', activeTab: 'games', profile }),
+            ({ profile }) => useGameHistory({ activeTab: 'games', profile }),
             { initialProps: { profile: PROFILE } },
         );
         await flush();

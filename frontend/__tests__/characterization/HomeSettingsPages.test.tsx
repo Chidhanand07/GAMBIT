@@ -147,6 +147,17 @@ describe('settings page', () => {
         expect(push.mock.calls).toEqual([['/login']])
     })
 
+    test('a refetch of the same profile keeps unsaved edits; a different profile prefills again', () => {
+        const { rerender } = render(<SettingsPage />)
+        fireEvent.change(screen.getByDisplayValue('Me'), { target: { value: 'Edited' } })
+        profileState = { ...profileState, profile: { ...ME, display_name: 'Server copy' } }
+        rerender(<SettingsPage />)
+        expect(screen.getByDisplayValue('Edited')).toBeInTheDocument()
+        profileState = { ...profileState, profile: { ...ME, id: 'u-2', display_name: 'Other' } }
+        rerender(<SettingsPage />)
+        expect(screen.getByDisplayValue('Other')).toBeInTheDocument()
+    })
+
     test('form is prefilled from the profile and saves trimmed values with PATCH', async () => {
         jest.useFakeTimers()
         render(<SettingsPage />)

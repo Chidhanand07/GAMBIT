@@ -28,7 +28,7 @@ export default function ProfilePage(props: { params: Promise<{ username: string 
     const { activeTab, setActiveTab } = useProfileTab();
     const { status, profile, meProfile, isOwnProfile, reload } = useProfileData(username);
     const { friendStatus, addFriend } = useFriendStatus({ username, profile, meProfile, isOwnProfile });
-    const gameHistory = useGameHistory({ username, activeTab, profile });
+    const gameHistory = useGameHistory({ activeTab, profile });
     const statsState = useProfileStats({ username, activeTab, profile });
     const friendsState = useFriends({ activeTab, profile, isOwnProfile });
     const isOnline = useProfilePresence(profile?.id);
