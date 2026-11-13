@@ -80,6 +80,18 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-057](#f-057) | Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list | M4 | SUPPLY-CHAIN |
 | [F-058](#f-058) | Schema drift is checked against the linked Supabase project on a schedule, not on every PR | M4 | SCHEMA-DRIFT |
 | [F-059](#f-059) | The game server can run as several replicas behind one Redis | M4 | MULTI-INSTANCE |
+| [F-060](#f-060) | One evaluation perspective for the engine (`services/perspective.py`) | L1 | ENG-PERSPECTIVE |
+| [F-061](#f-061) | Stored reviews re-run by an engine-side script, dry run by default | L1 | ENG-PERSPECTIVE |
+| [F-062](#f-062) | `/classify-move` answers 400 for an illegal move | L1 | ENG-CLASSIFY-ILLEGAL |
+| [F-063](#f-063) | `/analyze` depth bounded to 1..20 | L1 | ENG-DEPTH-BOUND |
+| [F-065](#f-065) | Ack timeouts, one retry for idempotent events only; challenge acks; re-queue takeover | L1 | ACKS |
+| [F-066](#f-066) | Redis outbox re-drives game results the database refused | L1 | ERRORS |
+| [F-067](#f-067) | HTTP tests bind 127.0.0.1: the 404/429 flakes were another process answering | L1 | FLAKY |
+| [F-068](#f-068) | Socket and request ids in logs and outgoing calls | L1 | OBSERVABILITY |
+| [F-069](#f-069) | Error-reporting port with an optional webhook (SEC-12) | L1 | OBSERVABILITY |
+| [F-070](#f-070) | Drop the legacy `*_time_ms` clock columns | L1 | SCHEMA-CLEANUP |
+| [F-071](#f-071) | Railway healthcheck on `/readyz` | L1 | OBSERVABILITY |
+| [F-072](#f-072) | Server analysis depth limit matches the engine (20) | L1 | ENG-DEPTH-BOUND |
 
 ---
 
@@ -2023,3 +2035,157 @@ charged twice and broadcasts that reach half the room (NODE-15, NODE-17, TEST-06
 - **Behaviour.** `joinQueue`/`leaveQueue` are async; `/api/matchmaking/status` reads a snapshot
   that may be up to ~1 s stale on a replica that does not hold the pairing lock.
 - *The matchmaking part was implemented on a side branch by a helper agent and merged here.*
+
+## F-060
+
+**One evaluation perspective for the engine (ENG-PERSPECTIVE).**
+
+- **Context.** The `stockfish` package (3.28.0) reports `get_evaluation()` and `get_top_moves()` from
+  **White's** point of view whoever is to move (`stockfish/models.py`: `compare = 1 if "w" in fen
+  else -1`, lines 499/512/546). `services/analysis.py` assumed side-to-move and always negated the
+  evaluation after a move, so every White move in a game review was mis-scored (with the real binary,
+  1.e4 was cp_loss ≈ 60, "Inaccuracy") and White's moves were drawn upside down on the eval graph.
+  `computer_engine.py` mixed both conventions, so MAVERICK could choose the move best for its
+  opponent. The test fake encoded the same wrong assumption, so the suite was green.
+- **Options.** (a) Patch each call site's sign; (b) wrap the package so it returns side-to-move
+  scores; (c) one pure helper that converts the package's White-view scores to a requested colour.
+- **Decision.** (c) `chess-engine/services/perspective.py`: `white_score`, `line_white_score`,
+  `for_color`, `evaluation_for`. Mate n is ±`MATE_CP` (10000, no distance-to-mate); `mate 0` (the side
+  to move is checkmated; the package loses the sign) is resolved by the side to move; centipawns are
+  clamped to ±9999 so any mate outranks them. Review cp_loss, accuracy, classification and
+  `eval_before`/`eval_after` are the mover's view; `eval_white` (the eval graph, drawn `+` above the
+  midline by `EvalGraph.tsx`) and `/analyze` stay White's view. MAVERICK converts each line to its own
+  side. The fake now models the package (binary-style side-to-move inputs × the package's sign); with
+  it, 15 existing tests failed on the old code. Eight tests run against a real Stockfish when one is
+  installed (skipped in CI, which installs none).
+- **Consequences.** Reviews stored before this fix are wrong until re-run (F-061). Any new code reading
+  Stockfish scores must go through the helpers.
+
+## F-061
+
+**Stored reviews are re-run by an engine-side script, dry run by default (ENG-PERSPECTIVE).**
+
+- The engine, not the game server, writes reviews (`services/review.py` updates `games` with the
+  secret key). Options: a Node script re-POSTing `/analyse-game` (through the admission gate, no
+  diff), a Python script reusing `review_pgn`/`save_review` in-process (chosen), or SQL (impossible:
+  needs Stockfish).
+- `services/rereview.py` + `scripts/rereview_games.py`: completed games with a stored review and a PGN,
+  newest first, paged by 200; `--apply`, `--since`, `--limit`, `--game-id` (repeatable),
+  `--concurrency` 1–8 (default 2). Writes only the review columns through `save_review` (which keeps the
+  `status = completed` filter); never ratings, results or statuses; unchanged reviews are not
+  rewritten; one failing game does not stop the batch. Exit 0 ok, 1 some failed, 2 Supabase not
+  configured. Run from the engine's shell (DEPLOY.md §10). Not yet run against a real project.
+
+## F-062
+
+**`/classify-move` validates the move at the boundary.** An illegal or garbage move answered 200
+"Mistake". `routers/fen.parse_legal_move` (the review's UCI-then-SAN parser) answers 400
+"Illegal move: …" before an engine is taken, like the existing 400 "Invalid FEN";
+`analyze_move_cp` raises `ValueError` instead of inventing a classification.
+
+## F-063
+
+**`/analyze` depth is bounded to 1..20.** Any depth was accepted (10000 worked; measured: depth 18 ≈
+6 s, 20 ≈ 13 s, 24 ≈ 80 s, so a few requests could hold the whole pool). `config.MIN_ANALYSIS_DEPTH =
+1`, `MAX_ANALYSIS_DEPTH = 20`, default 18; a pydantic `Field(ge, le)`, so out of range is 422 before an
+engine is taken. A constant, not an env knob. The game server's boundary schema follows (F-072).
+
+## F-065
+
+**Ack timeouts with one retry, for idempotent events only; challenge acks; re-queue takeover (ACKS).**
+
+- **Context.** F-043 added acks without a timeout; challenge emits and the banner had none; the
+  challenge spinner never showed (set and reset in one tick, F17). On the server, `join_queue` from a
+  new socket of an already-queued player was a silent no-op: the entry kept the dead socket, so
+  `match_found` was lost and the old socket's late disconnect then dequeued the player. An unknown
+  profile was acked ok and the client searched forever.
+- **Decision.** `frontend/lib/socket/ack.ts` `emitWithAck(socket, event, payload, { onAccepted,
+  onRejected })`: `ACK_TIMEOUT_MS` 8 s; `ACK_POLICY` retries once only the server-idempotent events
+  (`join_queue`, `leave_queue`, `join_game`, `spectate_game`, `challenge_decline`, `rematch_decline`; a
+  repeated decline answered `no_pending_request` counts as done). `make_move`, `resign`,
+  `send_message`, `challenge_request`, `challenge_accept`, `rematch_accept`, `rematch_request` are
+  never re-sent: the timeout is reported as `ack_timeout`. Unlisted events are not idempotent. The
+  first ack settles the call. New messages: `ack_timeout`, `rate_limited`, `invalid_target`,
+  `profile_not_found`. The challenge page logic is `features/challenge/hooks/useChallengeRequest.ts`
+  (spinner until the ack; refusal or timeout → error toast). Server: `mmJoin` is a no-op only for the
+  same socket; another socket takes the entry over (joining at the back); `requestMatch` refuses an
+  unknown profile with `profile_not_found`; the challenge acks `wrap()` already sent are pinned.
+- **Completed in L2:** the game and lobby callers (moves, resign, chat, rematch, queue) use
+  `emitWithAck` too.
+
+## F-066
+
+**Durable re-drive of game results the database refused (ERRORS, completes F-042).**
+
+- When `finishIfActive` still fails after the finalizer's 3 tries, the finalizer enqueues the result in
+  a Redis outbox (`repositories/gameResultOutboxRepository.js`): `{outbox}:item:<gameId>` (JSON, no
+  TTL), sorted sets `{outbox}:due` and `{outbox}:parked`, multi-key writes in Lua, lock `{outbox}:lock`
+  (`SET NX PX`, a token per pass, compare-and-delete release), all in one hash slot.
+- `services/resultOutboxWorker.js` runs every 5 s on the replica that takes the lock: write the row
+  through the same `status = 'active'` guard; review only if this write finished the row; rate always
+  (`apply_game_result` is idempotent per game via `rated_at`; the first attempt may have landed with
+  its response lost); only then remove the item. A crash before removal re-drives harmlessly.
+- Backoff (`domain/redrivePolicy.js`): 5 s doubling, capped at 5 min; after 12 re-drives (≈ 35 min) or
+  1 h since the first failure the item is **parked**: kept, no more automatic tries, a `fatal` log line
+  naming the game and an error report. A failed enqueue is logged at fatal and reported.
+- The lock only saves work; correctness rests on the row guard and `rated_at` (a test with a lapsed
+  lock and two workers on real Redis pins one write, one review). Operator re-drive: DEPLOY.md §4b-3.
+- **Limits.** `processGameEnd` swallows its own errors, so a rating failure after a successful re-drive
+  is not retried (as on the normal path).
+
+## F-067
+
+**The one-off 404/429 failures in `characterization/http.test.js` were another process answering
+(FLAKY).** `supertest(app)` listens on the wildcard address and connects to `127.0.0.1:<port>`. On
+macOS (BSD, `SO_REUSEADDR`) another process may bind `127.0.0.1:<that port>` explicitly and then
+receives the connection; Linux refuses that bind, so CI never saw it. Captured in the act: the 404
+had `x-powered-by: Express` and an HTML `Cannot GET /api/health` (our app sends neither), from a port
+that `lsof` showed a VS Code helper listening on. Forced reproduction: 13–18 failures per run on the old
+file, 0 on the fixed one. **Decision:** HTTP tests request a server bound to 127.0.0.1
+(`request(ctx.server)`, `__tests__/helpers/loopback.js`), never `request(app)`; `loopback.test.js`
+pins the platform behaviour. Ruled out: rate-limit windows, fake timers, env leaks.
+
+## F-068
+
+**Socket and request context in logs and outgoing calls (OBSERVABILITY follow-up).** `wrap()` and
+`guard()` log through the connection's pino child `{ socketId, userId }`, passed as a dependency and
+never stored on `socket.data` (F-059). The HTTP request id is kept in `AsyncLocalStorage`
+(`observability/requestContext.js`, bound after the body parser, which would otherwise lose the
+context) and sent as `X-Request-Id` to the engine and to Supabase (a supabase-js `global.fetch`
+wrapper; whether Supabase records it is up to Supabase). Socket events, the clock and workers carry
+socket or game ids instead.
+
+## F-069
+
+**Error tracking port (SEC-12) without a new dependency.** `observability/errorReporter.js` is a
+process-wide port (no-op by default; `reportError` never rejects). With `ERROR_WEBHOOK_URL` set, the
+composition root installs `clients/webhookErrorReporter.js`: one JSON POST per report (Slack/Discord
+`text`/`content` plus service, release `RAILWAY_GIT_COMMIT_SHA`, hostname, level, error with a stack
+up to 4 kB, redacted context), https only (http for localhost), 2 s abort, at most 20 reports a minute.
+Wired: fatal process errors (awaited before exit), HTTP 500s, socket `internal_error` and guarded
+handlers, token-verification outages, rating-function errors, parked or lost outbox results.
+**Deferred:** a hosted tracker (Sentry: a dependency; one more implementation of the port), release
+tags and source maps for the web app and the engine.
+
+## F-070
+
+**Drop `games.white_time_ms` / `black_time_ms` (SCHEMA-CLEANUP, follows F-028).** Nothing reads or
+writes them since M2. `supabase/migrations/20261114100000_drop_legacy_clock_columns.sql` first raises
+if any public function, policy or view names them, then `DROP COLUMN IF EXISTS`. **Apply only once
+every game server and the web app run M2 or later** (a pre-M2 server writes `white_time_ms`). Rollback:
+re-add as `integer` (the data was unused). Tests: pgTAP `04_legacy_clock_columns.test.sql`,
+`scripts/legacy-clock-columns.test.js`.
+
+## F-071
+
+**The Railway healthcheck targets `/readyz` (NODE-21).** A new deploy goes live only when Redis answers
+PING and Supabase a one-row query (2 s each) and the process is not draining. A deploy during a Redis
+or Supabase outage therefore does not go live and the previous version keeps serving: intended, a
+replica without Redis cannot run games. Railway uses the healthcheck at deploy time only. `/api/health`
+stays for existing monitors.
+
+## F-072
+
+**The game server's analysis depth limit is 20, the engine's maximum (F-063).** The server allowed 30
+and forwarded 21–30, which the engine refused (422 → `engine_rejected`). The boundary schema now
+refuses them with the same 400 as other invalid input.
