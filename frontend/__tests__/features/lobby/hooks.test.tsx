@@ -102,6 +102,19 @@ describe('useMatchmaking', () => {
         ]);
     });
 
+    test('a join_queue the server refuses stops the search and reports why [ACKS]', () => {
+        const onMatchFailed = jest.fn();
+        fake.emit.mockImplementationOnce((_event: string, _payload: unknown, ack?: (res: unknown) => void) => {
+            ack?.({ ok: false, error: 'invalid_time_control' });
+        });
+        const { result } = renderHook(() =>
+            useMatchmaking({ socket, router, profile, getTcMinutes: () => ({ mins: 3, inc: 0 }), onGameStart: jest.fn(), onMatchFailed }),
+        );
+        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3+0', increment: 0 }));
+        expect(result.current.searching).toBe(false);
+        expect(onMatchFailed).toHaveBeenCalledWith('invalid_time_control');
+    });
+
     test('match_failed stops the search and reports it; nothing navigates [G12]', () => {
         const onMatchFailed = jest.fn();
         const { result } = renderHook(() =>

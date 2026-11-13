@@ -117,7 +117,8 @@ describe('Play Online', () => {
         await renderLobby()
         playOnline()
         expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { ...ME }, time_control: '3+0', increment: 0 }],
+            // The third argument is the ack callback: a refused join is reported (ACKS).
+            ['join_queue', { user: { ...ME }, time_control: '3+0', increment: 0 }, expect.any(Function)],
         ])
     })
 

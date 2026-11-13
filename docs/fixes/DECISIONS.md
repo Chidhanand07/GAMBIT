@@ -63,6 +63,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
 | [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
 | [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
+| [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
 
 ---
 
@@ -1546,3 +1547,26 @@ instead of one file per ADR under `docs/refactor/adr/`.
   the database until the web app's stale-game cleanup or a manual fix; an outbox/retry queue
   is the full answer and is listed for the last phase. The log line names the game id so it
   can be found.
+
+## F-043
+
+**Client emits that the server can refuse wait for its ack, and a refusal is shown to the player (ACKS).**
+
+- **Context.** Since S15 every game-server handler acks `{ ok: true }` or `{ ok: false, error }`,
+  but the web client never passed an ack callback: a refused resign, a chat message in a
+  finished game, or a queue join with an invalid time control did nothing visible.
+- **Decision.**
+  - `lib/socket/ack.ts`: `onRejected(handler)` builds the ack callback (it fires only on
+    `ok: false`; a missing reason is `internal_error`), and `rejectionMessage(code)` turns a
+    reason into one sentence. Unknown codes get a generic sentence; codes are never shown raw.
+  - Game page: `make_move`, `resign`, `send_message`, `rematch_request`, `rematch_accept` and
+    `rematch_decline` pass the callback; the page shows the message with the existing toast
+    (`notify` is injected into the commands and the board hook). A refused rematch request
+    also resets the button from "sent" to idle. For a refused move the board is already
+    restored by the server's `move_rejected` + state resync (S1); the toast says why.
+  - Lobby: a refused `join_queue` stops the "searching" state and reports the reason through
+    the same callback as `match_failed` (F-036).
+- **Not covered (logged for the last phase).** There are no draw offers (F-009). The
+  challenge page and the challenge banner (`challenge_request` / `_accept` / `_decline`) and the
+  lobby's automatic re-queue after a reconnect still emit without an ack. No timeout is set on
+  acks: if the server never answers, nothing is shown (as before).

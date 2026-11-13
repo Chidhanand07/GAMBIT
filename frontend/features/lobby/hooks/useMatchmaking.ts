@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
 import { formatTimeControl } from '@/lib/chess/timeControl';
+import { onRejected } from '@/lib/socket/ack';
 import type { JoinQueuePayload } from '@/types/socket';
 import type { LobbyProfile, TcMinutes } from '../types';
 
@@ -16,6 +17,14 @@ interface MatchmakingOptions {
     onGameStart: () => void;
     /** Called when the server paired us but could not create the game (we are out of the queue). */
     onMatchFailed?: (reason: string) => void;
+}
+
+/** Ack callback for join_queue: a refused join ends the search and says why (ACKS). */
+function queueRefusal(setSearching: (value: boolean) => void, onMatchFailed?: (reason: string) => void) {
+    return onRejected((code) => {
+        setSearching(false);
+        onMatchFailed?.(code);
+    });
 }
 
 /** Seconds spent searching; resets to 0 when the search stops. */
@@ -95,8 +104,8 @@ export function useMatchmaking({
     }, [socket, router, profile, searching, getTcMinutes, onGameStart, onMatchFailed]);
 
     const joinQueue = (payload: JoinQueuePayload) => {
-        socket?.emit('join_queue', payload);
         setSearching(true);
+        socket?.emit('join_queue', payload, queueRefusal(setSearching, onMatchFailed));
     };
 
     const cancelSearch = () => {

@@ -8,6 +8,7 @@ import { Chess, type Color, type Square } from 'chess.js';
 import type { Socket } from 'socket.io-client';
 import type { GameAction, GameState } from '../state/gameReducer';
 import { isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
+import { onRejected, rejectionMessage } from '@/lib/socket/ack';
 
 interface Options {
     gameId: string;
@@ -15,6 +16,8 @@ interface Options {
     state: GameState;
     dispatch: Dispatch<GameAction>;
     chessRef: MutableRefObject<Chess>;
+    /** Shows the player why the server refused a move (the board itself is resynced by the server). */
+    notify?: (message: string) => void;
 }
 
 export interface ChessBoardControls {
@@ -50,7 +53,11 @@ function commitMoveWith(opts: Options, from: Square, to: Square, promotion: stri
     const moveObj = chess.move({ from, to, promotion });
     if (!moveObj) return;
     dispatch({ type: 'moveCommitted', fen: chess.fen(), from, to });
-    socket?.emit('make_move', { game_id: gameId, from, to, promotion });
+    socket?.emit(
+        'make_move',
+        { game_id: gameId, from, to, promotion },
+        onRejected((code) => opts.notify?.(rejectionMessage(code))),
+    );
     if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
 }
 
