@@ -130,11 +130,22 @@ describe('POST /api/analysis/engine', () => {
                 'http://localhost:8001/analyze',
                 {
                     method: 'POST',
-                    headers: ENGINE_HEADERS,
+                    // The request id goes along to the engine [OBSERVABILITY]. Was: ENGINE_HEADERS only.
+                    headers: { ...ENGINE_HEADERS, 'X-Request-Id': expect.stringMatching(/^[0-9a-f-]{36}$/) },
                     body: JSON.stringify({ fen: START_FEN, depth: 12 }),
                 },
             ],
         ]);
+    });
+
+    test('the incoming X-Request-Id is forwarded to the engine, and is the one we answer with [OBSERVABILITY]', async () => {
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        const res = await request(ctx.app)
+            .post('/api/analysis/engine')
+            .set('X-Request-Id', 'trace-abc-1')
+            .send({ fen: START_FEN, depth: 12 });
+        expect(res.headers['x-request-id']).toBe('trace-abc-1');
+        expect(ctx.fetch.mock.calls[0][1].headers['X-Request-Id']).toBe('trace-abc-1');
     });
 
     test('missing depth → 18; ENGINE_URL is honoured', async () => {

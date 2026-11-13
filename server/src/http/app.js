@@ -11,7 +11,7 @@ const express = require('express');
 const cors = require('cors');
 
 const { sendError } = require('./respond');
-const { createRequestLog } = require('./requestLog');
+const { createRequestLog, bindRequestContext } = require('./requestLog');
 
 const HTTP_FORBIDDEN = 403;
 const HTTP_NOT_FOUND = 404;
@@ -46,6 +46,8 @@ function createApp({ originPolicy }) {
         }),
     );
     app.use(express.json({ limit: JSON_BODY_LIMIT }));
+    // From here on, outgoing engine and Supabase calls carry this request's X-Request-Id.
+    app.use(bindRequestContext);
     return app;
 }
 

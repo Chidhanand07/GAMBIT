@@ -7,8 +7,10 @@
  *
  * Every request carries the shared secret in `X-Engine-Key` (the engine
  * rejects anything else). Without a secret no request is sent: the call
- * rejects instead (SEC-09).
+ * rejects instead (SEC-09). During an HTTP request the request id goes along
+ * as `X-Request-Id` (requestContext).
  */
+const { withRequestIdHeader } = require('../observability/requestContext');
 
 const JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json' });
 const ENGINE_KEY_HEADER = 'X-Engine-Key';
@@ -30,7 +32,7 @@ function createEngineClient({ baseUrl, sharedSecret }) {
         if (!secret) throw new Error('ENGINE_SHARED_SECRET is not set; refusing to call the engine');
         return fetch(`${baseUrl()}${path}`, {
             method: 'POST',
-            headers: { ...JSON_HEADERS, [ENGINE_KEY_HEADER]: secret },
+            headers: withRequestIdHeader({ ...JSON_HEADERS, [ENGINE_KEY_HEADER]: secret }),
             body: JSON.stringify(body),
         });
     }
