@@ -1,17 +1,26 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useProfile } from '@/components/ProfileProvider';
 
-const PresenceContext = createContext<{ onlineCount: number }>({ onlineCount: 1 });
+interface PresenceValue {
+    /** Number of signed-in users in the shared presence set (at least 1: the viewer). */
+    onlineCount: number;
+    /** Presence keys (profile ids) of the users currently online; empty while signed out. */
+    onlineUserIds: ReadonlySet<string>;
+}
+
+const NO_ONE_ONLINE: ReadonlySet<string> = new Set();
+
+const PresenceContext = createContext<PresenceValue>({ onlineCount: 1, onlineUserIds: NO_ONE_ONLINE });
 
 export function usePresence() {
     return useContext(PresenceContext);
 }
 
 export default function PresenceProvider({ children }: { children: React.ReactNode }) {
-    const [onlineCount, setOnlineCount] = useState(1);
+    const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(NO_ONE_ONLINE);
     const { profile } = useProfile();
 
     useEffect(() => {
@@ -25,7 +34,7 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
 
         const updateCount = () => {
             if (!mounted) return;
-            setOnlineCount(Math.max(1, Object.keys(channel.presenceState()).length));
+            setOnlineUserIds(new Set(Object.keys(channel.presenceState())));
         };
 
         // ALL handlers registered before subscribe()
@@ -47,8 +56,15 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
         // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: re-subscribe only when the user id changes; the username is read once per subscription
     }, [profile?.id]);
 
+    // A signed-out viewer has no subscription, so whatever the last one saw no longer applies.
+    const visibleIds = profile?.id ? onlineUserIds : NO_ONE_ONLINE;
+    const value = useMemo(
+        () => ({ onlineCount: Math.max(1, visibleIds.size), onlineUserIds: visibleIds }),
+        [visibleIds],
+    );
+
     return (
-        <PresenceContext.Provider value={{ onlineCount }}>
+        <PresenceContext.Provider value={value}>
             {children}
         </PresenceContext.Provider>
     );

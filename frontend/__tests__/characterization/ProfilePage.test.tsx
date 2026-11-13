@@ -7,7 +7,7 @@
  * @/lib/supabase/client and global.fetch. "LEGACY:" marks behaviour that looks
  * wrong but is asserted as-is.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn(), prefetch: jest.fn() }) }))
@@ -43,6 +43,10 @@ jest.mock('@/lib/supabase/client', () => ({
     }),
 }))
 
+// F11: the Online badge reads PresenceProvider's shared presence set.
+let onlineUserIds: ReadonlySet<string> = new Set()
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds }) }))
+
 import ProfilePage from '@/app/profile/[username]/page'
 import { routeParams } from '../helpers/params'
 
@@ -72,6 +76,7 @@ const FAIL = (body: unknown = {}) => () => jsonResponse(body, false)
 beforeEach(() => {
     channels.length = 0
     removeChannel.mockClear()
+    onlineUserIds = new Set()
     window.history.replaceState(null, '', '/')
     routes = {
         '/api/profile/bob': BOB,
@@ -519,29 +524,29 @@ describe('friends tab', () => {
 // ── Presence ────────────────────────────────────────────────────────────────
 
 describe('presence', () => {
-    test('subscribes to presence-watch-<id>-<Date.now()> keyed by profile id; shows Online when present', async () => {
-        const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
-        await renderProfile()
-        now.mockRestore()
-        expect(channels).toHaveLength(1)
-        const ch = channels[0]
-        expect(ch.name).toBe('presence-watch-u-bob-1700000000000')
-        expect(ch.opts).toEqual({ config: { presence: { key: 'u-bob' } } })
-        expect(ch.on).toHaveBeenCalledWith('presence', { event: 'sync' }, expect.any(Function))
-        expect(ch.subscribe).toHaveBeenCalledTimes(1)
+    // F11 (was: 'subscribes to presence-watch-<id>-<Date.now()> keyed by profile id'): the badge now
+    // reads PresenceProvider's shared `gambit-online-users` set, so the page opens no channel itself.
+    test('opens no presence channel of its own; shows Online when the shared presence set has the profile id', async () => {
+        const { rerender } = await renderProfile()
+        const page = () => <ProfilePage params={routeParams({ username: 'bob' })} />
+        expect(channels).toHaveLength(0)
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
 
-        ch.fireSync({ 'u-bob': [{}] })
+        onlineUserIds = new Set(['u-bob'])
+        rerender(page())
         expect(screen.getByText('Online')).toBeInTheDocument()
         expect(screen.getByTitle('Online now')).toBeInTheDocument()
 
-        ch.fireSync({ 'someone-else': [{}] })
+        onlineUserIds = new Set(['someone-else'])
+        rerender(page())
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
     })
 
-    test('unmount removes the channel', async () => {
+    // F11 (was: 'unmount removes the channel'): there is no page-owned channel to remove.
+    test('unmount removes no channel (the shared one belongs to PresenceProvider)', async () => {
         const { unmount } = await renderProfile()
         unmount()
-        await waitFor(() => expect(removeChannel).toHaveBeenCalledWith(channels[0]))
+        await settle()
+        expect(removeChannel).not.toHaveBeenCalled()
     })
 })
