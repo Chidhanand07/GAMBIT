@@ -78,9 +78,13 @@ export function profileUpdateFromPatch(patch: ProfilePatch): Record<string, stri
     return Object.keys(update).length > 0 ? update : null;
 }
 
-/** Updates the caller's own profile and returns the updated row. */
-export function updateProfile(admin: SupabaseClient, id: string, fields: Record<string, unknown>) {
-    return admin.from('profiles').update(fields).eq('id', id).select().single();
+/**
+ * Updates the caller's own profile and returns the updated row. `userClient` is the caller's
+ * session client (createUserClient): the `profiles_update` policy and the column grants
+ * (display_name, bio, country, avatar_url) decide what may change, not the service role.
+ */
+export function updateProfile(userClient: SupabaseClient, id: string, fields: Record<string, unknown>) {
+    return userClient.from('profiles').update(fields).eq('id', id).select().single();
 }
 
 /** Inserts a new profile row (no returning select). */

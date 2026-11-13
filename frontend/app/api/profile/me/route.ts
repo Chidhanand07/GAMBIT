@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireFreshUser, requireUser } from '@/lib/server/identity';
 import { createDefaultProfile, getProfileById, profileUpdateFromPatch, updateProfile } from '@/lib/server/profiles';
-import { createAdminClient } from '@/lib/server/supabase';
+import { createAdminClient, createUserClient } from '@/lib/server/supabase';
 import { parseJsonBody, schemas } from '@/lib/server/validation';
 
 export const dynamic = 'force-dynamic';
@@ -41,7 +41,7 @@ export async function PATCH(request: Request) {
     const update = profileUpdateFromPatch(body.data);
     if (!update) return NextResponse.json({ error: 'No profile fields to update' }, { status: 400 });
 
-    const { data, error } = await updateProfile(createAdminClient(), userId, update);
+    const { data, error } = await updateProfile(await createUserClient(), userId, update);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json(data);

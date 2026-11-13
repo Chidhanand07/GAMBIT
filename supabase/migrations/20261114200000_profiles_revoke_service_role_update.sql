@@ -1,0 +1,27 @@
+-- S8-PRIV (SEC-03, least privilege): the secret key can no longer UPDATE profiles.
+--
+-- 20261112100000_profiles_lockdown kept `GRANT ALL ... TO service_role`, and
+-- F-053 left table-level UPDATE in place because the web app still wrote
+-- profiles with the secret key (PATCH /api/profile/me). Anyone holding that key
+-- (a leaked env var, a compromised route) could rewrite every rating.
+--
+-- Who still writes profiles, and how, after this migration:
+--   * ratings and statistics: public.apply_game_result (security definer, owned
+--     by the migration role), called by the game server with the secret key.
+--     It runs with its owner's privileges, so this REVOKE does not affect it.
+--   * display fields: PATCH /api/profile/me now updates through the caller's
+--     own session (role `authenticated`), limited by the "profiles_update"
+--     policy and the column grants (display_name, bio, country, avatar_url).
+--   * new rows: signup, the OAuth callback and the /api/profile/me auto-create
+--     INSERT with the secret key. INSERT is kept.
+-- Nothing in server/ updates profiles directly (profilesRepository only reads;
+-- F-053 removed updateById), and the chess engine does not touch profiles.
+--
+-- Deploy order: deploy the web app that writes through the session client
+-- FIRST, then apply this migration. Applied earlier, the old web app's profile
+-- edits fail with 42501 until it is deployed (nothing else breaks).
+--
+-- Rollback: GRANT UPDATE ON TABLE public.profiles TO service_role;
+
+-- Table-level REVOKE also removes any column-level UPDATE grants.
+REVOKE UPDATE ON TABLE public.profiles FROM service_role;

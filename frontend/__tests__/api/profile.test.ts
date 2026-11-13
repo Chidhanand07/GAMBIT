@@ -7,7 +7,7 @@ import { GET as getMe, PATCH as patchMe } from '@/app/api/profile/me/route'
 import { GET as getProfile } from '@/app/api/profile/[username]/route'
 import { GET as getStats } from '@/app/api/profile/[username]/stats/route'
 import { GET as getGames } from '@/app/api/profile/[username]/games/route'
-import { db, req, json, resetHarness, signInWithCookie, uid } from '../helpers/routeHarness'
+import { db, req, json, resetHarness, signInWithCookie, supabaseJsMock, supabaseSsrMock, uid } from '../helpers/routeHarness'
 
 beforeEach(() => {
     resetHarness()
@@ -84,6 +84,19 @@ describe('PATCH /api/profile/me', () => {
         signInWithCookie(uid('me'))
         expect((await patch({ rating_rapid: 3000 })).status).toBe(400)
         expect(db.callsFor('profiles')).toHaveLength(0)
+    })
+
+    // S8-PRIV: the write runs as the signed-in user (RLS + column grants), so service_role
+    // can lose UPDATE on profiles.
+    test('S8-PRIV: the update goes through the session client, never the service-role key', async () => {
+        signInWithCookie(uid('me'))
+        supabaseJsMock.createClient.mockClear()
+        supabaseSsrMock.createServerClient.mockClear()
+        db.queue('profiles', { data: { id: uid('me') }, error: null })
+        expect((await patch({ bio: 'hi' })).status).toBe(200)
+        expect(supabaseJsMock.createClient).not.toHaveBeenCalled()
+        expect(supabaseSsrMock.createServerClient).toHaveBeenCalled()
+        expect(db.callsFor('profiles')[0].ops).toContainEqual(['eq', 'id', uid('me')])
     })
 
     test('database error → 500', async () => {
