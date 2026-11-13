@@ -121,3 +121,24 @@ describe('send_message', () => {
         expect(supabase.calls).toEqual([]);
     });
 });
+
+describe('rate limit on chat (per user and event) [RATE-LIMITS]', () => {
+    test('the 6th message within 10 s is refused with rate_limited and a retry hint; nothing is relayed', async () => {
+        const { game, white, black } = await ctx.seatedGame();
+        // Late events of the previous test (same user ids) must not count against this one.
+        const redis = require('../../lib/redis');
+        for (const key of [...redis._strings.keys()]) if (key.startsWith('ratelimit:')) redis._strings.delete(key);
+        const got = record(black, 'chat_message');
+        for (let i = 0; i < 5; i++) {
+            expect(await emitAck(white, 'send_message', { game_id: game.id, text: `m${i}` })).toEqual({ ok: true });
+        }
+        const ack = await emitAck(white, 'send_message', { game_id: game.id, text: 'spam' });
+        expect(ack).toMatchObject({ ok: false, error: 'rate_limited' });
+        expect(ack.retryAfterMs).toBeGreaterThan(0);
+        await sleep(100);
+        // The five allowed lines arrive (possibly after the acks); the refused one never does.
+        expect(got.map((m) => m.text)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4']);
+        // The other player has their own budget.
+        expect(await emitAck(black, 'send_message', { game_id: game.id, text: 'hi' })).toEqual({ ok: true });
+    });
+});

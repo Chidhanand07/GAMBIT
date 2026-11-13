@@ -53,6 +53,22 @@ Alternatively, add a **Redis add-on** directly in Railway (simpler but costs ~$5
 
 ---
 
+### 2b. REST credentials for the Next.js rate limiter (Vercel)
+
+Vercel functions reach Upstash over HTTPS (REST API), not the Redis protocol. In the Upstash
+console open the database → **REST API** and copy:
+- **UPSTASH_REDIS_REST_URL** (e.g. `https://xxx.upstash.io`)
+- **UPSTASH_REDIS_REST_TOKEN** (the read-write token, not the read-only one)
+
+Set both on **Vercel only** (Production and Preview), never with `NEXT_PUBLIC_`. They are not
+needed on Railway or Render. The same database the game server uses is fine (keys are prefixed
+`gambit:rl:`). If either is missing, the rate limits on login, signup, friend requests and
+`/api/maverick-move` are OFF: the app logs `[rate-limit] … not configured` once per instance and
+lets requests through. The game server's own limits (moves, chat, queue joins, challenges,
+analysis, username checks, invite look-ups) use `REDIS_URL` and need nothing extra.
+
+---
+
 ## 3. Chess Engine → Render
 
 The engine is deployed as a **Docker** service. `chess-engine/Dockerfile` is the one
@@ -91,6 +107,8 @@ If `GET /health` answers `"engine": "Engine unavailable"`, the binary was not fo
 | `SUPABASE_URL` | your Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`); legacy `SUPABASE_SERVICE_KEY` still read |
 | `STOCKFISH_POOL_SIZE` | `2` (free tier) or `4` (paid) |
+| `ENGINE_MAX_QUEUE` | optional; requests allowed to WAIT for a Stockfish instance beyond the `STOCKFISH_POOL_SIZE` in use (default `2 × STOCKFISH_POOL_SIZE`). Beyond it: 503 `{"detail":"Engine busy"}` + `Retry-After`. |
+| `ENGINE_QUEUE_TIMEOUT_SECONDS` | optional; longest wait for an instance before 503 "Engine busy" (default `5`, must be > 0). `GET /health` never waits; post-game reviews are checked when requested and then wait. |
 | `ENGINE_SHARED_SECRET` | a long random string (`openssl rand -hex 32`). **Required**: until it is set every endpoint except `GET /health` answers 503. Use the same value on Railway and Vercel. |
 | `MAVERICK_MODEL_URL` | optional, see 3e. Leave empty while `style_model.pt` ships in the image. |
 | `MAVERICK_MODEL_SHA256` | required whenever `MAVERICK_MODEL_URL` is set, see 3e. |
@@ -182,6 +200,8 @@ Go to **Settings → Environment Variables** and add all of these for **Producti
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (`sb_publishable_…`); legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` still read |
 | `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`), server-side only; legacy `SUPABASE_SERVICE_ROLE_KEY` still read |
 | `NEXT_PUBLIC_SOCKET_URL` | Railway server URL (e.g. `https://gambit-server.up.railway.app`) |
+| `UPSTASH_REDIS_REST_URL` | Upstash REST URL (see 2b). Server-only. |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash REST read-write token (see 2b). Server-only. |
 | `GAMBIT_ENGINE_URL` | Render engine URL. Server-side only (used by `/api/maverick-move`); the old `ENGINE_URL` still works. |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Server-side only: **never** prefix with `NEXT_PUBLIC_`. Without it "play the computer" answers 503. |
 

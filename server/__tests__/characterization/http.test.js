@@ -467,3 +467,35 @@ describe('CORS (Socket.IO handshake) [S13]', () => {
         expect(res.status).toBe(200);
     });
 });
+
+describe('rate limits (shared in Redis, per client IP) [RATE-LIMITS]', () => {
+    test('the 21st analysis request in a minute → 429 with Retry-After; the engine is not called', async () => {
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ score: 0.1 }) });
+        for (let i = 0; i < 20; i++) {
+            expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
+        }
+        ctx.fetch.mockClear();
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(429);
+        expect(res.body).toEqual({ error: 'rate_limited' });
+        expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+        expect(Number(res.headers['retry-after'])).toBeLessThanOrEqual(60);
+        expect(ctx.fetch).not.toHaveBeenCalled();
+    });
+
+    test('limits are per client: another IP is not affected', async () => {
+        for (let i = 0; i < 61; i++) await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.1');
+        const other = await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.2');
+        expect(other.status).toBe(200);
+    });
+
+    test('routes without a rule are not limited', async () => {
+        for (let i = 0; i < 100; i++) expect((await request(ctx.app).get('/api/health')).status).toBe(200);
+    });
+
+    test('Redis failing → allowed (fail open, ADR F-046)', async () => {
+        require('../../lib/redis')._failNext('exec');
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
+    });
+});

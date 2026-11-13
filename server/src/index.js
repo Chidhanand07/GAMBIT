@@ -42,6 +42,11 @@ const { createSocialService } = require('./services/socialService');
 const { createProfileService } = require('./services/profileService');
 const { createTokenVerifier } = require('./services/tokenVerifier');
 const { createOriginPolicy } = require('./services/originPolicy');
+const { createRateLimiter } = require('./services/rateLimiter');
+const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
+const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
+const { createHttpRateLimit } = require('./http/rateLimit');
+const { createSocketRateLimit } = require('./sockets/rateLimit');
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
@@ -98,6 +103,10 @@ const chatService = createChatService({
     emitter,
 });
 
+// Rate limits live in Redis, so every instance shares them (NODE-12).
+const rateLimiter = createRateLimiter({ store: createRateLimitRepository(redis), rules: RATE_LIMIT_RULES });
+app.use(createHttpRateLimit({ limiter: rateLimiter }));
+
 registerRoutes(app, {
     queueSize: () => matchmaking.queue.size,
     profileService: createProfileService({ profilesRepo: createProfilesRepository(supabase) }),
@@ -118,6 +127,7 @@ registerSocketHandlers(io, {
     socialService,
     verifyToken: tokenVerifier.verify,
     tokenDeadline: tokenVerifier.deadline,
+    rateLimit: createSocketRateLimit({ limiter: rateLimiter }),
 });
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */

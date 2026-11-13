@@ -46,10 +46,26 @@ function createRedisMock() {
             const core = {
                 get(key) { maybeFail('get'); expire(key); return strings.has(key) ? strings.get(key) : null; },
                 del(key) { maybeFail('del'); expiries.delete(key); return strings.delete(key) ? 1 : 0; },
+                /** SET key value PX ms NX: only when the key does not exist. */
+                setPxNx(key, value, ms) {
+                    maybeFail('set'); expire(key);
+                    if (strings.has(key)) return null;
+                    strings.set(key, String(value)); expiries.set(key, Date.now() + ms); return 'OK';
+                },
+                incr(key) { maybeFail('incr'); expire(key); const n = Number(strings.get(key) ?? 0) + 1; strings.set(key, String(n)); return n; },
+                pttl(key) { expire(key); if (!strings.has(key)) return -2; return expiries.has(key) ? expiries.get(key) - Date.now() : -1; },
             };
             const tx = {
                 get(key) { queued.push(() => core.get(key)); return tx; },
                 del(key) { queued.push(() => core.del(key)); return tx; },
+                /** SET key value PX ms NX (the only form the code uses inside MULTI). */
+                set(key, value, ...options) {
+                    const [px, ms, nx] = options;
+                    if (px !== 'PX' || nx !== 'NX') throw new Error('mock supports SET key value PX ms NX only');
+                    queued.push(() => core.setPxNx(key, value, ms)); return tx;
+                },
+                incr(key) { queued.push(() => core.incr(key)); return tx; },
+                pttl(key) { queued.push(() => core.pttl(key)); return tx; },
                 async exec() {
                     maybeFail('exec');
                     return queued.map((run) => {

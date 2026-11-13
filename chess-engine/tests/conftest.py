@@ -89,6 +89,9 @@ class EngineSwitch:
         if sf is not None:
             self.released += 1
 
+    def status(self):
+        return "Engine unavailable" if self.instance is None else "online"
+
 
 @pytest.fixture(autouse=True)
 def engine_switch(monkeypatch):
@@ -103,6 +106,7 @@ def engine_switch(monkeypatch):
     for mod in (engine, main):
         monkeypatch.setattr(mod, "get_stockfish_instance", sw.acquire)
         monkeypatch.setattr(mod, "release_stockfish_instance", sw.release)
+        monkeypatch.setattr(mod, "engine_status", sw.status)
     return sw
 
 
@@ -133,3 +137,43 @@ def client(engine_key):
     import main
 
     return TestClient(main.app, headers={"X-Engine-Key": engine_key})
+
+
+# ── the real pool (engine.py) over fake engines ──────────────────────────────
+
+REAL_POOL_SIZE = 2
+REAL_POOL_FUNCTION_NAMES = ("get_engine", "get_stockfish_instance", "release_stockfish_instance", "engine_status")
+_real_pool_functions: dict = {}
+
+
+def pytest_configure(config):
+    """Capture the real pool functions before any autouse fixture swaps them for doubles."""
+    import engine
+
+    _real_pool_functions.update({name: getattr(engine, name) for name in REAL_POOL_FUNCTION_NAMES})
+
+
+@pytest.fixture
+def real_pool(monkeypatch):
+    """
+    The real pool functions (engine.py), over a pool of REAL_POOL_SIZE fake
+    engines, instead of the EngineSwitch doubles the other tests use.
+    """
+    import computer_engine
+    import engine
+    import main
+
+    while not engine._pool.empty():
+        engine._pool.get_nowait()
+    for _ in range(REAL_POOL_SIZE):
+        engine._pool.put(FakeStockfish())
+    monkeypatch.setattr(engine, "_pool_initialized", True)
+    monkeypatch.setattr(engine, "_pool_capacity", REAL_POOL_SIZE)
+    monkeypatch.setattr(engine, "_gate", engine.AdmissionGate(REAL_POOL_SIZE + engine.ENGINE_MAX_QUEUE))
+    for mod in (engine, computer_engine, main):
+        for name, fn in _real_pool_functions.items():
+            if hasattr(mod, name):
+                monkeypatch.setattr(mod, name, fn)
+    yield engine._pool
+    while not engine._pool.empty():
+        engine._pool.get_nowait()

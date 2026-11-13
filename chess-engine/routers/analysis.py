@@ -45,11 +45,12 @@ def build_router(seams: EngineSeams) -> APIRouter:
         if review_service.parse_game_with_moves(req.pgn) is None:
             raise HTTPException(status_code=422, detail="PGN has no moves")
 
-        # Quick check engine is available without holding a pool slot
-        sf_check = seams.get_stockfish_instance(1)
-        if not sf_check:
-            raise HTTPException(status_code=503, detail="Engine unavailable")
-        seams.release_stockfish_instance(sf_check)
+        # Quick check that an engine is available, through the bounded request gate: when
+        # the pool is saturated this answers 503 "Engine busy" BEFORE anything is queued,
+        # so an admitted review is never rejected half-way (RATE-LIMITS ADR).
+        with seams.get_engine(1) as sf_check:
+            if not sf_check:
+                raise HTTPException(status_code=503, detail="Engine unavailable")
 
         # The review is written to the games row: only for a game that exists and is over.
         game_id = str(req.game_id)

@@ -24,6 +24,8 @@ const ORIGIN_NOT_ALLOWED = Object.freeze({ error: 'origin_not_allowed' });
  */
 function createApp({ originPolicy }) {
     const app = express();
+    // Railway terminates TLS in front of the app: one proxy hop, so req.ip is the client (rate limits).
+    app.set('trust proxy', 1);
     app.use((req, res, next) => {
         if (originPolicy().allowsRequest(req.headers.origin)) return next();
         res.status(HTTP_FORBIDDEN).json(ORIGIN_NOT_ALLOWED);

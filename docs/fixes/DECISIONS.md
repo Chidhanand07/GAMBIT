@@ -1722,3 +1722,48 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - *S6, S14 (and G22) were implemented on a side branch by a helper agent and cherry-picked; the
   two files that branch could not touch were cleaned here, which removed its temporary lint
   exemption.*
+
+## F-046
+
+**Rate limits in shared stores: Redis for the game server, Upstash REST for the web app, a bounded queue in the engine; the limiters fail open (RATE-LIMITS).**
+
+- **Context.** No endpoint, socket event or engine path had a limit (NODE-12). The game server
+  can run several instances, and Vercel runs many function instances, so per-process counters
+  would not limit anything.
+- **Game server.**
+  - `domain/rateLimits.js`: one table of named rules and the pure decision. Socket events, per
+    user and event type: moves 20 per 2 s, chat 5 per 10 s, queue joins 10 per minute,
+    challenges/rematch requests 10 per minute, any other event 60 per 10 s. HTTP, per client IP:
+    analysis 20 per minute, username checks 60 per minute, invite look-ups and joins 30 per
+    minute.
+  - Fixed windows in Redis: one MULTI (`SET key 0 PX window NX`, `INCR`, `PTTL`), so every
+    instance shares the counter and every key expires with its window.
+  - Sockets: a `socket.use` middleware runs before validation; a limited event is acked
+    `{ ok: false, error: 'rate_limited', retryAfterMs }` and goes no further. HTTP: a middleware
+    answers `429 { error: 'rate_limited' }` with `Retry-After` (seconds). Express trusts one
+    proxy hop (Railway) so `req.ip` is the client.
+- **Web app (Vercel).** Upstash REST pipeline (`INCR`, `PEXPIRE … NX`, `PTTL`) with `fetch`, a
+  1 s timeout, keys `gambit:rl:<rule>:<sha256(subject)>` (no raw IP or e-mail stored). Rules:
+  `/api/maverick-move` 60/min per IP; login 20 per 10 min per IP and 10 per 15 min per e-mail;
+  signup 5/hour per IP; friend requests 30/hour per verified user. Client IP: the first
+  `x-forwarded-for` entry, then `x-real-ip`. `maverick-move` is the web app's only engine proxy.
+- **Engine.** An admission gate of `STOCKFISH_POOL_SIZE + ENGINE_MAX_QUEUE` (default twice the
+  pool) and a wait of at most `ENGINE_QUEUE_TIMEOUT_SECONDS` (5): beyond either, `503 "Engine
+  busy"` with `Retry-After`. `/health` no longer takes an instance. A full-game review is
+  admitted (or refused with 503) when it is requested; once admitted, its background task waits
+  up to 600 s rather than being dropped after "Analysis queued".
+- **Fail open (the brief asks for this choice to be documented).** If a limiter's store is
+  unconfigured (web: no Upstash variables) or failing, the request is allowed and logged.
+  Rate limiting is overload and abuse protection, not authentication or authorization, which
+  SEC-09 requires to fail closed. Failing closed would turn an Upstash or Redis hiccup, or a
+  missing variable on a preview deploy, into an outage of sign-in, chat and moves. The
+  protected resources keep their own defences meanwhile (Supabase Auth's limits, the engine's
+  bounded queue, authentication).
+- **Behaviour changes.** Bursts beyond these limits get 429 / `rate_limited` acks. A saturated
+  engine answers 503 quickly instead of holding requests for 10 s; the web app's computer
+  opponent currently maps that to 502 (passing 503 + Retry-After through is a follow-up).
+- **Not verified.** A real Upstash database (`PEXPIRE … NX` support is inferred from "Redis
+  protocol up to 8.4"); Vercel's `x-forwarded-for` handling; behaviour with several uvicorn
+  workers (the engine gate is per process).
+- *The web and engine parts were implemented on a side branch by a helper agent
+  (`wip/medium-3-limits`) and squashed into this item's single commit.*

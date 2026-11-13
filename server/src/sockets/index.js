@@ -62,6 +62,7 @@ function clientOf(socket) {
  * @property {import('./handlers/social').SocialHandlerService} socialService
  * @property {(token: string) => Promise<string | null>} verifyToken access token → user id (null when invalid)
  * @property {(token: string) => number} tokenDeadline when a socket opened with the token must be closed
+ * @property {ReturnType<typeof import('./rateLimit').createSocketRateLimit>} [rateLimit] per-user, per-event limit (NODE-12)
  */
 
 /**
@@ -75,6 +76,7 @@ function registerSocketHandlers(io, deps) {
     io.on('connection', (socket) => {
         console.log('Client connected:', socket.id);
         const client = clientOf(socket);
+        if (deps.rateLimit) socket.use(deps.rateLimit(socket));
         registerSessionHandlers(socket, client, deps);
         registerLobbyHandlers(socket, deps);
         registerGameHandlers(socket, client, deps);
