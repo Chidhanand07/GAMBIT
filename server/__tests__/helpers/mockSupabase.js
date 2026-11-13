@@ -12,6 +12,7 @@
  *   }));
  *   const { supabase } = require('../supabase');
  *   supabase.queue('profiles', { data: [...], error: null });
+ *   supabase.queue('rpc:apply_game_result', { data: 'applied', error: null });
  */
 
 const CHAIN_METHODS = [
@@ -48,8 +49,16 @@ function createSupabaseMock() {
         return builder;
     }
 
+    /** `supabase.rpc(fn, args)`: recorded as table `rpc:<fn>`, op `['rpc', args]`. */
+    function rpc(fn, args) {
+        const call = { table: `rpc:${fn}`, ops: [['rpc', args]] };
+        calls.push(call);
+        return nextResult(call);
+    }
+
     const supabase = {
         from: jest.fn(from),
+        rpc: jest.fn(rpc),
         auth: {
             getUser: jest.fn(async () => ({ data: { user: null }, error: { message: 'no user' } })),
         },
@@ -87,6 +96,7 @@ function createSupabaseMock() {
             queues.clear();
             calls.length = 0;
             supabase.from.mockClear();
+            supabase.rpc.mockClear();
             supabase.auth.getUser.mockReset();
             supabase.auth.getUser.mockImplementation(
                 async () => ({ data: { user: null }, error: { message: 'no user' } })
