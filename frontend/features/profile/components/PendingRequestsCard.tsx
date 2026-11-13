@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { PendingFriendRequest } from '@/types/friendship';
 import type { FriendRequestAction } from '../hooks/useFriends';
 import { AvatarImg } from './AvatarImg';
+import { profileHref } from '../links';
 
 const DEFAULT_RATING = 1200;
 
@@ -27,7 +28,7 @@ function PendingRow({ req, onRespond }: { req: PendingFriendRequest; onRespond: 
                 <RequesterAvatar requester={requester} />
                 <div>
                     <Link
-                        href={`/profile/${requester?.username}`}
+                        href={profileHref(requester?.username ?? '')}
                         className="text-text-primary text-sm font-medium hover:text-accent transition-colors"
                     >
                         {requester?.display_name || requester?.username}

@@ -5,6 +5,7 @@ import type { Profile, ProfileSummary } from '@/types/profile';
 import type { ProfileGameRow } from '@/types/profilePage';
 import type { RatingField, SpeedBucket } from '@/types/timeControl';
 import { accColor, formatDate, gameOutcome } from '../format';
+import { gameHref, profileHref } from '../links';
 
 const TC_ICONS: Record<SpeedBucket, string> = { bullet: '⚡', blitz: '🔥', rapid: '⏱', classical: '📖' };
 const DEFAULT_TC_ICON = '⏱';
@@ -47,7 +48,7 @@ function Players({ profileName, ratingField, isWhite, me, opponent }: PlayersPro
                 <ColorSwatch white={!isWhite} />
                 {opponent?.username ? (
                     <Link
-                        href={`/profile/${opponent.username}`}
+                        href={profileHref(opponent.username)}
                         className="text-text-secondary text-sm hover:text-accent transition-colors truncate"
                     >
                         {opponent.display_name || opponent.username}
@@ -135,7 +136,7 @@ export function GameHistoryRow({ game, profile, striped }: GameHistoryRowProps) 
             </div>
             <div className="shrink-0 ml-3">
                 <Link
-                    href={`/game/${game.id}`}
+                    href={gameHref(game.id)}
                     className="px-3 py-1.5 bg-elevated hover:bg-hover border border-border rounded-lg text-xs text-text-secondary hover:text-text-primary transition-colors"
                 >
                     Review

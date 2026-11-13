@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Swords } from 'lucide-react';
 import type { Friend } from '@/types/friendship';
 import { AvatarImg } from './AvatarImg';
+import { challengeHref, profileHref } from '../links';
 
 const DEFAULT_RATING = 1200;
 
@@ -25,7 +26,7 @@ function FriendRow({ friend: f, canChallenge }: { friend: Friend; canChallenge: 
                 </div>
                 <div>
                     <Link
-                        href={`/profile/${f.username}`}
+                        href={profileHref(f.username)}
                         className="text-text-primary text-sm font-medium hover:text-accent transition-colors block"
                     >
                         {f.display_name || f.username}
@@ -37,7 +38,7 @@ function FriendRow({ friend: f, canChallenge }: { friend: Friend; canChallenge: 
             </div>
             {canChallenge && (
                 <Link
-                    href={`/challenge/${f.username}`}
+                    href={challengeHref(f.username)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-surface text-xs font-medium rounded-lg transition-colors"
                 >
                     <Swords size={12} strokeWidth={1.5} /> Challenge

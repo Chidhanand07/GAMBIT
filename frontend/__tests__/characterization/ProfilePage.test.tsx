@@ -163,20 +163,21 @@ describe('initial load', () => {
         expect(screen.getByText('Could not load this profile.')).toBeInTheDocument()
     })
 
-    test('usernames are URI-encoded everywhere EXCEPT the games-tab request', async () => {
+    // F12 (was: 'usernames are URI-encoded everywhere EXCEPT the games-tab request').
+    test('usernames are URI-encoded everywhere, the games-tab request included', async () => {
         const name = 'bob smith'
         routes = {
             '/api/profile/bob%20smith': { ...BOB, username: name },
             '/api/profile/me': ME,
             '/api/profile/bob%20smith/games?limit=5&offset=0': { games: [] },
             '/api/friends/status/bob%20smith': { status: 'none' },
-            '/api/profile/bob smith/games?limit=15&offset=0': { games: [] },
+            '/api/profile/bob%20smith/games?limit=15&offset=0': { games: [] },
         }
         await renderProfile(name)
         click(tab(/^Games/))
         await settle()
-        // LEGACY: loadGames does not encodeURIComponent the username
-        expect(urls()).toContain('/api/profile/bob smith/games?limit=15&offset=0')
+        expect(urls()).toContain('/api/profile/bob%20smith/games?limit=15&offset=0')
+        expect(urls()).not.toContain('/api/profile/bob smith/games?limit=15&offset=0')
         expect(urls()).toContain('/api/friends/status/bob%20smith')
     })
 })

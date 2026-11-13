@@ -5,6 +5,7 @@ import { displayTimeControl } from '@/lib/chess/timeControl';
 import type { ProfileGameRow } from '@/types/profilePage';
 import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
 import { formatDate, gameOutcome } from '../format';
+import { profileHref } from '../links';
 
 const OUTCOME_TEXT: Record<PlayerOutcome, { label: string; className: string }> = {
     win: { label: 'Win', className: 'text-indicator-green' },
@@ -23,7 +24,7 @@ function RecentGameRow({ game, profileId }: { game: ProfileGameRow; profileId: s
                 <span className={`text-xs font-medium w-8 ${resultClr}`}>{result}</span>
                 {opp?.username ? (
                     <Link
-                        href={`/profile/${opp.username}`}
+                        href={profileHref(opp.username)}
                         className="text-text-secondary text-sm hover:text-accent transition-colors"
                     >
                         vs {opp.display_name || opp.username}

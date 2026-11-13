@@ -15,14 +15,17 @@ test.each<[string, () => Promise<unknown>, unknown[]]>([
         () => api.fetchRecentGames('bob smith'),
         ['/api/profile/bob%20smith/games?limit=5&offset=0', { cache: 'no-store' }],
     ],
+    // F12 (was: 'fetchProfileGamesPage (LEGACY: not encoded)' → '/api/profile/bob smith/games?...').
     [
-        'fetchProfileGamesPage (LEGACY: not encoded)',
+        'fetchProfileGamesPage',
         () => api.fetchProfileGamesPage('bob smith', 15, 30),
-        ['/api/profile/bob smith/games?limit=15&offset=30', { cache: 'no-store' }],
+        ['/api/profile/bob%20smith/games?limit=15&offset=30', { cache: 'no-store' }],
     ],
     ['fetchProfileStats', () => api.fetchProfileStats('a/b'), ['/api/profile/a%2Fb/stats', { cache: 'no-store' }]],
     ['fetchFriendStatus', () => api.fetchFriendStatus('bob smith'), ['/api/friends/status/bob%20smith']],
     ['fetchFriendsOf', () => api.fetchFriendsOf('u-1'), ['/api/friends?userId=u-1']],
+    // F12: ids are encoded too.
+    ['fetchFriendsOf (encoded)', () => api.fetchFriendsOf('a&b=c'), ['/api/friends?userId=a%26b%3Dc']],
     ['fetchPendingFriendRequests', () => api.fetchPendingFriendRequests(), ['/api/friends/pending']],
     [
         'sendFriendRequest',
@@ -40,6 +43,11 @@ test.each<[string, () => Promise<unknown>, unknown[]]>([
         'respondToFriendRequest',
         () => api.respondToFriendRequest('f-1', 'decline'),
         ['/api/friends/f-1?action=decline', { method: 'PUT' }],
+    ],
+    [
+        'respondToFriendRequest (encoded)',
+        () => api.respondToFriendRequest('../x?y', 'accept'),
+        ['/api/friends/..%2Fx%3Fy?action=accept', { method: 'PUT' }],
     ],
 ])('%s calls fetch with the legacy url/options', async (_name, call, expected) => {
     await call();
