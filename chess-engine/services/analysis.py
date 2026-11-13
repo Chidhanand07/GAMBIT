@@ -51,11 +51,48 @@ def _eval_before_for_mover(evaluation: dict, player_color: chess.Color) -> Any:
     return raw_cp if player_color == chess.WHITE else -raw_cp
 
 
-def _best_cp_for_mover(top_moves: list, player_color: chess.Color) -> Any:
-    eval_best_cp = top_moves[0]["Centipawn"] if top_moves and top_moves[0]["Centipawn"] is not None else 0
-    if top_moves and top_moves[0]["Centipawn"] is not None:
-        eval_best_cp = eval_best_cp if player_color == chess.WHITE else -eval_best_cp
-    return eval_best_cp
+def top_line_cp(top_move: dict) -> int:
+    """
+    Score of one `get_top_moves()` line in centipawns, from WHITE's point of view
+    (the `stockfish` package reports both Centipawn and Mate that way).
+
+    A forced mate has no centipawn score: it is worth +MATE_CP when White mates
+    (Mate > 0) and -MATE_CP when Black mates (Mate < 0), never 0.
+    """
+    cp = top_move.get("Centipawn")
+    if cp is not None:
+        return cp
+    mate = top_move.get("Mate")
+    if not mate:
+        return 0
+    return MATE_CP if mate > 0 else -MATE_CP
+
+
+def _best_cp_for_mover(top_moves: list, player_color: chess.Color) -> int:
+    """Score of the engine's top line from the mover's point of view (0 without a line)."""
+    if not top_moves:
+        return 0
+    best_cp = top_line_cp(top_moves[0])
+    return best_cp if player_color == chess.WHITE else -best_cp
+
+
+def parse_played_move(board: chess.Board, text: str) -> chess.Move | None:
+    """
+    The legal move `text` names in `board`, or None.
+
+    UCI is tried first ("e2e4", "a7a8q"); only when `text` is not a legal UCI
+    move is it read as SAN ("Nbd7", "exd5", "O-O-O"). The length of the string
+    says nothing about its notation. A null move is not a played move.
+    """
+    text = text.strip()
+    for parse in (board.parse_uci, board.parse_san):
+        try:
+            move = parse(text)
+        except ValueError:  # invalid, illegal or ambiguous in this notation
+            continue
+        if move:
+            return move
+    return None
 
 
 def _eval_after_for_mover(evaluation: dict) -> Any:
@@ -106,9 +143,8 @@ def analyze_move_cp(sf: Any, board_fen: str, move_played_san: str, player_color:
 
     # Eval after user move
     b = chess.Board(board_fen)
-    try:
-        user_move = b.parse_uci(move_played_san) if len(move_played_san) in (4, 5) else b.parse_san(move_played_san)
-    except Exception:
+    user_move = parse_played_move(b, move_played_san)
+    if user_move is None:
         return 0, "Mistake", eval_before_normalized, 0, 0, None, None, 0.0
 
     b.push(user_move)
