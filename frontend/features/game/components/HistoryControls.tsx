@@ -31,7 +31,7 @@ export default function HistoryControls({ viewIndex, snapshotCount, isLive, goTo
             </button>
             <button
                 onClick={() => goToMove(stepForwardIndex(viewIndex, snapshotCount))}
-                disabled={isLive && empty}
+                disabled={isLive}
                 className={BUTTON}
             >
                 <ChevronRight {...ICON} />

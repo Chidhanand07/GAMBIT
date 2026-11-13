@@ -582,21 +582,20 @@ describe('history navigation', () => {
         socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
     }
 
-    test('ArrowLeft steps into history (first press lands on the LAST snapshot = live position); ArrowRight past the end returns live', async () => {
+    test('the first ArrowLeft from live shows the position before the last move; ArrowRight returns live [F6]', async () => {
         await twoMoves()
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
-        // LEGACY: snapshots hold post-move FENs, so "move 2 of 2" is the live board
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        expect(pieceOn('e5')).toBe('bp')
-        fireEvent.keyDown(document, { key: 'ArrowLeft' })
+        // Was (LEGACY): snapshots hold post-move FENs, so the first press showed "move 2 of 2" = the live board.
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument()
         expect(pieceOn('e5')).toBeNull()
+        expect(pieceOn('e4')).toBe('wp')
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument() // clamps at 0
         fireEvent.keyDown(document, { key: 'ArrowRight' })
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        fireEvent.keyDown(document, { key: 'ArrowRight' })
         expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument()
+        expect(pieceOn('e5')).toBe('bp')
+        fireEvent.keyDown(document, { key: 'ArrowRight' })
+        expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument() // already live
     })
 
     test('arrow keys are ignored while typing in an input', async () => {
