@@ -3,7 +3,7 @@ import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl, displayTimeControl } from '@/lib/chess/timeControl';
 import type { Profile, ProfileSummary } from '@/types/profile';
 import type { ProfileGameRow } from '@/types/profilePage';
-import type { SpeedBucket } from '@/types/timeControl';
+import type { RatingField, SpeedBucket } from '@/types/timeControl';
 import { accColor, formatDate, gameOutcome } from '../format';
 
 const TC_ICONS: Record<SpeedBucket, string> = { bullet: '⚡', blitz: '🔥', rapid: '⏱', classical: '📖' };
@@ -18,28 +18,30 @@ function ColorSwatch({ white }: { white: boolean }) {
     );
 }
 
-function RatingTag({ player }: { player: ProfileSummary | null }) {
+/** The player's current rating in the game's category (F12: not always rapid). */
+function RatingTag({ player, field }: { player: ProfileSummary | null; field: RatingField }) {
     return (
         <span className="text-text-tertiary text-xs tabular-nums shrink-0">
-            ({Math.round(player?.rating_rapid ?? DEFAULT_RATING)})
+            ({Math.round(player?.[field] ?? DEFAULT_RATING)})
         </span>
     );
 }
 
 interface PlayersProps {
     profileName: string;
+    ratingField: RatingField;
     isWhite: boolean;
     me: ProfileSummary | null;
     opponent: ProfileSummary | null;
 }
 
-function Players({ profileName, isWhite, me, opponent }: PlayersProps) {
+function Players({ profileName, ratingField, isWhite, me, opponent }: PlayersProps) {
     return (
         <div className="flex-1 min-w-0 flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
                 <ColorSwatch white={isWhite} />
                 <span className="text-text-primary text-sm font-medium truncate">{profileName}</span>
-                <RatingTag player={me} />
+                <RatingTag player={me} field={ratingField} />
             </div>
             <div className="flex items-center gap-1.5">
                 <ColorSwatch white={!isWhite} />
@@ -53,7 +55,7 @@ function Players({ profileName, isWhite, me, opponent }: PlayersProps) {
                 ) : (
                     <span className="text-text-secondary text-sm">Unknown</span>
                 )}
-                <RatingTag player={opponent} />
+                <RatingTag player={opponent} field={ratingField} />
             </div>
         </div>
     );
@@ -118,6 +120,7 @@ export function GameHistoryRow({ game, profile, striped }: GameHistoryRowProps) 
             </div>
             <Players
                 profileName={profile.display_name || profile.username}
+                ratingField={`rating_${tc}`}
                 isWhite={isWhite}
                 me={isWhite ? game.white : game.black}
                 opponent={isWhite ? game.black : game.white}

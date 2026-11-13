@@ -397,8 +397,29 @@ describe('games tab', () => {
         expect(screen.getByTitle('classical')).toHaveTextContent('📖')
         expect(screen.getByTitle('rapid')).toHaveTextContent('⏱')
         expect(screen.getByText('Unknown')).toBeInTheDocument()
-        expect(screen.getByText('(1200)')).toBeInTheDocument()
+        // F12 (was: one '(1200)', the missing black player): ratings follow the game's category, and the
+        // fixture players only carry rating_rapid, so rows a-c (bullet/blitz/classical) default to 1200 too.
+        expect(screen.getAllByText('(1200)')).toHaveLength(7)
+        expect(screen.getByText('(1400)')).toBeInTheDocument() // row d: 'weird' reads as 10+0, rapid
         expect(screen.getByText('—')).toBeInTheDocument()
+    })
+
+    test('F12: each row shows the players\' rating for the game\'s category, not always rapid', async () => {
+        routes['/api/profile/bob/games?limit=15&offset=0'] = {
+            games: [
+                game('blitz', {
+                    time_control: '3+2',
+                    white: { username: 'bob', rating_rapid: 1400, rating_blitz: 1555 },
+                    black: { username: 'alice', rating_rapid: 1333, rating_blitz: 1444.4 },
+                }),
+            ],
+        }
+        await renderProfile()
+        click(tab(/^Games/))
+        await settle()
+        expect(screen.getByText('(1555)')).toBeInTheDocument()
+        expect(screen.getByText('(1444)')).toBeInTheDocument()
+        expect(screen.queryByText('(1400)')).not.toBeInTheDocument()
     })
 
     test('empty / failed games request shows "No completed games yet."', async () => {
