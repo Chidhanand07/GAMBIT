@@ -1,8 +1,9 @@
 // @ts-check
 /**
  * Liveness, readiness (NODE-21) and the matchmaking queue size
- * (scripts/test-deployment.sh). `/api/health` stays for the existing Railway
- * healthcheck setting; it is the same as `/livez`.
+ * (scripts/test-deployment.sh). The Railway healthcheck targets `/readyz`
+ * (server/railway.toml); `/api/health` stays for existing monitors and
+ * scripts and is the same as `/livez`.
  */
 
 const HTTP_UNAVAILABLE = 503;

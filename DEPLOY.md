@@ -198,7 +198,18 @@ After deploy → **Settings → Domains** → generate a Railway domain e.g. `ht
 This becomes `NEXT_PUBLIC_SOCKET_URL` in the frontend.
 
 ### 4d. Verify
-Hit `https://gambit-server.up.railway.app/api/health` — should return `{ "status": "ok" }`.
+Hit `https://gambit-server.up.railway.app/readyz` — should return `200` with
+`{ "ready": true, "checks": { "redis": "ok", "supabase": "ok" } }`. `/livez` (and the older
+`/api/health`) only say the process is up.
+
+### 4e. Healthcheck
+`server/railway.toml` sets `healthcheckPath = "/readyz"` (NODE-21). Railway calls it when a new
+deploy starts and only switches traffic once it answers 200: Redis must answer `PING` and Supabase
+a one-row query, each within 2 s. **If Redis or Supabase is down, the new deploy does not go
+live and the previous one keeps serving; this is intended** (a replica that cannot reach Redis
+cannot run games). Railway does not use the healthcheck after the deploy is live, so an outage
+later does not restart running replicas. Railway's config-as-code takes precedence over the
+dashboard's healthcheck setting; the dashboard shows the value from the file after the next deploy.
 
 ---
 
@@ -238,7 +249,7 @@ Any time you change env vars in Vercel → **Deployments → Redeploy** the late
 ## 6. Post-Deploy Verification Checklist
 
 ```
-[ ] GET https://gambit-server.up.railway.app/api/health → { "status": "ok" }
+[ ] GET https://gambit-server.up.railway.app/readyz → 200 { "ready": true, … }
 [ ] GET https://gambit-engine.onrender.com/health → { "status": "ok", "engine": "online" }
 [ ] https://gambit.vercel.app/ → intro animation plays
 [ ] Sign up new account → redirected to /lobby, profile created in Supabase
