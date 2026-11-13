@@ -1862,3 +1862,28 @@ instead of one file per ADR under `docs/refactor/adr/`.
   or engine calls. An error tracker (SEC-12) is not part of this item.
 - **Owner action.** Point Railway's healthcheck at `/readyz` when convenient (NODE-21); keep
   `/api/health` until then. Optional `LOG_LEVEL`.
+
+## F-056
+
+**Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart (SHUTDOWN).**
+
+- **Context.** The process had no SIGTERM handling: a deploy killed live sockets mid-move.
+  An unhandled rejection was logged and the process kept running (F-003 recorded that as a
+  deviation from NODE-07).
+- **Decision.** `src/shutdown.js`, wired in `start()`:
+  1. `/readyz` starts answering 503 (the platform stops routing new connections here);
+  2. matchmaking and clock intervals stop;
+  3. every socket is told `server_shutdown { reconnect: true }`;
+  4. `io.close()`, then the HTTP server closes (in-flight requests finish);
+  5. Redis `QUIT`; logs are flushed; exit 0.
+  A step that throws is logged and the next one runs. If the whole sequence takes longer than
+  `DEFAULT_DRAIN_MS` (20 s, inside Railway's default 30 s drain), the process exits 1. A second
+  signal does not start a second shutdown. An uncaught exception or unhandled rejection is
+  logged at `fatal`, logs are flushed, and the process exits 1.
+- **Clients.** The web client already reconnects after a server-side disconnect (TOKEN-LIFETIME,
+  F-041); with a second instance (M4 MULTI-INSTANCE) it lands on the other one and re-joins its
+  game. With one instance it reconnects when the new deploy is up; the 20 s disconnect grace
+  period covers a fast deploy, a slower one can end games by abandonment.
+- **The Dockerfile runs `node server.js` directly** (M1), so SIGTERM reaches Node rather than
+  stopping at `npm`.
+- **Not verified.** No real Railway deploy; Railway's drain window was not measured.

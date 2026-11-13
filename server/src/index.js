@@ -22,7 +22,7 @@ const ratingService = require('../services/rating');
 const { supabase } = require('../supabase');
 const gameStore = require('../lib/gameStore');
 const redis = require('../lib/redis');
-const { startGlobalClock } = require('../services/clock');
+const { startGlobalClock, stopGlobalClock } = require('../services/clock');
 const env = require('./config/env');
 const { buildPgnFromMoveLog } = require('./domain/pgn');
 const { createEngineClient } = require('./clients/engineClient');
@@ -56,6 +56,7 @@ const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
 const { registerProcessHandlers } = require('./processHandlers');
+const { createShutdown } = require('./shutdown');
 const { log } = require('./observability/log');
 
 const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
@@ -145,7 +146,20 @@ registerSocketHandlers(io, {
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
-    registerProcessHandlers();
+    const shutdown = createShutdown({
+        readiness,
+        stopTimers: () => {
+            matchmaking.destroy();
+            stopGlobalClock();
+        },
+        notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
+        closeSockets: () => io.close(),
+        closeHttp: () => new Promise((resolve) => server.close(() => resolve(undefined))),
+        closeRedis: () => redis.quit(),
+        flushLogs: () => new Promise((resolve) => log.pino.flush(() => resolve(undefined))),
+        exit: (code) => process.exit(code),
+    });
+    registerProcessHandlers(shutdown);
     const PORT = env.port();
     server.listen(PORT, () => {
         log.info(`Node server running on port ${PORT}`);
