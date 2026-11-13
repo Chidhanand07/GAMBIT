@@ -1946,6 +1946,9 @@ instead of one file per ADR under `docs/refactor/adr/`.
   dispatch only, because it needs `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
   `SUPABASE_PROJECT_REF`; without them it passes with a "skipped" notice. Do not make it a
   required check. The manual command is in DEPLOY.md.
+- **Tested** with a fake CLI on `PATH` (`scripts/schema-drift.test.js`, run in the `Server (Node)`
+  job): no drift → 0, SQL in the diff → 1, a failing diff → 2 (never "clean"), `--remote` on CLI
+  v3 and `--linked` on 2.x, missing link or credentials → 2.
 - **Not verified.** The real CLI never ran here (no Docker, CLI download not permitted); flags
   were taken from the CLI v3.1 reference. `supabase link` writes `supabase/.temp/`, which is not
   git-ignored. Run the workflow once by hand after adding the secrets.

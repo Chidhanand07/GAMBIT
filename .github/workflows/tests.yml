@@ -55,6 +55,8 @@ jobs:
           fi
           npm run lint:baseline
       - run: npx jest --ci
+      - name: Repository script self-tests (schema drift, dependency audit)
+        run: node --test ../scripts/schema-drift.test.js ../scripts/dependency-audit.test.js
 
   frontend:
     name: Frontend (Next.js)
