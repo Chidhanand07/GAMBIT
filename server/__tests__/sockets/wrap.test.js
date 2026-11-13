@@ -80,3 +80,21 @@ describe('guard (events without a payload, e.g. disconnect)', () => {
         expect(log.error).toHaveBeenCalledWith('[socket] disconnect failed:', 'redis down');
     });
 });
+
+describe('the logger a failure is written to [OBSERVABILITY]', () => {
+    const fakeLogger = () => ({ error: jest.fn(), warn: jest.fn(), info: jest.fn(), fatal: jest.fn() });
+
+    test('wrap logs through the logger it is given (the connection child), not the process logger', async () => {
+        const socketLog = fakeLogger();
+        await wrap('resign', schema, async () => Promise.reject(new Error('boom')), socketLog)({ game_id: 'g1' });
+        expect(socketLog.error).toHaveBeenCalledWith('[socket] resign failed:', 'boom');
+        expect(log.error).not.toHaveBeenCalled();
+    });
+
+    test('guard logs through the logger it is given', async () => {
+        const socketLog = fakeLogger();
+        await guard('disconnect', () => Promise.reject(new Error('redis down')), socketLog)();
+        expect(socketLog.error).toHaveBeenCalledWith('[socket] disconnect failed:', 'redis down');
+        expect(log.error).not.toHaveBeenCalled();
+    });
+});

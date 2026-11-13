@@ -101,14 +101,17 @@ function registerSocketHandlers(io, depsIn) {
         // Every line about this connection carries its socket and user (NODE-20). Not stored on
         // socket.data: the adapter serializes socket.data for connection-state recovery, so it
         // holds plain data only [MULTI-INSTANCE].
-        log.child({ socketId: socket.id, userId: socket.data.userId }).info('client connected');
+        // Handler failures go to the same child logger (wrap/guard receive it) [OBSERVABILITY].
+        const socketLog = log.child({ socketId: socket.id, userId: socket.data.userId });
+        socketLog.info('client connected');
         const client = clientOf(socket);
+        const connectionDeps = { ...deps, log: socketLog };
         if (deps.rateLimit) socket.use(deps.rateLimit(socket));
-        registerSessionHandlers(socket, client, deps);
-        registerLobbyHandlers(socket, deps);
-        registerGameHandlers(socket, client, deps);
-        registerChatHandlers(socket, deps);
-        registerSocialHandlers(socket, deps);
+        registerSessionHandlers(socket, client, connectionDeps);
+        registerLobbyHandlers(socket, connectionDeps);
+        registerGameHandlers(socket, client, connectionDeps);
+        registerChatHandlers(socket, connectionDeps);
+        registerSocialHandlers(socket, connectionDeps);
     });
 }
 
