@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { displayTimeControl } from '@/lib/chess/timeControl';
 import type { ChallengeRequestPayload } from '@/types/socket';
 import { accentHover } from '../hover';
 
@@ -22,7 +23,7 @@ export function ChallengeToast({ challenge, onAccept, onDecline }: ChallengeToas
                             <span style={{ color: 'var(--accent)' }}>{challenge.from_username}</span> challenges you
                         </div>
                         <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                            {challenge.time_control} min · {challenge.is_rated ? 'Rated' : 'Casual'}
+                            {displayTimeControl(challenge.time_control)} · {challenge.is_rated ? 'Rated' : 'Casual'}
                         </div>
                     </div>
                     <button

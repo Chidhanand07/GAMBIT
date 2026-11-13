@@ -1,10 +1,15 @@
 """Move legality endpoints: POST /validate-move, POST /valid-moves."""
 
 import chess
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
+from routers.fen import parse_fen
+
 router = APIRouter()
+
+# The only error a client sees for a move that cannot be parsed.
+INVALID_MOVE = "invalid_move"
 
 
 class MoveReq(BaseModel):
@@ -14,8 +19,8 @@ class MoveReq(BaseModel):
 
 @router.post("/validate-move")
 def validate_move(req: MoveReq):
+    b = parse_fen(req.fen)
     try:
-        b = chess.Board(req.fen)
         move = chess.Move.from_uci(req.move)
         if move in b.legal_moves:
             b.push(move)
@@ -30,14 +35,13 @@ def validate_move(req: MoveReq):
                 },
             }
         return {"valid": False}
-    except Exception as e:
-        return {"valid": False, "error": str(e)}
+    except ValueError:
+        # An unparsable move (chess.InvalidMoveError is a ValueError). The exception text stays
+        # on the server: it is not part of the API (CodeQL py/stack-trace-exposure).
+        return {"valid": False, "error": INVALID_MOVE}
 
 
 @router.post("/valid-moves")
 def valid_moves(req: MoveReq):
-    try:
-        b = chess.Board(req.fen)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid FEN: {e}") from e
+    b = parse_fen(req.fen)
     return {"valid_moves": [m.uci() for m in b.legal_moves]}

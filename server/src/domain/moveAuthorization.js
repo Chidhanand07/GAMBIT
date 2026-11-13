@@ -13,6 +13,7 @@ const REJECTION = Object.freeze({
     NOT_A_PLAYER: 'not_a_player',
     NOT_YOUR_TURN: 'not_your_turn',
     ILLEGAL_MOVE: 'illegal_move',
+    TIME_EXPIRED: 'time_expired',
 });
 
 /**

@@ -28,6 +28,8 @@ interface OutcomeFlags {
     isWin: boolean;
     isDraw: boolean;
     isLoss: boolean;
+    /** No game was played (a side never made its first move): nobody won or lost, nothing was rated. */
+    isAborted: boolean;
 }
 
 /** Win/draw/loss from my seat; a spectator is neither a win nor a loss (a draw can still apply). */
@@ -35,19 +37,20 @@ export function outcomeFlags(result: string, myColor: SeatColor): OutcomeFlags {
     const isSpectator = myColor === 'spectator';
     const isWin = !isSpectator && result.toLowerCase().startsWith(myColor);
     const isDraw = result.toLowerCase().includes('draw');
-    return { isSpectator, isWin, isDraw, isLoss: !isSpectator && !isWin && !isDraw };
+    const isAborted = result.toLowerCase().includes('abort');
+    return { isSpectator, isWin, isDraw, isAborted, isLoss: !isSpectator && !isWin && !isDraw && !isAborted };
 }
 
-function outcomeBackground({ isWin, isDraw }: OutcomeFlags): string {
+function outcomeBackground({ isWin, isDraw, isAborted }: OutcomeFlags): string {
     if (isWin) return 'var(--accent-dim)';
-    return isDraw ? 'var(--bg-surface)' : 'rgba(192,57,43,0.1)';
+    return isDraw || isAborted ? 'var(--bg-surface)' : 'rgba(192,57,43,0.1)';
 }
 
-function OutcomeIcon({ isSpectator, isWin, isDraw, isLoss }: OutcomeFlags) {
+function OutcomeIcon({ isSpectator, isWin, isDraw, isLoss, isAborted }: OutcomeFlags) {
     return (
         <>
             {isWin && <Crown size={24} className="text-accent" strokeWidth={1.5} />}
-            {isDraw && (
+            {(isDraw || isAborted) && (
                 <svg
                     width="24"
                     height="24"
@@ -66,12 +69,13 @@ function OutcomeIcon({ isSpectator, isWin, isDraw, isLoss }: OutcomeFlags) {
                     <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
             )}
-            {isSpectator && <Trophy size={24} className="text-accent" strokeWidth={1.5} />}
+            {isSpectator && !isAborted && <Trophy size={24} className="text-accent" strokeWidth={1.5} />}
         </>
     );
 }
 
 function outcomeTitle(flags: OutcomeFlags, result: string): string {
+    if (flags.isAborted) return 'Game aborted';
     if (flags.isSpectator) return result;
     if (flags.isWin) return 'You Win!';
     return flags.isDraw ? 'Draw' : 'You Lost';
@@ -123,7 +127,9 @@ export default function GameOverModal(props: GameOverModalProps) {
                     </button>
                     <Outcome gameOver={gameOver} myColor={myColor} />
                     <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                        by {gameOver.reason}
+                        {outcomeFlags(gameOver.result, myColor).isAborted
+                            ? 'No game was played · not rated'
+                            : `by ${gameOver.reason}`}
                     </div>
                     {myColor !== 'spectator' && <RatingLine change={props.ratingChange} />}
                 </div>

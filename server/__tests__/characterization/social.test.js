@@ -16,6 +16,7 @@ const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame } = require('../../lib/gameStore');
 const { useServer, once, record, recordAll, sleep, opsFor, compact, ISO_DATE, START_FEN } = require('./harness');
+const { log } = require('../../src/observability/log');
 
 /** Emit with an ack callback and resolve with what the server acknowledged. */
 const emitAck = (socket, event, payload) => new Promise((resolve) => socket.emit(event, payload, resolve));
@@ -67,7 +68,8 @@ function expectPrivateGameOps({ gameId, host, hostColor, joiner, timeControl, is
             {
                 white_id: hostColor === 'white' ? host : null,
                 black_id: hostColor === 'black' ? host : null,
-                time_control: timeControl,
+                // The server stores the canonical "M+S" form [TIME-CONTROL].
+                time_control: timeControl.includes('+') ? timeControl : `${timeControl}+0`,
                 status: 'waiting',
                 is_rated: isRated,
             },
@@ -152,6 +154,7 @@ describe('rematch', () => {
             isRated: false,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect([...redis._sets.get('active_games')]).toEqual(['rm-1']);
         expect(redis._strings.has('pending:rematch:alice:bob')).toBe(false);
@@ -220,7 +223,7 @@ describe('rematch', () => {
         await sleep(50);
         expect(events.filter(([e]) => e !== 'queue_status')).toEqual([]);
         expect(opsFor('games')).toHaveLength(1);
-        expect(console.error).toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
+        expect(log.error).toHaveBeenCalledWith('[socket] rematch_accept failed:', 'insert failed');
     });
 
     test('rematch_decline sends rematch_declined (no payload) to the REQUESTER and clears the request', async () => {
@@ -314,7 +317,7 @@ describe('challenges', () => {
         expect(await toBob).toEqual({ game_id: 'ch-1' });
         // The host is always created as white, then the other player joins as black.
         expectPrivateGameOps({ gameId: 'ch-1', host: whiteId, hostColor: 'white', joiner: blackId, timeControl: '10', isRated: true });
-        expect(await getGame('ch-1')).toMatchObject({ whiteId, blackId, isRated: true, timeControl: '10' });
+        expect(await getGame('ch-1')).toMatchObject({ whiteId, blackId, isRated: true, timeControl: '10+0' });
     });
 
     test('challenge_accept without a pending challenge creates no game [S4]', async () => {

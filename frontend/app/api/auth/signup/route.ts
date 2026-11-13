@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createUserWithProfile } from '@/lib/server/auth';
+import { clientIp } from '@/lib/server/clientIp';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { supabaseSecretKey } from '@/lib/server/env';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/server/rateLimit';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseJsonBody, schemas } from '@/lib/server/validation';
 
@@ -10,6 +12,10 @@ const USERNAME_RULE = 'Username must be 3 to 20 letters, numbers or underscores'
 // POST /api/auth/signup — body { email, password, username }
 // PUBLIC on purpose: this is how an account is created (docs/fixes/DECISIONS.md F-012).
 export async function POST(request: NextRequest) {
+    // Per client IP, before any database call (RATE-LIMITS).
+    const limited = await enforceRateLimit(clientIp(request.headers), RATE_LIMITS.signup);
+    if (limited) return limited;
+
     const body = await parseJsonBody(request, schemas.signup, 'Missing required fields');
     if (!body.ok) return body.response;
     const { email, password, username } = body.data;

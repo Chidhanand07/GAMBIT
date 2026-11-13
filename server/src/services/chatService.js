@@ -1,49 +1,53 @@
 // @ts-check
 /**
- * In-game chat. Only the two players may send (H5); the sender id comes from
- * the session, not the payload. The message column is read from `data.message`
- * (the frontend sends `text`: known bug, preserved).
+ * In-game chat (G6). Only the two players of an active game may send; the
+ * sender is the connection's verified user, never a payload field (NODE-10,
+ * NODE-11). The text is the `text` field the web client sends (the schema
+ * also maps an older `message` field onto it).
  */
+const { playerRejection } = require('../domain/moveAuthorization');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
+
+/**
+ * @typedef {{ game_id: string, text: string, from?: string }} ChatRequest validated by the socket schema
+ */
 
 /**
  * @param {object} deps
  * @param {{ getGame: (id: string) => Promise<any> }} deps.gameStore
  * @param {{ insert: (row: object) => PromiseLike<{ error: { message: string } | null }> }} deps.messagesRepo
- * @param {{ userIdOf: (socketId: string) => string | undefined }} deps.sessions
  * @param {import('./emitter').Emitter} deps.emitter
  */
-function createChatService({ gameStore, messagesRepo, sessions, emitter }) {
+function createChatService({ gameStore, messagesRepo, emitter }) {
     return {
         /**
-         * `send_message`: persist (fire-and-forget, M4) and broadcast with the
-         * server-verified `from_user_id`.
-         * @param {Record<string, any>} data
-         * @param {string} socketId
+         * `send_message`: broadcast to the game room and persist (fire-and-forget).
+         * Refused with a reason when the caller is not a player of the game or
+         * the game is over.
+         * @param {ChatRequest} data
+         * @param {string} userId the connection's verified user
+         * @returns {Promise<{ ok: boolean, error?: string }>}
          */
-        async sendMessage(data, socketId) {
-            // H5: validate sender is a participant of this game
-            const senderId = sessions.userIdOf(socketId);
-            if (!senderId || !data.game_id) return;
-            const game = await gameStore.getGame(data.game_id);
-            if (!game || (senderId !== game.whiteId && senderId !== game.blackId)) return;
+        async sendMessage({ game_id: gameId, text, from }, userId) {
+            const game = await gameStore.getGame(gameId);
+            const reason = playerRejection(game, userId);
+            if (reason) return { ok: false, error: reason };
 
-            // Override from field with server-verified identity
-            const safeData = { ...data, from_user_id: senderId };
+            // `from` is the display name the client chose to show; identity is `from_user_id`.
+            emitter.toRoom(gameRoom(gameId), 'chat_message', {
+                game_id: gameId,
+                ...(from === undefined ? {} : { from }),
+                text,
+                from_user_id: userId,
+            });
 
-            // M4: persist chat message to DB
             messagesRepo
-                .insert({
-                    game_id: data.game_id,
-                    user_id: senderId,
-                    content: data.message,
-                    created_at: new Date().toISOString(),
-                })
+                .insert({ game_id: gameId, user_id: userId, content: text, created_at: new Date().toISOString() })
                 .then(({ error }) => {
-                    if (error) console.error('[send_message] persist:', error.message);
+                    if (error) log.error('[send_message] persist:', error.message);
                 });
-
-            emitter.toRoom(gameRoom(data.game_id), 'chat_message', safeData);
+            return { ok: true };
         },
     };
 }

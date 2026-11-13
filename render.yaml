@@ -1,17 +1,22 @@
+# Render Blueprint for the chess engine. This is the only Render file in the
+# repository, and it contains no build steps of its own: Render builds
+# chess-engine/Dockerfile, which installs Python, the dependencies and Stockfish
+# and sets STOCKFISH_PATH (docs: DEPLOY.md section 3).
 services:
   - type: web
     name: gambit-engine
-    env: python
-    rootDir: chess-engine
-    buildCommand: "apt-get update && apt-get install -y stockfish && pip install -r requirements.txt"
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    runtime: docker
+    dockerfilePath: ./chess-engine/Dockerfile
+    dockerContext: ./chess-engine
+    healthCheckPath: /health
+    # Only engine changes redeploy the engine.
+    buildFilter:
+      paths:
+        - chess-engine/**
+        - render.yaml
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
       - key: STOCKFISH_POOL_SIZE
         value: "2"
-      - key: STOCKFISH_PATH
-        value: "/usr/bin/stockfish"
       - key: SUPABASE_URL
         sync: false
       # Secret key (sb_secret_...). The legacy SUPABASE_SERVICE_KEY is still read as a fallback.
@@ -19,4 +24,11 @@ services:
         sync: false
       # Shared secret for X-Engine-Key; set the same value on Railway and Vercel.
       - key: ENGINE_SHARED_SECRET
+        sync: false
+      # Optional fallback for the MAVERICK weights. Leave both empty while
+      # chess-engine/style_model.pt ships in the image. When set, the engine
+      # downloads the file at startup and loads it only if its SHA-256 matches.
+      - key: MAVERICK_MODEL_URL
+        sync: false
+      - key: MAVERICK_MODEL_SHA256
         sync: false

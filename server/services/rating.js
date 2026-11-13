@@ -5,6 +5,10 @@
  */
 const { supabase } = require('../supabase');
 const { createProfilesRepository } = require('../src/repositories/profilesRepository');
+const { createGameResultsRepository } = require('../src/repositories/gameResultsRepository');
 const { createRatingService } = require('../src/services/ratingService');
 
-module.exports = createRatingService({ profilesRepo: createProfilesRepository(supabase) });
+module.exports = createRatingService({
+    profilesRepo: createProfilesRepository(supabase),
+    gameResultsRepo: createGameResultsRepository(supabase),
+});

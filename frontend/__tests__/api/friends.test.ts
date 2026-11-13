@@ -94,7 +94,7 @@ describe('POST /api/friends/request', () => {
 })
 
 describe('GET /api/friends/status/[username]', () => {
-    const get = () => status(req('/x'), { params: { username: 'bob' } })
+    const get = () => status(req('/x'), { params: Promise.resolve({ username: 'bob' }) })
 
     test.each([
         [{ status: 'accepted', requester_id: uid('me') }, 'friends'],
@@ -132,7 +132,7 @@ describe('GET /api/friends/pending', () => {
 
 describe('PUT/DELETE /api/friends/[id]', () => {
     test.each([['accept', 'accepted'], ['decline', 'declined']])('?action=%s sets status %s on a request addressed to me', async (action, newStatus) => {
-        const res = await json(await respond(req(`/api/friends/f1?action=${action}`, { method: 'PUT' }), { params: { id: uid('f1') } }))
+        const res = await json(await respond(req(`/api/friends/f1?action=${action}`, { method: 'PUT' }), { params: Promise.resolve({ id: uid('f1') }) }))
         expect(res.body).toEqual({ success: true })
         const call = db.callsFor('friendships')[0]
         expect(db.op(call, 'update')![0]).toEqual({ status: newStatus })
@@ -140,19 +140,19 @@ describe('PUT/DELETE /api/friends/[id]', () => {
     })
 
     test('an unknown action is rejected', async () => {
-        const res = await respond(req(`/api/friends/${uid('f1')}?action=hack`, { method: 'PUT' }), { params: { id: uid('f1') } })
+        const res = await respond(req(`/api/friends/${uid('f1')}?action=hack`, { method: 'PUT' }), { params: Promise.resolve({ id: uid('f1') }) })
         expect(res.status).toBe(400)
         expect(db.calls).toEqual([])
     })
 
     test('database error → 400', async () => {
         db.queue('friendships', { data: null, error: { message: 'nope' } })
-        const res = await respond(req(`/api/friends/${uid('f1')}?action=accept`, { method: 'PUT' }), { params: { id: uid('f1') } })
+        const res = await respond(req(`/api/friends/${uid('f1')}?action=accept`, { method: 'PUT' }), { params: Promise.resolve({ id: uid('f1') }) })
         expect(res.status).toBe(400)
     })
 
     test('unfriend only deletes a friendship I am part of', async () => {
-        await unfriend(req(`/api/friends/${uid('f1')}`, { method: 'DELETE' }), { params: { id: uid('f1') } })
+        await unfriend(req(`/api/friends/${uid('f1')}`, { method: 'DELETE' }), { params: Promise.resolve({ id: uid('f1') }) })
         const call = db.callsFor('friendships')[0]
         expect(db.op(call, 'delete')).toBeDefined()
         expect(call.ops).toEqual(expect.arrayContaining([['eq', 'id', uid('f1')], ['or', `requester_id.eq.${uid('me')},addressee_id.eq.${uid('me')}`]]))

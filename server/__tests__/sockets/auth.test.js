@@ -2,6 +2,7 @@
  * src/sockets/auth.js — handshake identity [S2] (NODE-10, SEC-09).
  */
 const { createHandshakeAuth } = require('../../src/sockets/auth');
+const { log } = require('../../src/observability/log');
 
 const socketWith = (auth) => ({ handshake: { auth }, data: {} });
 
@@ -52,5 +53,22 @@ test('fails closed when the verifier throws (auth service unavailable)', async (
     const err = await run(createHandshakeAuth({ verifyToken }), socket);
     expect(err.message).toBe('unauthorized');
     expect(socket.data.userId).toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith('[socket] token verification failed:', 'supabase unreachable');
+    expect(log.error).toHaveBeenCalledWith('[socket] token verification failed:', 'supabase unreachable');
+});
+
+test('the deadline of the token is recorded next to the user id [TOKEN-LIFETIME]', async () => {
+    const verifyToken = jest.fn(async () => 'user-1');
+    const tokenDeadline = jest.fn(() => 1_700_000_900_000);
+    const socket = socketWith({ token: 'good-token' });
+    expect(await run(createHandshakeAuth({ verifyToken, tokenDeadline }), socket)).toBeUndefined();
+    expect(tokenDeadline).toHaveBeenCalledWith('good-token');
+    expect(socket.data).toEqual({ userId: 'user-1', tokenExpiresAt: 1_700_000_900_000 });
+});
+
+test('no deadline is computed for a token that was not verified', async () => {
+    const tokenDeadline = jest.fn();
+    const socket = socketWith({ token: 'bad' });
+    await run(createHandshakeAuth({ verifyToken: async () => null, tokenDeadline }), socket);
+    expect(tokenDeadline).not.toHaveBeenCalled();
+    expect(socket.data.tokenExpiresAt).toBeUndefined();
 });

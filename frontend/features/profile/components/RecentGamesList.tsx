@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { fetchRecentGames } from '@/lib/api/profile';
+import { displayTimeControl } from '@/lib/chess/timeControl';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
 
@@ -24,7 +25,7 @@ function RecentGameRow({ game, profileId }: { game: ProfileGameRow; profileId: s
                 ) : (
                     <span className="text-text-secondary text-sm">vs Unknown</span>
                 )}
-                <span className="text-text-tertiary text-xs">{game.time_control}</span>
+                <span className="text-text-tertiary text-xs">{displayTimeControl(game.time_control)}</span>
             </div>
             <span className="text-text-tertiary text-xs">{formatDate(game.created_at)}</span>
         </div>

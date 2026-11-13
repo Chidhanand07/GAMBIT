@@ -1,11 +1,10 @@
 import 'server-only';
-import { parseBaseMinutes, speedBucketForMinutes } from '@/lib/chess/timeControl';
+import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
 
 /** Rating reported for a bucket whose column is null. */
 const DEFAULT_RATING = 1200;
 /** Time control assumed for a game row without one. */
-const DEFAULT_TIME_CONTROL = '10';
 
 type CategoryStats = { played: number; wins: number; losses: number; draws: number };
 
@@ -38,7 +37,7 @@ function statsByCategory(games: StatsGameRow[], profileId: string): Record<Speed
         classical: emptyCategory(),
     };
     for (const game of games) {
-        const cat = speedBucketForMinutes(parseBaseMinutes(game.time_control ?? DEFAULT_TIME_CONTROL));
+        const cat = classifyTimeControl(game.time_control);
         stats[cat].played++;
         if (game.result === 'draw') {
             stats[cat].draws++;

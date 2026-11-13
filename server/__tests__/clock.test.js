@@ -11,9 +11,16 @@ jest.mock('../services/rating', () => ({ processGameEnd: jest.fn() }));
 const { supabase } = require('../supabase');
 const redis = require('../lib/redis');
 const rating = require('../services/rating');
-const { setGame, getGame, addActiveGame, getActiveGameIds } = require('../lib/gameStore');
+const gameStore = require('../lib/gameStore');
+const { setGame, getGame, addActiveGame, getActiveGameIds } = gameStore;
 const clock = require('../services/clock');
+const { createGamesRepository } = require('../src/repositories/gamesRepository');
+const { createClockService } = require('../src/services/clockService');
+const { createIoEmitter } = require('../src/services/emitter');
+const { createGameFinalizer } = require('../src/services/gameFinalizer');
+const { createSessionRegistry } = require('../src/sockets/sessionRegistry');
 const { makeGame, makeIo } = require('./helpers/fixtures');
+const { log } = require('../src/observability/log');
 
 const NOW = new Date('2026-01-01T12:00:00Z').getTime();
 
@@ -23,6 +30,7 @@ beforeEach(() => {
     supabase.reset();
     redis._reset();
     rating.processGameEnd.mockReset().mockResolvedValue(null);
+    review.triggerGameReview.mockReset();
     io = makeIo();
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -33,15 +41,33 @@ afterEach(() => {
     jest.restoreAllMocks();
 });
 
+const review = { triggerGameReview: jest.fn() };
+
+/** The clock service as the composition root builds it: it ends games through the finalizer [G3]. */
+function clockService() {
+    const emitter = createIoEmitter(io);
+    const finalizer = createGameFinalizer({
+        gameStore,
+        gamesRepo: createGamesRepository(supabase),
+        ratingService: rating,
+        reviewService: review,
+        sessions: createSessionRegistry(),
+        emitter,
+    });
+    return createClockService({ gameStore, finalizer, emitter });
+}
+
 async function startWith(game) {
     await setGame(game.id, game);
     await addActiveGame(game.id);
-    clock.startGlobalClock(io);
+    clock.startGlobalClock(clockService());
 }
 
 describe('parseIncrement', () => {
     test.each([
-        ['10', 0], ['5+3', 3000], ['3+2', 2000], ['1+0', 0], ['0+30', 30000],
+        ['10', 0], ['5+3', 3000], ['3+2', 2000], ['1+0', 0],
+        // A 0-minute base is not a time control: the stored value falls back to 10+0.
+        ['0+30', 0],
         ['', 0], [undefined, 0], [null, 0], ['5+x', 0], [10, 0],
     ])('%p → %p ms', (tc, ms) => expect(clock.parseIncrement(tc)).toBe(ms));
 });
@@ -122,6 +148,8 @@ describe('global ticker', () => {
     test('ends the game by abandonment after 20 s disconnected', async () => {
         await startWith(makeGame({
             lastMoveAt: NOW,
+            // A game that is underway (one move each); before that a disconnect aborts it [G10].
+            moveLog: [{ move: 'e2e4', fen: 'x', san: 'e4' }, { move: 'e7e5', fen: 'y', san: 'e5' }],
             disconnectInfo: { userId: 'white-user', side: 'white', at: NOW },
         }));
         supabase.queue('games', { data: { id: 'game-1' }, error: null });
@@ -145,17 +173,28 @@ describe('global ticker', () => {
     });
 });
 
-describe('finalizeExpiredGame', () => {
-    test('does not rate a game that was already finalized elsewhere', async () => {
+describe('finalization of a game the clock ended [G3]', () => {
+    const flagged = () => makeGame({ lastMoveAt: NOW, whiteClockMs: 500, activeSide: 'w' });
+
+    test('does not rate or review a game that was already finalized elsewhere', async () => {
+        await startWith(flagged());
         supabase.queue('games', { data: null, error: null });
-        await clock.finalizeExpiredGame(io, 'game-1', makeGame(), 'white-user', 'time');
+        await jest.advanceTimersByTimeAsync(1000);
+        expect(io.eventsNamed('game_end')).toHaveLength(1);
         expect(rating.processGameEnd).not.toHaveBeenCalled();
+        expect(review.triggerGameReview).not.toHaveBeenCalled();
     });
 
-    test('a rating failure is logged, not thrown', async () => {
+    test('a rating failure is logged, not thrown: the ticker keeps running', async () => {
+        await startWith(flagged());
         supabase.queue('games', { data: { id: 'game-1' }, error: null });
         rating.processGameEnd.mockRejectedValue(new Error('rating down'));
-        await expect(clock.finalizeExpiredGame(io, 'game-1', makeGame(), 'white-user', 'time')).resolves.toBeUndefined();
-        expect(console.error).toHaveBeenCalled();
+        await jest.advanceTimersByTimeAsync(1000);
+        expect(log.error).toHaveBeenCalledWith('[clock] game game-1 error:', 'rating down');
+        expect(io.eventsNamed('game_end')).toHaveLength(1);
+    });
+
+    test('the legacy second finalization path is gone', () => {
+        expect(clock.finalizeExpiredGame).toBeUndefined();
     });
 });

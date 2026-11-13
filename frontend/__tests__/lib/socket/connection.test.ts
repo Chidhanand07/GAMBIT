@@ -88,3 +88,38 @@ test('close() disconnects and cancels a pending retry', () => {
     expect(fake.disconnect).toHaveBeenCalledTimes(1)
     expect(fake.connect).not.toHaveBeenCalled()
 })
+
+describe('the server closed the socket (its token expired) [TOKEN-LIFETIME]', () => {
+    test('the client reconnects by itself; the handshake then carries a fresh token', async () => {
+        const getToken = jest.fn().mockResolvedValueOnce('old-token').mockResolvedValueOnce('fresh-token')
+        createGameSocket({ url: 'http://rt.test', getToken })
+        expect(await handshakeAuth()).toEqual({ token: 'old-token' })
+
+        // socket.io does not reconnect after a disconnect the server initiated.
+        fake.fire('disconnect', 'io server disconnect')
+        expect(fake.connect).toHaveBeenCalledTimes(1)
+        expect(await handshakeAuth()).toEqual({ token: 'fresh-token' })
+    })
+
+    test.each(['transport close', 'ping timeout', 'transport error'])(
+        'a network drop (%s) is left to socket.io, which reconnects on its own',
+        (reason) => {
+            createGameSocket({ url: 'http://rt.test', getToken: async () => 'tok' })
+            fake.fire('disconnect', reason)
+            expect(fake.connect).not.toHaveBeenCalled()
+        },
+    )
+
+    test('closing the connection ourselves does not reconnect', () => {
+        const { close } = createGameSocket({ url: 'http://rt.test', getToken: async () => 'tok' })
+        close()
+        fake.fire('disconnect', 'io client disconnect')
+        fake.fire('disconnect', 'io server disconnect')
+        expect(fake.connect).not.toHaveBeenCalled()
+    })
+})
+
+test('WebSocket only: no long-polling fallback, so no sticky sessions are needed [MULTI-INSTANCE]', () => {
+    createGameSocket({ url: 'http://rt.test', getToken: async () => 'tok' })
+    expect(ioMock.mock.calls[0][1].transports).toEqual(['websocket'])
+})

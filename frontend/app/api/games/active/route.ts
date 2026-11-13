@@ -7,7 +7,8 @@ import { createAdminClient } from '@/lib/server/supabase';
 export const dynamic = 'force-dynamic';
 
 // GET /api/games/active — returns the caller's active game row, or null.
-// Also cleans up stale games whose clock_deadline has passed (server restart survivors).
+// Also cleans up stale games (server restart survivors): clock_deadline long past, or no
+// move for two hours.
 export async function GET() {
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
@@ -18,9 +19,9 @@ export async function GET() {
 
     if (!data) return NextResponse.json(null);
 
-    // The game timed out while the server was down, or never got a move: mark it
+    // The game timed out while the server was down, or nobody has moved for hours: mark it
     // abandoned (no winner — we can't know who ran out of time without the FEN).
-    if (isStaleActiveGame(data)) {
+    if (await isStaleActiveGame(admin, data)) {
         await abandonActiveGame(admin, data.id);
         return NextResponse.json(null);
     }

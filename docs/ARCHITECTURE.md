@@ -4,7 +4,7 @@ Three deployable services plus Supabase:
 
 | Service | Stack | Deployed to | Owns |
 |---|---|---|---|
-| `frontend/` | Next.js 14 App Router, TypeScript | Vercel | UI, and Next.js route handlers for profile, friends, notifications, games history, leaderboard, auth |
+| `frontend/` | Next.js 16 App Router, React 19, TypeScript | Vercel | UI, and Next.js route handlers for profile, friends, notifications, games history, leaderboard, auth |
 | `server/` | Node, Express 4, Socket.io, CommonJS | Railway | Realtime only: sessions, matchmaking, clocks, live game state (Redis), game end, rating, review trigger |
 | `chess-engine/` | FastAPI, python-chess, Stockfish | Render | Move validation, position analysis, full-game review, computer opponent |
 | `supabase/` | Postgres + Auth | Supabase | Persistent data; schema changes only via `supabase migration new` (SEC-08) |
@@ -71,6 +71,8 @@ repositories/, clients/ ──▶ @supabase/supabase-js, ioredis, fetch
 ## Frontend (`frontend/`)
 
 ```
+proxy.ts              session refresh + optimistic redirect for the protected pages only
+                      (allow-list matcher); never the only auth check (NX-09)
 app/**/page.tsx       thin compositions (< 150 lines)
 app/api/**/route.ts   parse → identity → lib/server data function → respond
 features/<feature>/   components/, hooks/, state/, utils — one folder per feature:
@@ -101,6 +103,14 @@ services/       analysis (scoring, classification), review (full-game pipeline)
 engine.py       Stockfish pool API
 seams.py        late-bound dependency lookup through `main` (ADR 0301)
 ```
+
+## Shared definitions (`shared/`)
+
+`shared/time-control.json` is the one definition of the time-control model (limits, category
+thresholds, lobby presets, contract cases). Each deployable carries a copy
+(`server/src/domain/timeControl.data.json`, `frontend/lib/chess/timeControl.data.json`) written
+by `node scripts/sync-shared.js`; a test on each side fails when a copy differs
+(docs/fixes/DECISIONS.md F-027). Edit the file in `shared/`, never a copy.
 
 ## How to add a feature
 

@@ -5,6 +5,7 @@
  * the process still boots without credentials.
  */
 const { createClient } = require('@supabase/supabase-js');
+const { log } = require('../observability/log');
 
 const PLACEHOLDER_URL = 'https://placeholder.supabase.co';
 const PLACEHOLDER_KEY = 'placeholder';
@@ -18,17 +19,17 @@ const PLACEHOLDER_KEY = 'placeholder';
  */
 function createSupabaseClient({ url, key, keySource }) {
     if (!url) {
-        console.error('[supabase] FATAL: SUPABASE_URL is not set. DB operations will fail.');
+        log.error('[supabase] FATAL: SUPABASE_URL is not set. DB operations will fail.');
     } else {
-        console.log('[supabase] URL:', url);
+        log.info('[supabase] URL:', url);
     }
 
     if (!key) {
-        console.error(
+        log.error(
             '[supabase] FATAL: SUPABASE_SECRET_KEY is not set (nor the legacy SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY). All DB writes will fail (RLS will block them).',
         );
     } else {
-        console.log(`[supabase] Using service key from ${keySource}`);
+        log.info(`[supabase] Using service key from ${keySource}`);
     }
 
     return createClient(url || PLACEHOLDER_URL, key || PLACEHOLDER_KEY, {

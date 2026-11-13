@@ -74,10 +74,34 @@ describe('resign (there is no game_end schema: clients cannot report results) [S
     });
 });
 
-describe('send_message', () => {
-    test('bounds the text', () => {
-        expect(ok('send_message', { game_id: 'g1', text: 'hi' })).toBe(true);
+describe('send_message [G6]', () => {
+    const parse = (payload) => schemas.send_message.safeParse(payload);
+
+    test('reads the `text` the web client sends, trimmed', () => {
+        expect(parse({ game_id: 'g1', from: 'me', text: '  hi  ' }).data).toEqual({ game_id: 'g1', from: 'me', text: 'hi' });
+    });
+
+    test('an older `message` field is accepted as the text; `text` wins when both are sent', () => {
+        expect(parse({ game_id: 'g1', message: 'old' }).data).toEqual({ game_id: 'g1', text: 'old' });
+        expect(parse({ game_id: 'g1', text: 'new', message: 'old' }).data).toEqual({ game_id: 'g1', text: 'new' });
+    });
+
+    test('bounds the length: 500 characters at most', () => {
+        expect(ok('send_message', { game_id: 'g1', text: 'x'.repeat(500) })).toBe(true);
         expect(ok('send_message', { game_id: 'g1', text: 'x'.repeat(501) })).toBe(false);
+        expect(ok('send_message', { game_id: 'g1', message: 'x'.repeat(501) })).toBe(false);
+    });
+
+    test.each([
+        ['no text', { game_id: 'g1' }],
+        ['an empty text', { game_id: 'g1', text: '' }],
+        ['only whitespace', { game_id: 'g1', text: '   ' }],
+        ['a non-string text', { game_id: 'g1', text: { $ne: 1 } }],
+        ['no game id', { text: 'hi' }],
+    ])('rejects %s', (_label, payload) => expect(ok('send_message', payload)).toBe(false));
+
+    test('a client-supplied sender id is stripped', () => {
+        expect(parse({ game_id: 'g1', text: 'hi', from_user_id: 'victim' }).data).toEqual({ game_id: 'g1', text: 'hi' });
     });
 });
 
@@ -87,6 +111,7 @@ describe('join_queue', () => {
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 10, increment: 0 })).toBe(true);
         expect(ok('join_queue', { time_control: '10' })).toBe(true);
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: 'x'.repeat(17) })).toBe(false);
+        expect(ok('join_queue', {})).toBe(true); // no time control → the server's default
         expect(ok('join_queue', { user: { id: 'u1' }, time_control: '10', is_rated: 'yes' })).toBe(false);
     });
 });
@@ -116,5 +141,32 @@ describe('challenge / rematch', () => {
         expect(ok('challenge_request', { ...base, color: 'purple' })).toBe(false);
         expect(ok('rematch_request', base)).toBe(true);
         expect(ok('rematch_request', { ...base, to_user_id: null })).toBe(false);
+    });
+});
+
+describe('time-control ranges (shared model) [TIME-CONTROL]', () => {
+    const { limits } = require('../../src/domain/timeControl.data.json');
+    const EVENTS = [
+        ['join_queue', {}],
+        ['rematch_request', { to_user_id: 'u2' }],
+        ['challenge_request', { to_user_id: 'u2' }],
+    ];
+    const BAD = ['0', '-5', 'rapid', '1.5', '10+', '+3', ' 10', `${limits.maxMinutes + 1}`, `10+${limits.maxIncrementSeconds + 1}`, 0, -1, 2.5];
+    const GOOD = ['1', '10', '5+3', '1440', `10+${limits.maxIncrementSeconds}`, 10];
+
+    describe.each(EVENTS)('%s', (event, base) => {
+        test.each(BAD)('rejects time_control %p', (value) => {
+            expect(ok(event, { ...base, time_control: value })).toBe(false);
+        });
+        test.each(GOOD)('accepts time_control %p', (value) => {
+            expect(ok(event, { ...base, time_control: value })).toBe(true);
+        });
+    });
+
+    test('join_queue: the separate increment is range-checked together with the time control', () => {
+        expect(ok('join_queue', { time_control: '10', increment: limits.maxIncrementSeconds })).toBe(true);
+        expect(ok('join_queue', { time_control: '10', increment: limits.maxIncrementSeconds + 1 })).toBe(false);
+        expect(ok('join_queue', { time_control: '10', increment: 1.5 })).toBe(false);
+        expect(ok('join_queue', { time_control: '10', increment: -1 })).toBe(false);
     });
 });

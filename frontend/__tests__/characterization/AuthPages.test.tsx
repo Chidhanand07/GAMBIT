@@ -59,6 +59,38 @@ describe('auth/exchange', () => {
         expect(replace.mock.calls).toEqual([['/profile/x']])
     })
 
+    test.each([
+        ['https://evil.example'],
+        ['//evil.example'],
+        ['/\\evil.example'],
+        ['/\t/evil.example'],
+        ['javascript:alert(1)'],
+    ])('PKCE code: next=%j is not followed, the user lands on /lobby [S6]', async (next) => {
+        searchParams = new URLSearchParams({ code: 'c_FAKE', next })
+        auth.exchangeCodeForSession.mockResolvedValue({ error: null })
+        render(<ExchangePage />)
+        await flush()
+        expect(replace.mock.calls).toEqual([['/lobby']])
+    })
+
+    test('implicit hash tokens: an off-site `next` is not followed either [S6]', async () => {
+        searchParams = new URLSearchParams({ next: 'https://evil.example' })
+        window.location.hash = '#access_token=at_FAKE&refresh_token=rt_FAKE'
+        auth.setSession.mockResolvedValue({ error: null })
+        render(<ExchangePage />)
+        await flush()
+        expect(replace.mock.calls).toEqual([['/lobby']])
+    })
+
+    test('implicit hash tokens: a same-origin `next` is followed', async () => {
+        searchParams = new URLSearchParams({ next: '/join/tok' })
+        window.location.hash = '#access_token=at_FAKE&refresh_token=rt_FAKE'
+        auth.setSession.mockResolvedValue({ error: null })
+        render(<ExchangePage />)
+        await flush()
+        expect(replace.mock.calls).toEqual([['/join/tok']])
+    })
+
     test('PKCE failure: shows the error, then replaces to /login?error=oauth_failed after 2 s', async () => {
         jest.useFakeTimers()
         searchParams = new URLSearchParams('code=c_FAKE')
@@ -66,6 +98,7 @@ describe('auth/exchange', () => {
         render(<ExchangePage />)
         await flush()
         expect(screen.getByText('Sign-in error: bad code')).toBeInTheDocument()
+        expect(console.error).not.toHaveBeenCalled() // S14
         expect(replace).not.toHaveBeenCalled()
         act(() => { jest.advanceTimersByTime(2000) })
         expect(replace.mock.calls).toEqual([['/login?error=oauth_failed']])
@@ -134,6 +167,22 @@ describe('login', () => {
         await flush()
         expect(push.mock.calls).toEqual([['/join/tok']])
         expect(refresh).toHaveBeenCalledTimes(1)
+    })
+
+    test.each([
+        ['https://evil.example'],
+        ['//evil.example'],
+        ['/\\evil.example'],
+        ['/\t/evil.example'],
+        ['javascript:alert(1)'],
+    ])('success with redirect=%j goes to /lobby, never off-site [S6]', async (redirect) => {
+        searchParams = new URLSearchParams({ redirect })
+        auth.signInWithPassword.mockResolvedValue({ error: null })
+        const { container } = render(<LoginPage />)
+        fill(container, 'a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+        await flush()
+        expect(push.mock.calls).toEqual([['/lobby']])
     })
 
     test('success without redirect goes to /lobby', async () => {
@@ -280,6 +329,10 @@ describe('signup', () => {
         submit()
         await flush()
         expect(screen.getByText('Connection failed. Please check your internet connection.')).toBeInTheDocument()
+        // S14: the failure is shown to the user, not written to the browser console.
+        expect(console.error).not.toHaveBeenCalled()
+        expect(console.log).not.toHaveBeenCalled()
+        expect(console.warn).not.toHaveBeenCalled()
     })
 
     test('Google button calls OAuth with the callback redirect', async () => {

@@ -1,0 +1,14 @@
+# Local environments, caches and secrets never go into the image.
+venv
+.venv
+.env
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+# Not needed at runtime.
+tests
+requirements-dev.txt
+pytest.ini
+ruff.toml
+*.download

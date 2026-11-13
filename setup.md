@@ -7,7 +7,7 @@ This document provides a highly structured, step-by-step guide to installing, co
 ## 1. Prerequisites
 
 Before you begin, ensure your system has the following installed:
-- **Node.js** (v18.0.0 or higher) & **npm**
+- **Node.js 26** (see `.nvmrc`; run `nvm use`) & **npm**
 - **Python** (v3.10 or higher) & **pip**
 - **Supabase Account**: You will need a cloud project on [Supabase](https://supabase.com/).
 

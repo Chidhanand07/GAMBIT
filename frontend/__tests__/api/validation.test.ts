@@ -60,9 +60,9 @@ describe('PostgREST filter injection', () => {
     test('every .or() filter the friends and games routes build contains only UUIDs', async () => {
         db.queue('profiles', { data: { id: uid('bob') }, error: null }, { data: { id: uid('bob') }, error: null })
         await listFriends(req(`/api/friends?userId=${uid('other')}`))
-        await friendStatus(req('/x'), { params: { username: 'bob' } })
+        await friendStatus(req('/x'), { params: Promise.resolve({ username: 'bob' }) })
         await sendRequest(req('/x', { method: 'POST', body: { addressee_username: 'bob' } }))
-        await unfriend(req('/x', { method: 'DELETE' }), { params: { id: uid('f1') } })
+        await unfriend(req('/x', { method: 'DELETE' }), { params: Promise.resolve({ id: uid('f1') }) })
         const filters = orFilters()
         expect(filters.length).toBeGreaterThanOrEqual(4)
         const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
@@ -74,29 +74,29 @@ describe('PostgREST filter injection', () => {
 
 describe('route params', () => {
     test.each([['f1'], [INJECTION], ['../etc'], ['']])('friends/[id] = %p → 400 and no write', async (id) => {
-        expect((await respond(req('/x?action=accept', { method: 'PUT' }), { params: { id } })).status).toBe(400)
-        expect((await unfriend(req('/x', { method: 'DELETE' }), { params: { id } })).status).toBe(400)
+        expect((await respond(req('/x?action=accept', { method: 'PUT' }), { params: Promise.resolve({ id }) })).status).toBe(400)
+        expect((await unfriend(req('/x', { method: 'DELETE' }), { params: Promise.resolve({ id }) })).status).toBe(400)
         expect(db.calls).toEqual([])
     })
 
     test('friends/[id] with an unknown action → 400', async () => {
-        const res = await respond(req('/x?action=block', { method: 'PUT' }), { params: { id: uid('f1') } })
+        const res = await respond(req('/x?action=block', { method: 'PUT' }), { params: Promise.resolve({ id: uid('f1') }) })
         expect(res.status).toBe(400)
         expect(await res.json()).toEqual({ error: 'Invalid action' })
         expect(db.calls).toEqual([])
     })
 
     test.each([['g1'], [INJECTION], ['null']])('games/[id] = %p → 404 without querying', async (id) => {
-        expect((await getGame(req('/x'), { params: { id } })).status).toBe(404)
-        expect((await patchGame(req('/x', { method: 'PATCH', body: { draw_offer: true } }), { params: { id } })).status).toBe(404)
+        expect((await getGame(req('/x'), { params: Promise.resolve({ id }) })).status).toBe(404)
+        expect((await patchGame(req('/x', { method: 'PATCH', body: { draw_offer: true } }), { params: Promise.resolve({ id }) })).status).toBe(404)
         expect(db.calls).toEqual([])
     })
 
     test.each([['a b'], ['bob,id.neq.x'], ['x'.repeat(41)], ['bob"']])('username %p → not found, no query', async (username) => {
-        expect((await profile(req('/x'), { params: { username } })).status).toBe(404)
-        expect((await profileGames(req('/x'), { params: { username } })).status).toBe(404)
-        expect((await profileStats(req('/x'), { params: { username } })).status).toBe(404)
-        expect(await (await friendStatus(req('/x'), { params: { username } })).json()).toEqual({ status: 'none' })
+        expect((await profile(req('/x'), { params: Promise.resolve({ username }) })).status).toBe(404)
+        expect((await profileGames(req('/x'), { params: Promise.resolve({ username }) })).status).toBe(404)
+        expect((await profileStats(req('/x'), { params: Promise.resolve({ username }) })).status).toBe(404)
+        expect(await (await friendStatus(req('/x'), { params: Promise.resolve({ username }) })).json()).toEqual({ status: 'none' })
         expect(db.calls).toEqual([])
     })
 })
@@ -138,6 +138,9 @@ describe('request bodies', () => {
         ['a negative clock', { timeControl: '-5' }],
         ['zero minutes', { timeControl: '0' }],
         ['an absurd clock', { timeControl: '9999' }],
+        ['more than a day', { timeControl: '1441' }],
+        ['an absurd increment', { timeControl: '10+181' }],
+        ['an unknown preset name', { timeControl: 'hyperbullet' }],
         ['injected text', { timeControl: '10; drop' }],
         ['a number', { timeControl: 10 }],
         ['an unknown colour', { timeControl: '10', color: 'purple' }],

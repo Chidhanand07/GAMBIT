@@ -108,12 +108,11 @@ describe('reconnect during an active game', () => {
             ['clock_sync', { whiteMs: 600000, blackMs: 590000 }],
         ]);
 
-        // NOTE pinned: lastMoveAt is reset to "now" even though no move was ever
-        // made (it was null), which starts white's clock before the first move.
+        // No move had been made (lastMoveAt null): reconnecting must not start a clock [G8].
         expect(await getGame(game.id)).toEqual({
             ...before,
             disconnectInfo: null,
-            lastMoveAt: expect.any(Number),
+            lastMoveAt: null,
         });
 
         // Back in the game room: room broadcasts reach the new socket.
@@ -170,5 +169,30 @@ describe('reconnect during an active game', () => {
         await sleep(80);
         expect(syncs).toEqual([]);
         expect(reconnects).toEqual([]);
+    });
+});
+
+describe('a socket does not outlive its token [TOKEN-LIFETIME]', () => {
+    const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    /** A JWT-shaped token that the (mocked) Supabase Auth resolves to `userId` and that expires soon. */
+    function shortLivedToken(userId, lifetimeMs) {
+        const token = `${b64url({ alg: 'ES256' })}.${b64url({ sub: userId, exp: (Date.now() + lifetimeMs) / 1000 })}.sig`;
+        supabase.setUsers({ [token]: userId });
+        return token;
+    }
+
+    test('at the expiry the server says why and closes the connection; a fresh token connects again', async () => {
+        const socket = ctx.open({ token: shortLivedToken('alice', 400) });
+        await once(socket, 'connect');
+        const told = once(socket, 'token_expired', 2000);
+        const closed = once(socket, 'disconnect', 2000);
+
+        expect(await told).toEqual({ reason: 'token_expired' });
+        // 'io server disconnect': the server ended it, so the client must reconnect itself.
+        expect([await closed].flat()[0]).toBe('io server disconnect');
+
+        const again = ctx.open({ token: shortLivedToken('alice', 60_000) });
+        await once(again, 'connect');
+        expect(again.connected).toBe(true);
     });
 });

@@ -34,6 +34,7 @@ jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile 
 
 import GamePage from '@/app/game/[id]/page'
 import * as sounds from '@/lib/sounds'
+import { routeParams } from '../helpers/params'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
@@ -70,7 +71,7 @@ afterEach(() => {
 })
 
 async function renderGame(id = 'g1') {
-    const utils = render(<GamePage params={{ id }} />)
+    const utils = render(<GamePage params={routeParams({ id })} />)
     // game data loaded once a player strip shows a name
     await screen.findAllByText(/Alice|Bob/)
     return utils
@@ -139,7 +140,7 @@ describe('mount', () => {
 
     test('a failed game fetch sends the user back to the lobby', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({ error: 'nope' }, false))
-        render(<GamePage params={{ id: 'g1' }} />)
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
         await waitFor(() => expect(push).toHaveBeenCalledWith('/lobby'))
     })
 
@@ -300,7 +301,7 @@ describe('server events', () => {
     test('clock_sync after load prevents the game fetch from resetting the clocks', async () => {
         let resolveFetch!: (v: any) => void
         fetchMock.mockImplementation(() => new Promise(r => { resolveFetch = r }))
-        render(<GamePage params={{ id: 'g1' }} />)
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
         socket.serverSends('clock_sync', { whiteMs: 42_000, blackMs: 41_000 })
         await act(async () => { resolveFetch(jsonResponse(gameRow)) })
         await screen.findAllByText('Alice')

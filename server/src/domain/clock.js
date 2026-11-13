@@ -10,11 +10,12 @@ const DISCONNECT_GRACE_MS = 20000;
 
 /**
  * @typedef {object} ClockState
- * @property {number} whiteClockMs
+ * @property {number} whiteClockMs time left as of `lastMoveAt` (or in total, while not running)
  * @property {number} blackClockMs
  * @property {string} activeSide
- * @property {number | null} [lastMoveAt]
+ * @property {number | null} [lastMoveAt] when the running clock was last charged; null before the first move
  * @property {number} [incrementMs]
+ * @property {object | null} [disconnectInfo] set while a player is away: the clocks are frozen
  */
 
 /**
@@ -28,8 +29,20 @@ function remainingMs(clockMs, elapsedMs) {
 }
 
 /**
- * Both clocks as of `now`: the active side is charged for the time since the
- * last move. Unchanged when the clock has not started (`lastMoveAt` falsy).
+ * Is a clock counting down right now? Not before the first move, and not
+ * while a player is disconnected (the clocks are frozen for the grace period).
+ * @param {ClockState} state
+ * @returns {boolean}
+ */
+function isClockRunning(state) {
+    return Boolean(state.lastMoveAt) && !state.disconnectInfo;
+}
+
+/**
+ * Both clocks as of `now`. This is the one view of the clocks: the ticker,
+ * the state sync and the disconnect snapshot all use it. While the clock is
+ * running the side to move is charged for the time since `lastMoveAt`;
+ * otherwise the stored values are the answer.
  * @param {ClockState} state
  * @param {number} now
  * @returns {{ whiteMs: number, blackMs: number }}
@@ -37,12 +50,48 @@ function remainingMs(clockMs, elapsedMs) {
 function clocksAt(state, now) {
     let whiteMs = state.whiteClockMs;
     let blackMs = state.blackClockMs;
-    if (state.lastMoveAt) {
-        const elapsed = now - state.lastMoveAt;
+    if (isClockRunning(state)) {
+        const elapsed = now - /** @type {number} */ (state.lastMoveAt);
         if (state.activeSide === 'w') whiteMs = remainingMs(whiteMs, elapsed);
         else blackMs = remainingMs(blackMs, elapsed);
     }
     return { whiteMs, blackMs };
+}
+
+/**
+ * Time left for the side to move as of `now`.
+ * @param {ClockState} state
+ * @param {number} now
+ * @returns {number}
+ */
+function activeRemainingMs(state, now) {
+    const { whiteMs, blackMs } = clocksAt(state, now);
+    return state.activeSide === 'w' ? whiteMs : blackMs;
+}
+
+/**
+ * Fields to store when the clocks stop for a disconnect: the time used so far
+ * is charged once, and `lastMoveAt` moves to `now` so nothing can charge it
+ * again (G9). A clock that never started stays stopped.
+ * @param {ClockState} state
+ * @param {number} now
+ * @returns {{ whiteClockMs: number, blackClockMs: number, lastMoveAt: number | null }}
+ */
+function freezeClocks(state, now) {
+    const { whiteMs, blackMs } = clocksAt(state, now);
+    return { whiteClockMs: whiteMs, blackClockMs: blackMs, lastMoveAt: state.lastMoveAt ? now : null };
+}
+
+/**
+ * Fields to store when the clocks start again after a disconnect: counting
+ * resumes from `now`, so the absence is not charged. Before the first move
+ * there is no clock to resume (G8).
+ * @param {ClockState} state
+ * @param {number} now
+ * @returns {{ lastMoveAt: number | null }}
+ */
+function resumeClocks(state, now) {
+    return { lastMoveAt: state.lastMoveAt ? now : null };
 }
 
 /**
@@ -56,7 +105,9 @@ function nextSide(side) {
 
 /**
  * Clocks after the active side moves at `now`: charge elapsed time, then add
- * the increment (`incrementMs ?? 0`) to the mover.
+ * the increment (`incrementMs ?? 0`) to the mover. A move is only ever applied
+ * to a game nobody is disconnected from, so the clock is charged whenever it
+ * has started.
  * @param {ClockState} state
  * @param {number} now
  * @returns {{ whiteMs: number, blackMs: number, nextSide: 'w' | 'b' }}
@@ -67,26 +118,6 @@ function clocksAfterMove(state, now) {
     if (state.activeSide === 'w') whiteMs += incMs;
     else blackMs += incMs;
     return { whiteMs, blackMs, nextSide: nextSide(state.activeSide) };
-}
-
-/**
- * What the global ticker broadcasts. Differs from `clocksAt` on purpose (kept
- * from the original ticker): `lastMoveAt` is assumed set, and Black's displayed
- * clock is only replaced when `activeSide === 'b'` exactly.
- * @param {ClockState} state
- * @param {number} now
- * @returns {{ remainingMs: number, whiteMs: number, blackMs: number }}
- */
-function tickerSnapshot(state, now) {
-    const elapsed = now - /** @type {number} */ (state.lastMoveAt);
-    const side = state.activeSide;
-    const remaining =
-        side === 'w' ? remainingMs(state.whiteClockMs, elapsed) : remainingMs(state.blackClockMs, elapsed);
-    return {
-        remainingMs: remaining,
-        whiteMs: side === 'w' ? remaining : state.whiteClockMs,
-        blackMs: side === 'b' ? remaining : state.blackClockMs,
-    };
 }
 
 /**
@@ -102,9 +133,12 @@ function isGraceExpired(disconnectInfo, now) {
 module.exports = {
     DISCONNECT_GRACE_MS,
     remainingMs,
+    isClockRunning,
     clocksAt,
+    activeRemainingMs,
+    freezeClocks,
+    resumeClocks,
     nextSide,
     clocksAfterMove,
-    tickerSnapshot,
     isGraceExpired,
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { useSocket } from '@/components/SocketProvider';
@@ -10,7 +10,8 @@ import { ColorPicker, RatedToggle, TimeControlPicker } from '@/features/challeng
 import { ChallengeStatus } from '@/features/challenge/components/ChallengeStatus';
 import type { ChallengeColor, ChallengeOpponent } from '@/features/challenge/types';
 
-export default function ChallengePage({ params }: { params: { username: string } }) {
+export default function ChallengePage(props: { params: Promise<{ username: string }> }) {
+    const params = use(props.params);
     const router = useRouter();
     const socket = useSocket();
     const { profile: myProfile } = useProfile();

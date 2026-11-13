@@ -42,7 +42,7 @@ function NotificationList({ notifications, loading }: { notifications: NavNotifi
 }
 
 interface NotificationBellProps {
-    panelRef: RefObject<HTMLDivElement>;
+    panelRef: RefObject<HTMLDivElement | null>;
     isOpen: boolean;
     onToggle: () => void;
     notifications: NavNotification[];

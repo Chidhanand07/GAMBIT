@@ -1,6 +1,6 @@
 # GAMBIT — working rules for humans and agents
 
-GAMBIT is a monorepo: `frontend/` (Next.js 14 App Router, TypeScript), `server/`
+GAMBIT is a monorepo: `frontend/` (Next.js 16 App Router, React 19, TypeScript), `server/`
 (Express + Socket.io realtime game server, CommonJS), `chess-engine/` (FastAPI +
 Stockfish), `supabase/` (Postgres schema and migrations).
 

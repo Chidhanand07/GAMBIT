@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { clientIp } from '@/lib/server/clientIp';
 import { requestComputerMove } from '@/lib/server/engine';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/server/rateLimit';
 import { schemas } from '@/lib/server/validation';
 
 // PUBLIC on purpose: the offline "play the computer" page works signed out and no user data
@@ -22,6 +24,10 @@ const pickDifficulty = (requested: string | undefined) =>
 const errorDetail = (e: unknown) => (e as { message?: string } | null | undefined)?.message ?? String(e);
 
 export async function POST(req: Request) {
+    // Per client IP, before anything reaches the engine (RATE-LIMITS).
+    const limited = await enforceRateLimit(clientIp(req.headers), RATE_LIMITS.maverickMove);
+    if (limited) return limited;
+
     let body: unknown;
     try {
         body = await req.json();

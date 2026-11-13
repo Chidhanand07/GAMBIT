@@ -3,6 +3,8 @@
  * Factory for the ioredis connection used for live game state. Same options
  * and log lines as the original `server/lib/redis.js`.
  */
+const { log } = require('../observability/log');
+const { defineRedisCommands } = require('./redisCommands');
 // The CommonJS export is the Redis class itself; the cast tells @ts-check so.
 const Redis = /** @type {typeof import('ioredis').default} */ (/** @type {unknown} */ (require('ioredis')));
 
@@ -18,7 +20,7 @@ const MAX_RETRIES_PER_REQUEST = 2;
  */
 function retryStrategy(times) {
     if (times > MAX_CONNECT_RETRIES) {
-        console.error('[Redis] Connection failed after 3 retries — game state will use Supabase fallback');
+        log.error('[Redis] Connection failed after 3 retries — game state will use Supabase fallback');
         return null;
     }
     return Math.min(times * RETRY_STEP_MS, MAX_RETRY_DELAY_MS);
@@ -36,8 +38,10 @@ function createRedisClient(url) {
         maxRetriesPerRequest: MAX_RETRIES_PER_REQUEST,
     });
 
-    redis.on('connect', () => console.log('[Redis] Connected'));
-    redis.on('error', (err) => console.error('[Redis] Error:', err.message));
+    // Lua commands the repositories need for cross-instance correctness (MULTI-INSTANCE).
+    defineRedisCommands(redis);
+    redis.on('connect', () => log.info('[Redis] Connected'));
+    redis.on('error', (err) => log.error('[Redis] Error:', err.message));
 
     return redis;
 }

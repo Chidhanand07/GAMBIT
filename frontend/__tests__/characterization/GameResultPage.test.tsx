@@ -11,6 +11,7 @@ import { jsonResponse } from './fakeSocket'
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, className }: any) => <a href={href} className={className}>{children}</a> }))
 
 import GameResultPage from '@/app/game/[id]/result/page'
+import { routeParams } from '../helpers/params'
 
 const WHITE_CLS = [
     { ply: 1, move: 'e2e4', san: 'e4', classification: 'Book', accuracy: 100, best_move: 'e2e4', eval_white: 30 },
@@ -48,7 +49,7 @@ async function settle() {
     for (let i = 0; i < 5; i++) await act(async () => {})
 }
 async function renderPage(id = 'g1') {
-    const utils = render(<GameResultPage params={{ id }} />)
+    const utils = render(<GameResultPage params={routeParams({ id })} />)
     await settle()
     return utils
 }
@@ -63,7 +64,7 @@ const ctrls = (c: HTMLElement) => Array.from(c.querySelectorAll('button.w-9.h-9'
 
 describe('states and fetching', () => {
     test('shows loading first, then fetches /api/games/:id with no options', async () => {
-        render(<GameResultPage params={{ id: 'abc' }} />)
+        render(<GameResultPage params={routeParams({ id: 'abc' })} />)
         expect(screen.getByText('Loading game…')).toBeInTheDocument()
         await settle()
         expect(fetchMock.mock.calls).toEqual([['/api/games/abc']])

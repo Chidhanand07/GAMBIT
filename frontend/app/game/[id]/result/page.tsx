@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, use } from 'react';
 import Link from 'next/link';
 import { Chess } from 'chess.js';
 import { useGameReview } from '@/features/game-result/hooks/useGameReview';
@@ -11,7 +11,8 @@ import { EvalGraph } from '@/features/game-result/components/EvalGraph';
 import { MoveCaption, ReviewControls, ReviewMoveList } from '@/features/game-result/components/ReviewMoves';
 import { ReviewStatusScreen } from '@/features/game-result/components/ReviewChrome';
 
-export default function GameResultPage({ params }: { params: { id: string } }) {
+export default function GameResultPage(props: { params: Promise<{ id: string }> }) {
+    const params = use(props.params);
     const { game, status, flipped, setFlipped } = useGameReview(params.id);
     const [ply, setPly] = useState(0);
 

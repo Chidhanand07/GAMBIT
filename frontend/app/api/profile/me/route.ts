@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireUser } from '@/lib/server/identity';
+import { requireFreshUser, requireUser } from '@/lib/server/identity';
 import { createDefaultProfile, getProfileById, updateProfile } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseJsonBody, schemas } from '@/lib/server/validation';
@@ -32,7 +32,7 @@ export async function GET() {
 
 // PATCH /api/profile/me — body { displayName, bio, country, avatarUrl? }
 export async function PATCH(request: Request) {
-    const auth = await requireUser();
+    const auth = await requireFreshUser();
     if (!auth.ok) return auth.response;
     const { userId } = auth;
 

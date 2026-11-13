@@ -9,6 +9,8 @@ const KEYS = [
     'ENGINE_SHARED_SECRET',
     'NODE_ENV',
     'FRONTEND_URL',
+    'CORS_ORIGINS',
+    'CORS_PREVIEW_ORIGIN_REGEX',
     'PORT',
     'REDIS_URL',
     'SUPABASE_URL',
@@ -33,7 +35,9 @@ afterEach(() => {
 
 test('defaults match the pre-refactor literals', () => {
     expect(env.engineUrl()).toBe('http://localhost:8001');
-    expect(env.frontendUrl()).toBeUndefined();
+    // Outside production without configuration: the local development origins only [S13].
+    expect(env.corsOrigins()).toEqual(['http://localhost:3000', 'http://127.0.0.1:3000']);
+    expect(env.corsPreviewPattern()).toBeUndefined();
     expect(env.port()).toBe(3001);
     expect(env.redisUrl()).toBe('redis://127.0.0.1:6379');
     expect(env.supabaseUrl()).toBeUndefined();
@@ -48,7 +52,8 @@ test('values are read when called, not when the module loaded', () => {
     process.env.REDIS_URL = 'redis://r:1';
     process.env.SUPABASE_URL = 'https://x.supabase.co';
     expect(env.engineUrl()).toBe('http://engine.test:9000');
-    expect(env.frontendUrl()).toBe('https://app.example');
+    // FRONTEND_URL is the legacy one-origin fallback for CORS_ORIGINS.
+    expect(env.corsOrigins()).toEqual(['https://app.example', 'http://localhost:3000', 'http://127.0.0.1:3000']);
     expect(env.port()).toBe('4000');
     expect(env.redisUrl()).toBe('redis://r:1');
     expect(env.supabaseUrl()).toBe('https://x.supabase.co');
@@ -88,8 +93,9 @@ describe('engine URL [G5]', () => {
     beforeEach(() => {
         jest.isolateModules(() => {
             env = require('../../src/config/env');
+            // Warnings go through the structured logger (NODE-20) of the same fresh module set.
+            warn = jest.spyOn(require('../../src/observability/log').log, 'warn');
         });
-        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
     afterEach(() => warn.mockRestore());
 
@@ -129,8 +135,9 @@ describe('engine shared secret [ENG-AUTH]', () => {
     beforeEach(() => {
         jest.isolateModules(() => {
             env = require('../../src/config/env');
+            // Warnings go through the structured logger (NODE-20) of the same fresh module set.
+            warn = jest.spyOn(require('../../src/observability/log').log, 'warn');
         });
-        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     });
     afterEach(() => warn.mockRestore());
 
@@ -152,4 +159,29 @@ describe('engine shared secret [ENG-AUTH]', () => {
 
 test('the config object is frozen', () => {
     expect(Object.isFrozen(env)).toBe(true);
+});
+
+describe('CORS_ORIGINS [S13]', () => {
+    test('CORS_ORIGINS wins over FRONTEND_URL', () => {
+        process.env.CORS_ORIGINS = 'https://a.example, https://b.example';
+        process.env.FRONTEND_URL = 'https://legacy.example';
+        expect(env.corsOrigins()).toEqual(['https://a.example', 'https://b.example', 'http://localhost:3000', 'http://127.0.0.1:3000']);
+        delete process.env.CORS_ORIGINS;
+    });
+
+    test('production: only the configured origins, no localhost', () => {
+        process.env.NODE_ENV = 'production';
+        process.env.CORS_ORIGINS = 'https://gambit.app';
+        expect(env.corsOrigins()).toEqual(['https://gambit.app']);
+        delete process.env.CORS_ORIGINS;
+        process.env.NODE_ENV = 'test';
+    });
+
+    test('production without any configured origin fails fast', () => {
+        process.env.NODE_ENV = 'production';
+        delete process.env.CORS_ORIGINS;
+        delete process.env.FRONTEND_URL;
+        expect(() => env.corsOrigins()).toThrow('CORS_ORIGINS is required in production');
+        process.env.NODE_ENV = 'test';
+    });
 });

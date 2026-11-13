@@ -27,6 +27,7 @@ jest.mock('@/lib/supabase/client', () => ({
 import ChallengePage from '@/app/challenge/[username]/page'
 import JoinPage from '@/app/join/[token]/page'
 import LeaderboardPage from '@/app/leaderboard/page'
+import { routeParams } from '../helpers/params'
 
 const flush = async () => {
     for (let i = 0; i < 6; i++) await act(async () => {})
@@ -51,7 +52,7 @@ describe('challenge/[username]', () => {
 
     async function renderChallenge(opponent: any = BOB) {
         fetchMock.mockImplementation(async () => (opponent ? jsonResponse(opponent) : jsonResponse(null, false)))
-        const utils = render(<ChallengePage params={{ username: 'bob b' }} />)
+        const utils = render(<ChallengePage params={routeParams({ username: 'bob b' })} />)
         await flush()
         return utils
     }
@@ -127,7 +128,7 @@ describe('join/[token]', () => {
         })
 
     async function renderJoin() {
-        const utils = render(<JoinPage params={{ token: 'tok_FAKE_0001' }} />)
+        const utils = render(<JoinPage params={routeParams({ token: 'tok_FAKE_0001' })} />)
         await flush()
         return utils
     }

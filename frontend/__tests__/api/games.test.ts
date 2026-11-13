@@ -26,26 +26,26 @@ describe('GET /api/games/[id]', () => {
     ])('caller %s sees myColor=%s', async (userId, color) => {
         db.signIn(uid(userId))
         db.queue('games', { data: game, error: null })
-        const res = await json(await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } }))
+        const res = await json(await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) }))
         expect(res.body).toMatchObject({ id: uid('g1'), myColor: color })
     })
 
     test('signed-out callers get 401 and the game is not read (was: the whole row, as a spectator) [S5][S8]', async () => {
         db.queue('games', { data: game, error: null })
-        expect((await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } })).status).toBe(401)
+        expect((await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) })).status).toBe(401)
         expect(db.calls).toEqual([])
     })
 
     test('a signed-in non-player is a spectator', async () => {
         signInWithCookie(uid('someone-else'))
         db.queue('games', { data: game, error: null })
-        expect((await json(await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } }))).body.myColor).toBe('spectator')
+        expect((await json(await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) }))).body.myColor).toBe('spectator')
     })
 
     test('unknown game → 404', async () => {
         signInWithCookie(uid('me'))
         db.queue('games', { data: null, error: { message: 'not found' } })
-        expect((await getGame(req(`/api/games/${uid('x')}`), { params: { id: uid('x') } })).status).toBe(404)
+        expect((await getGame(req(`/api/games/${uid('x')}`), { params: Promise.resolve({ id: uid('x') }) })).status).toBe(404)
     })
 })
 
@@ -68,7 +68,7 @@ describe('game responses never carry the invite token [S8]', () => {
     ])('GET as %s: minimal DTO, no invite_token / invite_expires_at', async (_label, who) => {
         db.signIn(uid(who))
         db.queue('games', { data: row, error: null })
-        const res = await getGame(req(`/api/games/${uid('g1')}`), { params: { id: uid('g1') } })
+        const res = await getGame(req(`/api/games/${uid('g1')}`), { params: Promise.resolve({ id: uid('g1') }) })
         const text = await res.text()
         expect(text).not.toContain('SECRETTOKN')
         const body = JSON.parse(text)
@@ -82,7 +82,7 @@ describe('game responses never carry the invite token [S8]', () => {
         db.signIn(uid('w'))
         db.queue('games', { data: { white_id: uid('w'), black_id: uid('b') }, error: null }, { data: { ...row, draw_offer: true }, error: null })
         const res = await patchGame(req(`/api/games/${uid('g1')}`, { method: 'PATCH', body: { draw_offer: true } }), {
-            params: { id: uid('g1') },
+            params: Promise.resolve({ id: uid('g1') }),
         })
         expect(res.status).toBe(200)
         expect(await res.text()).not.toContain('SECRETTOKN')
@@ -90,7 +90,7 @@ describe('game responses never carry the invite token [S8]', () => {
 })
 
 describe('PATCH /api/games/[id]', () => {
-    const patch = (body: unknown, id = uid('g1')) => patchGame(req(`/api/games/${id}`, { method: 'PATCH', body }), { params: { id } })
+    const patch = (body: unknown, id = uid('g1')) => patchGame(req(`/api/games/${id}`, { method: 'PATCH', body }), { params: Promise.resolve({ id }) })
 
     test('401 when signed out', async () => {
         expect((await patch({ draw_offer: true })).status).toBe(401)
@@ -125,14 +125,25 @@ describe('PATCH /api/games/[id]', () => {
 })
 
 describe('GET /api/games/active', () => {
+    const HOUR_MS = 3600_000
+    const ago = (ms: number) => new Date(NOW - ms).toISOString()
+    const lastMove = (ms: number) => ({ data: { created_at: ago(ms) }, error: null })
+
     test('returns my most recent active game', async () => {
         signInWithCookie(uid('me'))
-        const row = { id: uid('g1'), started_at: new Date(NOW - 60000).toISOString(), clock_deadline: null, white_time_ms: null, black_time_ms: null }
+        const row = { id: uid('g1'), started_at: ago(60000), clock_deadline: null }
         db.queue('games', { data: row, error: null })
         expect((await json(await activeGame())).body).toEqual(row)
         expect(db.callsFor('games')[0].ops).toEqual(expect.arrayContaining([
             ['or', `white_id.eq.${uid('me')},black_id.eq.${uid('me')}`], ['eq', 'status', 'active'], ['limit', 1],
         ]))
+    })
+
+    test('the legacy *_time_ms columns are not selected [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(60000), clock_deadline: null }, error: null })
+        await activeGame()
+        expect(db.op(db.callsFor('games')[0], 'select')![0]).not.toMatch(/_time_ms/)
     })
 
     test('no active game → null', async () => {
@@ -157,15 +168,81 @@ describe('GET /api/games/active', () => {
 
     test('a game started >2 h ago with no moves is closed as abandoned', async () => {
         signInWithCookie(uid('me'))
-        db.queue('games', { data: { id: uid('g1'), started_at: new Date(NOW - 3 * 3600_000).toISOString(), white_time_ms: null, black_time_ms: null }, error: null })
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', { data: null, error: null })
         expect((await json(await activeGame())).body).toBeNull()
         expect(db.op(db.callsFor('games')[1], 'update')![0]).toMatchObject({ result: 'abandoned' })
     })
 
     test('an old game that has moves is kept', async () => {
         signInWithCookie(uid('me'))
-        db.queue('games', { data: { id: uid('g1'), started_at: new Date(NOW - 3 * 3600_000).toISOString(), white_time_ms: 1000, black_time_ms: null }, error: null })
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(60_000))
         expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games')).toHaveLength(1)
+    })
+
+    // G22: "has moves" used to be read from white_time_ms / black_time_ms, which nothing writes
+    // any more (F-028), so every game older than two hours was abandoned, moves or not.
+    test('a >2 h game whose last move was a minute ago is kept although *_time_ms are null [G22]', async () => {
+        signInWithCookie(uid('me'))
+        const row = { id: uid('g1'), started_at: ago(3 * HOUR_MS), clock_deadline: null, white_time_ms: null, black_time_ms: null }
+        db.queue('games', { data: row, error: null })
+        db.queue('moves', lastMove(60_000))
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games').some((call) => db.op(call, 'update'))).toBe(false)
+    })
+
+    test('the last move is the newest moves.created_at of that game, read in one query [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(60_000))
+        await activeGame()
+        expect(db.callsFor('moves')).toHaveLength(1)
+        expect(db.callsFor('moves')[0].ops).toEqual([
+            ['select', 'created_at'],
+            ['eq', 'game_id', uid('g1')],
+            ['order', 'created_at', { ascending: false }],
+            ['limit', 1],
+            ['maybeSingle'],
+        ])
+    })
+
+    test('a game whose last move is itself >2 h old is closed as abandoned [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(5 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(2 * HOUR_MS + 1000))
+        expect((await json(await activeGame())).body).toBeNull()
+        expect(db.op(db.callsFor('games')[1], 'update')![0]).toMatchObject({ status: 'completed', result: 'abandoned' })
+    })
+
+    test('a last move exactly 2 h old is not yet stale [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(5 * HOUR_MS) }, error: null })
+        db.queue('moves', lastMove(2 * HOUR_MS))
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+    })
+
+    test('a game younger than 2 h is kept without reading its moves [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(HOUR_MS) }, error: null })
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('moves')).toEqual([])
+    })
+
+    test('when the moves cannot be read the game is kept, never abandoned on a guess [G22]', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS) }, error: null })
+        db.queue('moves', { data: null, error: { message: 'db down' } })
+        expect((await json(await activeGame())).body).toMatchObject({ id: uid('g1') })
+        expect(db.callsFor('games')).toHaveLength(1)
+    })
+
+    test('an expired clock deadline closes the game without reading its moves', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('games', { data: { id: uid('g1'), started_at: ago(3 * HOUR_MS), clock_deadline: ago(11_000) }, error: null })
+        expect((await json(await activeGame())).body).toBeNull()
+        expect(db.callsFor('moves')).toEqual([])
     })
 })
 
@@ -177,6 +254,21 @@ describe('POST /api/games/private/create', () => {
 
     test('400 without a time control', async () => {
         expect((await post({})).status).toBe(400)
+    })
+
+    // TIME-CONTROL / F9: the stored value is always the canonical "<min>+<inc>".
+    test.each([
+        ['10', '10+0'],
+        ['5+3', '5+3'],
+        ['1440', '1440+0'],
+        // Preset names from tabs opened before this release are mapped, not stored verbatim.
+        ['rapid', '10+0'],
+        ['classical', '30+0'],
+        ['daily', '1440+0'],
+    ])('time control %p is stored as %p', async (timeControl, stored) => {
+        db.queue('games', echo)
+        expect((await post({ timeControl })).status).toBe(200)
+        expect(db.op(db.callsFor('games')[0], 'insert')![0].time_control).toBe(stored)
     })
 
     test.each([

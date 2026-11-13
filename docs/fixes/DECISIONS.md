@@ -37,6 +37,50 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
 | [F-021](#f-021) | New Supabase key names with legacy fallbacks; JS client pinned to the last Node 20 line; `supabase-py` 2.34.1 | 3 | SUPABASE-KEYS |
 
+**Medium-risk phase** (four local stacked branches `fix/medium-1-platform-upgrade` …
+`fix/medium-4-scaling-ops`; PR column = M1..M4). Same priority order.
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-022](#f-022) | Medium phase is based on local `fix/high-3-supabase-lockdown` @ `70a94f9`; local-only work | M1 | — |
+| [F-023](#f-023) | Node 26 everywhere; Railway builds the Dockerfile; Supabase client pins lifted | M1 | NODE-RUNTIME |
+| [F-024](#f-024) | Next.js 16.4.6 + React 19; `proxy.ts` with an allow-list matcher and verified claims | M1 | NEXT-16 |
+| [F-025](#f-025) | `requireUser()` verifies claims (`getClaims`); `requireFreshUser()` keeps `getUser()` for account changes | M1 | IDENTITY-PERF |
+| [F-026](#f-026) | Debug route deleted; builds type-check; CI builds the app | M1 | S12, NX-14 |
+| [F-027](#f-027) | One time-control model (`shared/time-control.json`), canonical `M+S`, one set of category thresholds | M2 | TIME-CONTROL (G4, F7, F9) |
+| [F-028](#f-028) | Clocks live in `white_clock_ms` / `black_clock_ms` only, written on every move; no column is dropped yet | M2 | G2 |
+| [F-029](#f-029) | Flag falls and abandonment end games through the one finalizer (`endGameIf`) | M2 | G3 |
+| [F-030](#f-030) | One clock view; a disconnect charges time once and a reconnect never starts a clock | M2 | G8, G9 |
+| [F-031](#f-031) | First-move timeout (30 s per side) aborts the game unrated; time rules are a table in `domain/clockVerdict` | M2 | FIRST-MOVE |
+| [F-032](#f-032) | A disconnect before both sides have moved is adjudicated as an abort | M2 | G10 |
+| [F-033](#f-033) | A move that arrives after flag fall is refused and the game ends on time at once | M2 | G7 |
+| [F-034](#f-034) | Final clocks include the time used in the last, unfinished move; the rest of G11 was already fixed | M2 | G11 |
+| [F-035](#f-035) | Chat stores and relays the client's `text`; bounded; closed when the game is over | M2 | G6 |
+| [F-036](#f-036) | `match_found` carries a minimal opponent DTO; a failed game insert sends `match_failed`; `??` for ratings | M2 | G12 |
+| [F-037](#f-037) | Engine and database failures are HTTP errors with a code (`AppError`); the username check fails closed | M2 | G14 |
+| [F-038](#f-038) | Private games: no `game_start` for a creator re-join, invite page only for waiting games, null expiry never expires | M2 | G15 |
+| [F-039](#f-039) | The abandonment countdown starts only when a player's last socket at that board is gone | M2 | MULTI-SOCKET |
+| [F-040](#f-040) | Session registry entries are removed when the socket goes, the game ends, or the game turns out to be gone | M2 | G17 |
+| [F-041](#f-041) | A socket is closed when its token expires; the client reconnects with a fresh one; 5 s before that counts as leaving | M2 | TOKEN-LIFETIME |
+| [F-042](#f-042) | Redis errors propagate; the finished row is retried 3× with backoff; nothing is announced before Redis commits | M2 | ERRORS |
+| [F-043](#f-043) | Moves, resign, chat, rematch and queue joins wait for the server's ack; refusals are shown as a toast | M2 | ACKS |
+| [F-044](#f-044) | Stale-game detection reads the last move from `moves`, lazily; a failed read keeps the game | M2 | G22 |
+| [F-045](#f-045) | One `CORS_ORIGINS` allow-list for Express and the Socket.IO handshake; rejections are a plain 403 | M3 | S13 |
+| [F-046](#f-046) | Rate limits in shared stores: Redis for the game server, Upstash REST for the web app, a bounded queue in the engine; the limiters fail open | M3 | RATE-LIMITS |
+| [F-047](#f-047) | One FEN check at the HTTP boundary of the engine, answering 400 | M3 | G19 |
+| [F-048](#f-048) | A mate on the top line scores ±10000 (White's perspective); moves are parsed as UCI first, then SAN | M3 | G20 |
+| [F-049](#f-049) | A game without moves is never reviewed; a side without moves has no accuracy | M3 | G21 |
+| [F-050](#f-050) | Render builds the engine's Dockerfile, which is the only place Stockfish is installed; the MAVERICK weights stay in git with a checksum-verified download as fallback | M3 | ENGINE-BUILD |
+| [F-051](#f-051) | One pure helper decides post-sign-in redirects: a same-origin path with exactly one leading `/` | M3 | S6 |
+| [F-052](#f-052) | No console output from browser code; ESLint enforces it | M3 | S14 |
+| [F-053](#f-053) | Ratings and statistics are written once per game, atomically, by `public.apply_game_result`; closes the SEC-04 deviation in F-017 | M3 | RATING-ATOMIC |
+| [F-054](#f-054) | Express 5; one error middleware; routes throw instead of wrapping | M4 | EXPRESS-5 |
+| [F-055](#f-055) | Structured logs with pino; `/livez` and `/readyz` | M4 | OBSERVABILITY |
+| [F-056](#f-056) | Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart | M4 | SHUTDOWN |
+| [F-057](#f-057) | Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list | M4 | SUPPLY-CHAIN |
+| [F-058](#f-058) | Schema drift is checked against the linked Supabase project on a schedule, not on every PR | M4 | SCHEMA-DRIFT |
+| [F-059](#f-059) | The game server can run as several replicas behind one Redis | M4 | MULTI-INSTANCE |
+
 ---
 
 ## F-001
@@ -840,3 +884,1142 @@ instead of one file per ADR under `docs/refactor/adr/`.
     would remove an Auth round trip per request (SEC-05); not done here.
   - The Supabase *Realtime* presence channel in the browser uses the public key; with a
     publishable key, unauthenticated connections are limited to 24 hours by Supabase.
+
+---
+
+# Medium-risk phase
+
+## F-022
+
+**The medium phase is based on local `fix/high-3-supabase-lockdown` at `70a94f9`, and stays local.**
+
+- **Context.** The brief for this phase forbids every network git operation (`fetch`, `pull`,
+  `push`, `gh`): the owner is signed in to another GitHub account. So whether PR #22 has been
+  merged into `preprod` cannot be checked.
+- **Decision.** Base = the local branch `fix/high-3-supabase-lockdown`, SHA
+  `70a94f97232db7a712e223ab9ef091675d81647b`. The local ref
+  `origin/fix/high-3-supabase-lockdown` points at the same commit; there is no local `preprod`
+  branch, and the local `origin/preprod` is older (it does not contain the high-risk work).
+  The base contains `docs/fixes/HIGH_RISK_REPORT.md`, so it is not stale relative to the
+  high-risk phase. Whether it is stale relative to the remote is unknown.
+- **How the work is laid out.** One git worktree per branch under `../GAMBIT-wt/medium-<n>`,
+  each branch created from the previous one. Nothing is pushed; no PR is opened. The PR title
+  and description for each branch are in `docs/fixes/pr/M<n>.md`.
+- **Consequence for the owner.** If `preprod` moved on the remote in the meantime, rebase
+  `fix/medium-1-platform-upgrade` (and then the three branches above it) before opening PRs.
+- **"CI" in this phase** means the gates run locally in the worktree. Docker and the Supabase
+  CLI are not installed on this machine, so `supabase start` / `supabase test db` and
+  `docker build` were **not** run; each PR description says so where it matters.
+
+## F-023
+
+**Node 26 for the frontend and the game server; Railway builds `server/Dockerfile`; the Supabase client pins are lifted (NODE-RUNTIME).**
+
+- **Context.** NODE-01 asks for an Active or Maintenance LTS line, pinned identically for the
+  frontend and the game server. The repo had no `engines`, no `.nvmrc`, CI on Node 20, a
+  `server/Dockerfile` on Node 18 that Railway did not even use (`railway.toml` selected
+  Nixpacks, which picks its own Node), and `@supabase/supabase-js` held at `~2.109.0` because
+  later releases need Node 22 (F-021).
+- **Which version.** Node 26 ("Lithium") is the newest LTS line (26.13.1 on the day of this
+  change). Vercel's documentation lists 26.x as available and as the default for new projects,
+  and reads the major from `engines.node`. Railway runs whatever image it is given.
+- **Decision.**
+  - `engines.node = "26.x"` in `frontend/package.json` and `server/package.json`; a root
+    `.nvmrc` containing `26`; every CI `setup-node` step uses `node-version-file: .nvmrc`, so
+    there is one place to change next time.
+  - `server/Dockerfile`: `node:26-alpine`, `npm ci --omit=dev` (was `npm install --production`,
+    which ignores the lockfile), runs as the unprivileged `node` user, and starts `node
+    server.js` directly so SIGTERM reaches the process. `server/railway.toml` switches the
+    builder from Nixpacks to this Dockerfile.
+  - `@supabase/supabase-js` `^2.119.0` (server and frontend) and `@supabase/ssr` `^0.12.7`.
+  - The engine stays on Python 3.11.
+- **Why the Dockerfile and not a Nixpacks/Railpack setting.** A buildpack maps a version
+  request to whatever it currently ships; whether Railway's builder has Node 26 today could not
+  be confirmed from here. The official `node:26-alpine` image exists and is exactly what the
+  tests ran on. It also makes the image reproducible and removes the duplicated, contradictory
+  runtime definition.
+- **Why a test for configuration.** `server/__tests__/config/nodeRuntime.test.js` reads the
+  five places and fails when they disagree; it failed on all seven assertions before this
+  change. Drift between them is the bug being fixed.
+- **Not verified.** There is no Docker on this machine, so the image was **not built**. Both
+  test suites, lint and `next build` were run on Node 26.13.1 with nvm. Railway's behaviour
+  with the new builder setting is untested: the first deploy of this branch should be watched,
+  and if the service was configured in the Railway dashboard to use Nixpacks, the dashboard
+  setting may need to be changed to "Dockerfile" by hand.
+- **Rollback.** Revert the commit; nothing persistent changes.
+
+## F-024
+
+**Next.js 16.4.6 and React 19; `middleware.ts` becomes `proxy.ts`, which refreshes the session and redirects only on verified identity (NEXT-16).**
+
+- **Context.** NX-01: 14.x must not ship after the stopgap (F-011). `npm audit` listed
+  advisories for the 14.x line that are fixed only in 15/16.
+- **What was done.**
+  - `next` pinned to exactly `16.4.6` (the brief asks for ≥ 16.4.5), `react` / `react-dom`
+    `^19`, `@types/react*` `^19`, `@next/eslint-plugin-next` `^16.4.6`, `@types/node` `^26`.
+  - Official codemods: `next-async-request-api` (14 files: `await cookies()`, `params` as a
+    Promise in route handlers, `use(props.params)` in client pages) and `middleware-to-proxy`.
+    Their output was reviewed and tidied by hand (a stray `;;`, import formatting).
+  - `next.config.js`: the `eslint` key is gone (Next 16 rejects it; ESLint is a separate CI
+    step), and `turbopack.root` / `outputFileTracingRoot` are set to `frontend/`, because the
+    monorepo has a second lockfile at the repository root and Next otherwise guesses the root.
+  - `tsconfig.json`: `jsx: react-jsx` and the `.next/dev/types` include, both written by Next.
+- **Libraries that had to move for React 19** (their peer ranges excluded it): `framer-motion`
+  10 → `^11.18.2`, `lucide-react` 0.292 → `^0.469.0`, `qrcode.react` 3 → `^4.2.0`. Each is the
+  *smallest* step that accepts React 19, not the newest release (`framer-motion` is at 14,
+  `lucide-react` at 1.x), to keep icon names and animation APIs unchanged. `recharts` and
+  `@testing-library/react` already accepted React 19.
+- **The proxy: options.**
+  1. Keep the old logic (decode the cookie's JWT without verifying it, accept if not expired).
+  2. Follow the current `@supabase/ssr` guidance: a server client on the request cookies with
+     `getAll` / `setAll`, call `auth.getClaims()`, return the response the client built.
+  3. Matcher: (a) everything except static files (the old matcher, and Supabase's example);
+     (b) an allow-list of the protected page prefixes.
+- **Decision.** 2 and 3b.
+  - `lib/server/sessionRefresh.ts` (`server-only`) builds the client, lets it refresh an
+    expired access token, copies refreshed cookies onto both the forwarded request and the
+    response, applies the `Cache-Control: no-store` headers Supabase passes to `setAll`, and
+    reports the verified user id. `proxy.ts` redirects to `/login?redirect=…` when there is
+    none, carrying over any cookies Supabase set or cleared.
+  - The matcher lists `/lobby`, `/game`, `/profile`, `/leaderboard`, `/settings`,
+    `/challenge` (each with `/:path*`). API routes, public pages and static files never run
+    the proxy.
+- **Why.**
+  - *Verified claims*: the old check accepted any well-formed cookie, so it was decoration.
+    `getClaims()` verifies the signature (locally with asymmetric signing keys; through
+    Supabase Auth otherwise). The proxy is still only an optimistic redirect: every route
+    handler keeps its own `requireUser()`, which is where data is protected (NX-07, NX-09).
+  - *Allow-list matcher*: NX-09 asks for one. It also bounds the cost: on a project that still
+    uses the legacy symmetric JWT secret, `getClaims()` is a network call to Supabase Auth, and
+    running it for every API request would double the calls `requireUser()` already makes.
+    Route handlers refresh cookies themselves through their own `setAll`.
+  - *Fail closed*: if verification errors or throws, protected pages redirect to `/login`
+    (SEC-09). During a Supabase Auth outage signed-in users therefore land on the login page;
+    the alternative is to show protected page shells to anyone, and the data routes would
+    refuse them anyway.
+- **Behaviour changes.**
+  - A cookie that is well-formed but not verifiable no longer opens protected pages.
+  - "A token that expired under a minute ago is still accepted" is gone; an expired token is
+    refreshed with the refresh token, or the visitor is sent to `/login`.
+  - `/login` and other public pages are not touched by the proxy at all.
+- **Caching (NX-11).** Nothing in the app uses `"use cache"`, `unstable_cache`, `force-static`
+  or `revalidate`; a source-scan test keeps it that way. Route handlers stay `force-dynamic`.
+  `cacheComponents` is not enabled. The login and OAuth-callback responses now also carry the
+  no-store headers Supabase supplies when it sets cookies.
+- **Tests.** `__tests__/proxy.test.ts` (41 cases) replaces `middleware.test.ts`;
+  `__tests__/security/nextVersion.test.ts` pins the line, React 19, the file rename and the
+  no-caching scan. Page tests pass `params` as an already-settled promise
+  (`__tests__/helpers/params.ts`); route tests pass `Promise.resolve(params)`.
+- **Verified / not verified.** `next build` (Turbopack) passes on Node 26.13.1. The built app
+  was started and probed with curl: protected pages redirect with the return path, a forged
+  cookie redirects, `/api/profile/me` answers 401, public pages answer 200. **Not verified:**
+  a real sign-in, a real token refresh through the proxy, the Vercel build, and how the pages
+  look and animate under React 19 with the three bumped UI libraries (no browser was used).
+- **Lint.** `@next/eslint-plugin-next` 16 adds a warning for `window.location.assign('/lobby')`
+  in `features/auth/signup.ts`. It is intentional there (a full reload so the new session
+  cookie is sent; documented in `readme_first.md`), so it stays a warning and is not changed.
+
+## F-025
+
+**`requireUser()` verifies the token's claims with `getClaims()`; `requireFreshUser()` adds `getUser()` for routes that change the account (IDENTITY-PERF).**
+
+- **Context.** Since S5 (F-012) every route handler called `auth.getUser()`: one HTTPS round
+  trip to Supabase Auth per API request. `getClaims()` verifies the same token locally when
+  the project signs JWTs with an asymmetric key: the client fetches the project's JWKS once,
+  caches it for 10 minutes at module level (so it survives across requests in a warm function),
+  and checks the signature with WebCrypto. For a token signed with the legacy shared secret
+  (`HS256`) the library itself falls back to `getUser()`. So one call gives local verification
+  "where the project's keys allow it" and the old behaviour everywhere else, with no
+  configuration switch to get wrong.
+- **What verified claims do not tell you.** A token that verifies was issued by Supabase and
+  has not expired. It does not prove the session still exists: after a sign-out, a ban or a
+  deleted account, an already issued access token keeps verifying until it expires (one hour
+  by default). `getUser()` does notice.
+- **Options.** (a) `getClaims()` everywhere; (b) `getClaims()` for reads, `getUser()` for every
+  mutation; (c) `getClaims()` by default and `getUser()` only where the account itself changes.
+- **Decision.** (c).
+  - `getVerifiedUserId()` / `requireUser()`: `getClaims()`; the subject must be a non-empty
+    string and there must be no error. `getSession()` is still never used.
+  - `getVerifiedUserId({ fresh: true })` / `requireFreshUser()`: the same, and then
+    `getUser()` must return the same user id. Used by `PATCH /api/profile/me`, the only route
+    that edits the account.
+  - Any error or exception → 401 (SEC-09). The 401 body and status are unchanged.
+- **Why not (b).** The other mutations (friend requests, notifications read, private game
+  creation, draw offer) are bounded by RLS-independent ownership checks on the caller's own
+  id and are low-value for a token that is at most an hour old; making them all pay the round
+  trip gives back most of what this item removes. The stale-token window is the same one every
+  JWT-verifying service has, and the game server has it too (F-004, addressed by
+  TOKEN-LIFETIME in M2).
+- **What the owner must do to get the benefit.** Enable asymmetric JWT signing keys in the
+  Supabase dashboard (Authentication → Signing keys) and rotate to them. Until then
+  `getClaims()` behaves exactly like `getUser()` did: correct, just not faster.
+- **Tests.** `__tests__/api/cookieAuth.test.ts`: the forged-cookie matrix now has 14 kinds of
+  unverified caller × 18 handlers (was 9 × 18), including claims without a subject, a
+  non-string subject, a cookie that `getSession()` would accept, and "claims fail although
+  `getUser()` would name a user". New `requireFreshUser` cases. `identity.test.ts`: the default
+  path never calls `getUser()`.
+- **Not verified.** No real token was verified: the tests mock `@supabase/ssr`. The local
+  verification path was read in the installed `@supabase/auth-js` source (JWKS cache, HS256
+  fallback) but not exercised against a project with asymmetric keys.
+
+## F-026
+
+**The debug route is deleted, production builds type-check, and CI runs `next build` (S12, NX-14).**
+
+- **S12.** `app/api/debug/session` is deleted, not protected: since S5 it answered only the
+  signed-in caller, but it still returned cookie names and session details that no feature
+  uses. No other debug-only route exists in the three services (checked by search: the game
+  server exposes health, matchmaking status, username check, analysis and invite routes; the
+  engine exposes its documented endpoints). `security/noDebugRoutes.test.ts` fails if a route
+  or page appears under a `debug`, `diagnostics`, `internal`, `dev` or `test` segment.
+- **NX-14.** `typescript.ignoreBuildErrors` is removed (the `eslint` key went with NEXT-16
+  because Next 16 rejects it). `next build` now runs TypeScript and fails on errors; it passed
+  on the first run because `tsc --noEmit` was already a CI gate. ESLint stays a separate CI
+  step (`npm run lint`), as the brief asks.
+- **A build step in CI.** The frontend job now ends with `npm run build`, using placeholder
+  public values (`https://placeholder.supabase.co`, `sb_publishable_placeholder`). No secret is
+  needed: server secrets are read at call time, not at build time. Without this step nothing
+  in CI would notice a change that breaks the production build, which is the point of NX-14.
+- **Cost.** About half a minute of CI time (the build takes ~10 s locally with Turbopack).
+
+## F-027
+
+**One time-control model for the game server and the web app: `shared/time-control.json`, canonical `"M+S"`, one set of category thresholds (TIME-CONTROL: G4, F7, F9).**
+
+- **Context.** A time control was a free string parsed with `parseInt` in five places.
+  - *G4*: `join_queue` carries `time_control: "10"` plus a separate `increment`; the clock only
+    read an increment written inside the string, so the increment was silently dropped, and
+    the queue paired players on the string alone ("10" with any increment).
+  - *F7*: three different minute → category tables: game page `<3 / <10 / ≥30`, profile and
+    stats `≤2 / ≤5 / ≤15`, server rating pools `≤2 / ≤5 / ≤60`. The lobby's "Classical 30 min"
+    card started games the server rated as *rapid*.
+  - *F9*: the private-game dialog sent the option id (`"rapid"`, `"daily"`) as the time
+    control; `parseInt("rapid")` is `NaN`, so every such game was played as 10 minutes.
+  - `"-5"` produced a negative clock, `"0"` meant 10 minutes in some helpers and 0 in others.
+- **Decision: the model.** A time control is `{ minutes, incrementSeconds }`, written
+  `"M+S"` (always with the increment: `"10+0"`). Limits: 1–1440 minutes, 0–180 seconds.
+  Categories by base minutes: **bullet ≤ 2, blitz ≤ 5, rapid ≤ 29, classical ≥ 30.**
+  - Two entry points on each side. `parseTimeControl` is strict and is used for anything a
+    client sends: an invalid value is refused (`invalid_payload` / 400), never defaulted.
+    `timeControlOf` is for values the server stored itself: an old or unreadable row still
+    gets a playable clock (the default, 10+0).
+  - New games store the canonical text. Old rows (`"10"`) keep working: both forms parse.
+- **Why these thresholds.** They are the smallest change that makes every surface agree with
+  the lobby's own cards (1 → bullet, 3 → blitz, 10 → rapid, 30 → classical). Bullet and blitz
+  are exactly what the server already used for ratings, so those pools are untouched. What
+  changes: on the server, 30–60 minute games now count for the *classical* rating instead of
+  rapid (which is what the lobby has always called them); on the profile, 16–29 minutes is
+  rapid instead of classical; on the game page, 6–9 minutes shows the rapid rating instead of
+  blitz. Past games are not re-rated; only which column the next game updates changes.
+  Categories ignore the increment on purpose: weighting it (as Lichess does) would move
+  existing presets between pools, which is a product decision, not a bug fix.
+- **Decision: "defined once" across two deploy roots.** The game server is built from
+  `server/` (Railway) and the web app from `frontend/` (Vercel); neither can import a file
+  above its own directory, and there is no workspace package. So:
+  - `shared/time-control.json` is the only file to edit: limits, default, thresholds, lobby
+    presets, and a list of contract `cases` (valid and invalid inputs with expected results);
+  - `node scripts/sync-shared.js` copies it to `server/src/domain/timeControl.data.json` and
+    `frontend/lib/chess/timeControl.data.json` (`--check` fails when a copy is stale);
+  - each side has a small module that implements the rules over that data, and each side's
+    test suite (a) asserts its copy is byte-identical to the shared file and (b) runs the same
+    contract cases (TEST-08). A change on one side that the other does not follow fails CI.
+  - Options not taken: a workspace package (changes both hosts' build roots and install
+    steps); importing across directories (breaks the Docker build context and the Turbopack
+    root set in F-024).
+- **Where the canonical form is produced.**
+  - Server: `matchmakingService` (queue entries carry `"M+S"` and the increment; pairing
+    compares both), `privateGameService` (rematch, challenge and invite games), and the socket
+    schemas, which range-check `time_control` (and `join_queue`'s separate increment) through
+    `services/timeControlRules.js`. That file exists because entry adapters may not import
+    `domain/` directly (dependency-cruiser rule `entry-adapters-call-services-only`).
+  - Web: the lobby sends `"M+S"` for presets and custom; the private-game dialog sends the
+    option's real time control; `POST /api/games/private/create` canonicalises and
+    range-checks. It still accepts a preset *name* and maps it to the preset's time control,
+    so a tab opened before the deploy keeps working (backwards-compatible rollout).
+- **Display.** The UI printed the stored string followed by " min". `displayTimeControl`
+  prints `"10 min"` or `"5+3"` for both old and canonical values.
+- **F8, touched only where required (brief rule 6).** The lobby's reconnect re-queue sent only
+  the minutes (`"12"` for a custom 12+5), which now would pair the player in a different pool
+  than the one they asked for. It sends the canonical value. The other F8 quirks (`{ id }`-only
+  user, forced `is_rated: true`, no `leave_queue` on unmount) are left for the last phase.
+- **Behaviour changes users can see.** Increments chosen in the lobby actually apply. Players
+  are only paired with someone who chose the same increment. A "Classical" (30 min) game
+  updates the classical rating. Private "Rapid" / "Classical" / "Bullet" / "Daily" games are
+  played at that speed, not at 10 minutes. "Daily" is a 1440-minute clock, as its card always
+  implied; there is still no per-move correspondence mode.
+- **Not verified.** No browser run; the queue was exercised through the socket tests only.
+
+## F-028
+
+**Clocks are stored in one column pair, `white_clock_ms` / `black_clock_ms`, written with every move; the legacy pair is left in place, unused (G2).**
+
+- **Context.** `games` has two pairs of clock columns. The disconnect snapshot wrote
+  `white_time_ms` / `black_time_ms`; the restore after a server restart read
+  `white_clock_ms` / `black_clock_ms`, which were written only when a game ended. So a game
+  restored mid-play always came back with full starting clocks.
+- **Decision.**
+  - Canonical pair: `white_clock_ms` / `black_clock_ms` (the pair in the initial schema, and
+    the one the finalizer and the restore already used).
+  - The server writes that pair in three places: with every move (together with the FEN),
+    at a disconnect, and when the game ends. It never reads or writes `*_time_ms`.
+  - The web DTO no longer exposes `*_time_ms`.
+- **Why write the clocks with every move.** "Read and written consistently" is only useful if
+  the row is current. The move already updates the `games` row (the FEN), so this adds two
+  integers to an existing statement, not a new query.
+- **Why the legacy columns are not dropped here.** No migration is needed to *fix* G2, and
+  dropping columns the previous release still writes would turn its (fire-and-forget)
+  disconnect snapshot into a logged error during a rollback. They are dead weight, not a
+  hazard. Dropping them is a one-line migration for a later release, once this one is the
+  oldest version that can run; it is listed in the report's remaining issues.
+- **Behaviour change.** A game restored after a server restart resumes with the clocks of
+  its last move instead of full clocks.
+- **Tests.** The characterization case "writes white_time_ms/black_time_ms (BUG pinned)" now
+  asserts the canonical pair; a move's row update includes both clocks; a round-trip test on
+  `gameStateFromRow`; the DTO test asserts the legacy pair is not exposed.
+
+## F-029
+
+**Timeouts and abandonment end games through the single finalizer (G3).**
+
+- **Context.** After S3 there were still two ways to finish a game. Moves and resignations
+  went through `gameFinalizer`. The clock had its own `finalizeExpiredGame`, which wrote only
+  `status`, `winner_id`, `ended_at` and `final_fen` (no `result`, no clocks), never triggered
+  the game review, did not store the reason in Redis, did not clear the session links, and
+  sent a `game_end` payload with two extra fields on flag fall and none on abandonment.
+- **Decision.**
+  - `gameFinalizer.endGameIf(gameId, decide)`: `decide(game)` runs on the state read inside the
+    per-game lock, in the same atomic active → completed transition, and returns a verdict or
+    null. `endGame(gameId, verdict)` is `endGameIf(gameId, () => verdict)`.
+  - `clockService` no longer finalizes anything. A tick broadcasts the clock and, when its
+    pure `clockVerdict` says the game is over, calls `finalizer.endGameIf` with that same
+    function, so the verdict is re-taken on fresh state (the guarantee F-010 added: a move or
+    a reconnect that lands first wins).
+  - `REASON.TIME` and `REASON.ABANDONMENT` join the other reasons in `domain/adjudication`.
+  - The composition root builds one finalizer and gives it to both the game service and the
+    clock. The legacy facade `services/clock.js` only owns the interval now;
+    `finalizeExpiredGame` is deleted.
+- **Why a function and not a verdict.** The clock's verdict depends on the time and on state
+  that changes every move. Passing the verdict would reintroduce the stale-read race; passing
+  the decision keeps one transition and one place that knows how a game ends (SOLID-01).
+- **Behaviour changes.**
+  - Games that end on time or by abandonment now have `result` and both clock columns in the
+    database, get a game review, and show their real reason ("Time", "Abandonment") when a
+    player re-joins later (it was "Game over").
+  - The `game_end` payload is the same five fields for every ending. The `is_rated` and
+    `time_control` extras on flag fall are gone; nothing in the web app read them.
+  - A rating failure after a clock ending is logged as `[clock] game <id> error: …`.
+
+## F-030
+
+**One view of the clocks; a disconnect charges elapsed time once, and a reconnect never starts a clock that was not running (G8, G9).**
+
+- **Context.** Clock state is `whiteClockMs` / `blackClockMs` (time left as of `lastMoveAt`)
+  plus `lastMoveAt` (null before the first move). Three functions read it differently:
+  `clocksAt`, the ticker's `tickerSnapshot`, and an inline special case in the state sync.
+  - *G9*: on disconnect the service stored the already charged clocks but kept `lastMoveAt`;
+    the ticker then subtracted `now - lastMoveAt` again in every `clock_sync`, so the
+    disconnected side's clock visibly kept falling, twice as fast as it had run.
+  - *G8*: on reconnect the service set `lastMoveAt = now` unconditionally. For a game with no
+    move yet that *started* White's clock.
+- **Options for G9** (the brief names both): (a) store the charged time and reset
+  `lastMoveAt`; (b) store the raw time and keep `lastMoveAt`, subtracting the absence later.
+- **Decision.** (a), with the rule in one place, `domain/clock.js`:
+  - `isClockRunning(state)`: a move has been made **and** nobody is disconnected.
+  - `clocksAt(state, now)`: the only view of the clocks. It charges the side to move only
+    while the clock is running; otherwise the stored values are the answer. The ticker, the
+    state sync and the snapshot all call it. `tickerSnapshot` is deleted.
+  - `freezeClocks(state, now)` (disconnect): charged clocks, `lastMoveAt = now` if the clock
+    had started, else null.
+  - `resumeClocks(state, now)` (reconnect): `lastMoveAt = now` if the clock had started, else
+    null.
+- **Why (a).** With (b) every reader has to know about the absence, and the value in the
+  database (written at disconnect, F-028) would not be the real remaining time. With (a) the
+  stored clocks are always true as of `lastMoveAt`, and "frozen" is a single predicate.
+- **Behaviour changes.**
+  - While a player is disconnected both clocks stand still for everyone; the time away is not
+    charged to either side (that part is unchanged, it is the 20 s grace period).
+  - `game_state_sync.clockActive` is false while a player is disconnected (it was true). The
+    web client uses it to decide whether to count down locally.
+  - Reconnecting before the first move leaves both clocks full and stopped.
+- **Tests.** Pure tests for the four functions, including the 3 s + 10 s away + 2 s case; the
+  characterization cases "clock_sync subtracts the elapsed time AGAIN (pinned)" and
+  "lastMoveAt is reset to now … starts white's clock before the first move (pinned)" now
+  assert the correct behaviour.
+
+## F-031
+
+**A side that never makes its first move gets the game aborted, unrated, after 30 seconds (FIRST-MOVE).**
+
+- **Context.** A game with no move had no running clock, and the ticker skipped it, so a
+  player who was paired and walked away left the opponent in a game that never ended.
+- **Decision.**
+  - `FIRST_MOVE_TIMEOUT_MS = 30000` in `domain/clockVerdict.js`. White has 30 s from the moment
+    the game becomes active; once White has moved, Black has 30 s from that move. After both
+    sides have moved the rule no longer applies.
+  - The game state gains `startedAt` (set when the game is created, or when it is restored
+    from the database after a restart, which gives a fresh 30 s).
+  - The verdict is `{ winner: null, reason: 'Aborted', aborted: true }`. The finalizer stores
+    Redis `status: 'completed', result: 'aborted'`, writes the row with `status = 'aborted'`
+    (a status the schema has always listed) and no result or winner, and does **not** rate or
+    review the game. `game_end` carries `result: 'Aborted'`.
+  - Time-based endings are now one pure, ordered table in the domain (`clockVerdict`):
+    abandonment → first-move timeout → flag fall. The clock service only ticks; it walks every
+    active game, started or not, and broadcasts `clock_sync` only once a clock has started.
+- **Why abort instead of a win for the waiting player.** No chess was played. Awarding rating
+  points for it would make "pair and wait" a way to farm rating against people with a bad
+  connection, and "pair and leave" a way to give points away. An abort costs nobody anything.
+- **Why Black's window is 30 s although Black's clock is already running.** After White's
+  first move Black's clock counts down normally. In a 10-minute game a Black player who never
+  shows up would otherwise make White wait 10 minutes for a flag fall. If Black's clock is
+  shorter than 30 s the first-move rule still decides (abort), because it comes first in the
+  table: a game with one move is not a game.
+- **Disconnects.** While a player is disconnected the abandonment rule decides (20 s grace);
+  what happens when that grace expires before both sides have moved is G10.
+- **States created before this release** have no `startedAt` and are simply not subject to the
+  rule; nothing is aborted retroactively at deploy time.
+- **Web client.** `GameOverModal` treats `Aborted` as its own outcome: title "Game aborted",
+  the line "No game was played · not rated", neutral icon. Before, any result that was not a
+  win or a draw rendered as "You Lost". There is no on-board countdown for the 30 s; that is a
+  UI addition for a later phase.
+- **Not verified.** No browser run of the modal.
+
+## F-032
+
+**A disconnect before both sides have moved is adjudicated when the grace period ends, as an abort (G10).**
+
+- **Context.** The ticker only looked at games whose clock had started (`lastMoveAt` set). A
+  player who disconnected before the first move was therefore never adjudicated: the opponent
+  saw "disconnected, 20 s" and then nothing, forever.
+- **What FIRST-MOVE already changed.** The ticker now walks every active game, so the
+  abandonment rule was reached for these games too, and it awarded the opponent a (possibly
+  rated) win for a game in which no move, or one move, had been played.
+- **Decision.** In `domain/clockVerdict`, when the 20 s grace period of a disconnected player
+  runs out: if each side has made at least one move, the opponent wins by Abandonment (as
+  before); otherwise the game is **aborted**: no winner, not rated, not reviewed. The
+  threshold ("one move each") is the same one that ends the first-move rule (F-031).
+- **Why not a win.** For the same reason as F-031: nothing was played, and a rated result for
+  an unplayed game is exploitable in both directions. It also makes the two rules agree: it
+  does not matter whether the absent player's tab was closed (disconnect, 20 s) or merely idle
+  (first-move timeout, 30 s); the game is aborted either way.
+- **Tests.** Pure cases in `domain/clockVerdict.test.js`; a ticker case; the characterization
+  case that pinned "never adjudicated (BUG pinned)" asserts the abort. The existing
+  abandonment tests now use a position with one move each, because that is when the rule
+  awards a win.
+
+## F-033
+
+**A move that arrives after the mover's flag has fallen is refused, and the game ends on time immediately (G7).**
+
+- **Context.** The ticker looks at each game once a second. A move sent after the mover's
+  clock reached zero but before the next tick was accepted: the clock was clamped to 0, the
+  increment was added, and the player went on with fresh time.
+- **Decision.** Inside the per-game lock, after the authorization checks and before the
+  legality check, `moveRecorder` asks whether the mover's remaining time at that instant is
+  ≤ 0 (only for a clock that is running; a game before its first move, or frozen for a
+  disconnect, cannot time out). If so the move is rejected with `time_expired`; the game
+  service then calls `finalizer.endGameIf` with the same `clockVerdict` the ticker uses, so
+  the game ends as "Time" for the opponent right away, through the one finalizer.
+- **Why reject and finalize, not just reject.** Otherwise the outcome would depend on which
+  comes first, the player's next attempt or the tick, and the opponent would wait up to a
+  second for a result that is already decided.
+- **Boundary.** Exactly 0 ms left is too late; 1 ms is in time. The increment is added only
+  after a move is accepted, so it cannot rescue a move that was not.
+- **Client.** The sender gets `move_rejected { reason: 'time_expired' }` and the `game_end`
+  broadcast; no extra state sync is sent because the game is over.
+
+## F-034
+
+**Final clocks are the clocks at the moment the game ended; the other two parts of G11 were already fixed by S3 (G11).**
+
+- **G11 has three parts** (docs/refactor/REPORT.md): (1) the reason was not stored in Redis;
+  (2) the persisted clocks lacked the elapsed deduction; (3) the client's `time_control` /
+  `is_rated` were used when Redis lacked them.
+- **(1) and (3): already fixed** by the high-risk phase (S3, F-008): the finalizer stores
+  `reason` with the finished state, and it takes the time control and the rated flag only
+  from the stored game; no payload reaches it. New tests state both explicitly, and they
+  passed before any change in this commit, which is the evidence.
+- **(2): fixed here.** The stored clocks are "time left as of the last move". When a game
+  ended by resignation, flag fall or abandonment, those values were written to the database
+  as the final clocks, so a player who resigned seven seconds into a move kept those seven
+  seconds, and a player who lost on time was recorded with time left. The finalizer now takes
+  `clocksAt(game, now)` inside the transition and stores that, both in Redis and in the row:
+  the loser of a flag fall has 0.
+- **Frozen and unstarted clocks** are stored as they are (`clocksAt` does not charge them).
+- **`now` is injected** into the finalizer (default `Date.now`), like in the other services.
+
+## F-035
+
+**Chat reads the field the web client sends, bounds it, and is closed once the game is over (G6).**
+
+- **Context.** The client sends `{ game_id, from, text }`. The server persisted
+  `data.message`, so every chat line was stored with a NULL content, and it relayed the whole
+  payload as received. Chat kept working after the game had ended.
+- **Decision.**
+  - Schema: `text` (or an older `message`, read as the text) is trimmed and must be 1–500
+    characters; otherwise `invalid_payload`.
+  - Service: the same `playerRejection` rule moves and resignations use: the caller must be
+    one of the two players of an **active** game. A refusal is an ack with the reason
+    (`not_a_player`, `game_not_active`, `game_not_found`); it used to be silence.
+  - The relayed `chat_message` is a fixed shape: `{ game_id, from?, text, from_user_id }`.
+    `from_user_id` is the verified user. Nothing else a client adds is relayed.
+  - The service takes the verified user id as an argument (the handler has it), so it no
+    longer needs the session registry.
+- **Closed after the game.** The brief asks for it. A finished or aborted game's room is a
+  result screen; a channel that stays open there has no moderation and no end.
+- **Left as is: `from`.** The display name next to a message is still the one the client
+  sends (bounded to 64 characters). Identity is `from_user_id`; deriving the shown name from
+  it is a web-client change (the game page would map the id to the player's username) and is
+  listed for the last phase.
+
+## F-036
+
+**`match_found` is a minimal DTO, a failed game insert is reported with `match_failed`, and a rating of 0 is a rating (G12).**
+
+- **Context.** Three small defects in `matchmakingService.createGame`:
+  1. `match_found.opponent` was the raw queue entry: the opponent's socket id, queue timing,
+     time control and rated flag. The game part was the raw inserted row.
+  2. If the `games` insert failed, both players had already been removed from the queue, got
+     no event, and kept showing "searching" forever.
+  3. `rating: user.rating || 1200` turned a rating of 0 into 1200.
+- **Decision.**
+  1. `opponent` is `pairing.opponentView(entry)`: `{ user_id, username, rating,
+     isProvisional }`. The game part is `toPublicGame(row)`, the allow-list the join endpoints
+     already use (S8).
+  2. On failure (an error result *or* a throw, which is also caught now so one failed pair
+     cannot abort the whole pairing pass) both players receive
+     `match_failed { reason: 'game_creation_failed' }`. They stay out of the queue.
+  3. `??`.
+- **Notify, not re-queue** (the brief allows either). If the database is failing, re-queued
+  pairs would be paired and re-inserted every second, each attempt logging an error and adding
+  load to the thing that is failing. Telling the players is honest and lets each decide; the
+  lobby stops the search and shows a toast ("could not start the game, please search again").
+- **Web client.** `useMatchmaking` listens for `match_failed`; `MatchFoundPayload.opponent` is
+  typed as the four public fields. Nothing in the client read the removed fields.
+
+## F-037
+
+**Upstream failures are reported as errors with a status and a code; the username check fails closed (G14).**
+
+- **Context.**
+  - `POST /api/analysis/engine` returned whatever JSON the engine sent with status 200, also
+    when the engine answered 4xx/5xx. Unreachable engine → 500 with the raw socket error text.
+  - `GET /api/users/check-username` used `.single()`, for which "no row" is itself an error,
+    and read only `data`: any database failure answered `{ available: true }`.
+- **Decision.**
+  - `services/errors.js`: `AppError(code, httpStatus)`, the operational error NODE-07 asks for.
+    Services throw it; `http/respond.js` `sendError` answers `{ error: code }` with that
+    status. Anything else that is thrown is logged and answered with a generic
+    `500 { error: 'internal_error' }`: internal messages (socket errors, parser text, SQL)
+    no longer reach the client.
+  - Analysis: engine 400/404/422 → `400 engine_rejected`; 429/503 → `503 engine_busy`;
+    anything else not OK, unreachable, or an unreadable body → `502 engine_unavailable`.
+    A 401/403 from the engine means *our* shared key was refused, so it is a 502, not passed
+    on as if the caller were unauthorized.
+  - Username: the repository uses `.maybeSingle()`, so an `error` is always a real failure;
+    the service turns an error result or a throw into `503 username_check_unavailable`.
+  - Both routes validate their input with zod first (`http/schemas.js`): a FEN is a string of
+    at most 100 characters, depth an integer 1–30, a username 1–64 characters. Invalid →
+    `400 { error: 'invalid_request' }` before any dependency is called.
+- **Why 503 and not `available: false`.** "Taken" would also be a lie, and it would tell a
+  user to give up a name that may be free. The signup form already treats a non-OK answer as
+  "not checked" (no tick, no cross), and signup itself enforces uniqueness in the database.
+- **Compatibility.** Response *bodies* for failures changed shape (`{ error: <code> }`; they
+  used to be `{ error: <message> }` or the engine's body). The analysis page does not check
+  the status and renders missing fields as 0.0, exactly as it did for an error body before
+  (F14, a low-risk item, untouched). A depth of 0 used to mean "default"; it is now invalid,
+  and the web client always sends 18.
+- **Not done here.** Routes still catch and call `sendError` themselves; a single Express
+  error middleware replaces that with the Express 5 upgrade (M4, EXPRESS-5).
+
+## F-038
+
+**Private games: status checks around the invite link (G15).**
+
+- **Three defects.**
+  1. The creator opening their own invite link and pressing "join" got the waiting row back
+     (correct) and the route then announced `game_start` to the game room (wrong): the
+     creator's browser navigated into a game with no opponent.
+  2. `GET /api/games/join/:token` served the invite page for a game in any status, including
+     finished ones.
+  3. An invite with `expires_at = null` was read as `new Date(null)`, i.e. 1970: "expired".
+- **Decision.**
+  1. `socialService.announceGameStart` announces only a game whose status is `active`. The
+     check is in the one function that emits `game_start`, so every caller gets it.
+  2. `getGameByToken` (what the GET route uses) returns the game only while it is `waiting`.
+     Joining uses `findInvitedGame`, the lookup in any status, so a second player who is too
+     late still gets the specific "Game already started" answer instead of "invalid token".
+  3. `isExpired(null)` is false: an invite without an expiry does not expire. Every invite
+     the code creates has one (48 h); null can only come from a row written by hand or by an
+     older version, and "valid" is the reading that does not break a link someone was given.
+- **Behaviour change.** An old invite link to a game that has started or ended now shows the
+  "invite not found or expired" screen instead of an invite card whose button fails.
+
+## F-039
+
+**The abandonment countdown starts only when all of a player's sockets for that game are gone (MULTI-SOCKET).**
+
+- **Context.** The registry kept one socket per user and "the user's active game". Any socket
+  of a player disconnecting (a second tab closed, an old socket timing out after the new one
+  had connected) froze the clocks and started the 20 s countdown, while the player was still
+  sitting at the board in another tab. Listed as deferred in F-010.
+- **Decision.**
+  - The session registry records sockets per user and, per socket, the games that socket is
+    *at the board of*. A socket is linked to a game when it joins it as a player
+    (`join_game`), or when it resumes the game on connect (it cleared its own disconnect).
+  - `unregister(socketId)` returns `orphanedGames`: the games that socket was linked to in
+    which its user now has no linked socket left. The disconnect handler calls
+    `gameService.handleDisconnect(userId, gameId)` for exactly those.
+  - `handleDisconnect` takes the game id; it no longer looks up "the user's active game".
+- **What counts as "a socket for that game".** A socket that joined the game, not any socket
+  of the user. A lobby tab does not keep a game alive: if the only tab showing the board is
+  closed, the opponent should not wait for a flag fall because another tab happens to be open.
+- **Edge: paired but never arrived.** A player who is matched and closes the tab before the
+  game page has joined has no linked socket, so no countdown starts. The first-move timeout
+  (F-031) aborts that game after 30 s.
+- **Per process.** The registry is in memory; with two server instances a player's tabs can
+  be on different instances. That is addressed in the scaling phase (M4, MULTI-INSTANCE).
+
+## F-040
+
+**Nothing in the session registry outlives its reason (G17).**
+
+- **Context.** `userActiveGame` (user → game) was only cleared by the move/resign finalizer.
+  Games that ended on time or by abandonment, and games joined after they were over, left an
+  entry per player for the life of the process.
+- **What earlier items already fixed.** G3 routes every ending through the finalizer, which
+  calls `sessions.clearGame`. MULTI-SOCKET removes a socket's entries when it disconnects.
+- **What this commit adds.**
+  - `join_game` links a socket only to a game that is `active`; joining a finished game
+    (to see its result) creates no link.
+  - When a player's last socket leaves a game and the game is not there or not active any
+    more (it expired from Redis, or was closed by another writer such as the web app's
+    stale-game cleanup), `handleDisconnect` calls `sessions.forgetGame(userId, gameId)`.
+  - `sessions.stats()` reports the four map sizes; a test plays 1000 join/vanish/disconnect
+    cycles and asserts all four are 0 afterwards.
+- **Why keep the link across a disconnect of a live game.** It is what lets a player who
+  reconnects on any page resume the game and cancel the countdown. It is removed when the
+  game ends, which the countdown guarantees happens within 20 seconds.
+
+## F-041
+
+**A socket lives no longer than the token it was opened with; the client comes back with a fresh one (TOKEN-LIFETIME).**
+
+- **Context.** The handshake verified the access token once (F-004). A socket then stayed
+  authenticated for as long as the TCP connection lived: hours after the token had expired,
+  and after a sign-out elsewhere or a ban.
+- **Decision.**
+  - *Deadline.* `domain/accessToken.socketDeadline(token, now)`: the token's `exp` claim, but
+    never later than one default access-token lifetime (1 h) from now. The token has already
+    been verified by Supabase Auth at that point; reading `exp` from it decides only how long
+    the connection may live, never whether the token is genuine. A token whose `exp` cannot be
+    read gets the 1 h cap, not "forever".
+  - *Server.* The handshake stores the deadline in `socket.data.tokenExpiresAt`. The session
+    handler starts one timer per socket; at the deadline it emits
+    `token_expired { reason: 'token_expired' }` and calls `socket.disconnect(true)`.
+  - *Client.* `lib/socket/connection.ts`: on a disconnect with socket.io's reason
+    `io server disconnect` it calls `socket.connect()`. The handshake `auth` callback runs
+    again and asks Supabase for the session, which by then holds a refreshed token.
+  - *Not an abandonment.* A disconnect the server caused this way must not freeze the clocks
+    and show the opponent a countdown. The session handler therefore waits
+    `TOKEN_RECONNECT_GRACE_MS` (5 s) and starts the countdown only for games the player still
+    has no socket in. The game page re-joins on every connect, so normally nothing is seen
+    except a state re-sync.
+- **Why disconnect instead of re-verifying in place.** A long-lived socket that accepts new
+  tokens needs its own protocol (a refresh event, replay protection, a rule for late
+  refreshes). Closing and re-opening reuses the one verified path that already exists.
+- **Cost.** One reconnect per player per token lifetime (an hour by default).
+- **Not verified.** The server side is tested end to end against the real server with a
+  token that expires after 400 ms. The client half is tested against a fake socket; a real
+  browser session crossing a real token expiry mid-game has not been observed.
+
+## F-042
+
+**Redis errors are errors; the database write of a finished game is retried; a game is announced as over only after Redis has committed it (ERRORS).**
+
+- **Context.** `gameStateRepository` logged and swallowed every Redis error: `getGame` returned
+  null ("no such game") when Redis was down, `setGame` resolved as if it had written, the
+  active-set calls returned `[]` or nothing. A move could be broadcast without being stored.
+  The finalizer treated a database error exactly like "already finalized": no log, no rating,
+  the row stayed `active` (deferred in F-010).
+- **Decision.**
+  - *Store.* Every call rejects when Redis fails (and `getGame` when the stored value is not
+    JSON). Callers already handle a rejection: socket handlers go through `wrap()`, which acks
+    `{ ok: false, error: 'internal_error' }` and logs; the ticker logs per game and tries again
+    next second; HTTP routes answer 500 through `sendError`. A move whose write fails is
+    therefore *not* broadcast: `mutateGame` rejects before `moveRecorder` emits `move_made`.
+  - *Finalizer, order of effects.* 1) the atomic active → completed transition in Redis (if it
+    fails, the call rejects and nobody is told anything), 2) `game_end` to the room, 3) session
+    cleanup, 4) leaving the active set (a failure there is logged; the ticker ignores finished
+    games anyway), 5) the database row, rating and review.
+  - *Database row.* `finishIfActive` is tried up to 3 times with pauses of 200 ms and 800 ms; an
+    error result and a thrown call are both retried; "no row" (already finalized) is not an
+    error and is not retried. If all attempts fail, the error is logged with the game id
+    (`[finalizer] game <id>: result not persisted after 3 attempts: …`) and the game is **not
+    rated**, because the rating is only idempotent together with that row (RATING-ATOMIC, M3).
+- **Why announce before the database.** Redis is the authority for live games (NODE-17). Once
+  it says "completed", no move can be applied any more; holding the players' result screen
+  until Postgres answers would make an outage of the database look like a frozen game.
+- **What is still missing.** A finished game whose row could not be written stays `active` in
+  the database until the web app's stale-game cleanup or a manual fix; an outbox/retry queue
+  is the full answer and is listed for the last phase. The log line names the game id so it
+  can be found.
+
+## F-043
+
+**Client emits that the server can refuse wait for its ack, and a refusal is shown to the player (ACKS).**
+
+- **Context.** Since S15 every game-server handler acks `{ ok: true }` or `{ ok: false, error }`,
+  but the web client never passed an ack callback: a refused resign, a chat message in a
+  finished game, or a queue join with an invalid time control did nothing visible.
+- **Decision.**
+  - `lib/socket/ack.ts`: `onRejected(handler)` builds the ack callback (it fires only on
+    `ok: false`; a missing reason is `internal_error`), and `rejectionMessage(code)` turns a
+    reason into one sentence. Unknown codes get a generic sentence; codes are never shown raw.
+  - Game page: `make_move`, `resign`, `send_message`, `rematch_request`, `rematch_accept` and
+    `rematch_decline` pass the callback; the page shows the message with the existing toast
+    (`notify` is injected into the commands and the board hook). A refused rematch request
+    also resets the button from "sent" to idle. For a refused move the board is already
+    restored by the server's `move_rejected` + state resync (S1); the toast says why.
+  - Lobby: a refused `join_queue` stops the "searching" state and reports the reason through
+    the same callback as `match_failed` (F-036).
+- **Not covered (logged for the last phase).** There are no draw offers (F-009). The
+  challenge page and the challenge banner (`challenge_request` / `_accept` / `_decline`) and the
+  lobby's automatic re-queue after a reconnect still emit without an ack. No timeout is set on
+  acks: if the server never answers, nothing is shown (as before).
+
+## F-044
+
+**Stale-game detection uses the time of the last move, read from `moves` only when needed; a failed read keeps the game (G22).**
+
+- **Context.** `GET /api/games/active` closes an "active" game that is evidently dead. "Has
+  moves" was read from `white_time_ms` / `black_time_ms`, which were only written at a
+  disconnect and are not written at all since F-028, so every active game older than two hours
+  was auto-abandoned, mid-play included.
+- **Options.** (a) infer "has moves" from `white_clock_ms` / `black_clock_ms` being non-null:
+  says a move happened, not when; (b) the newest `moves.created_at`, queried always; (c) the
+  same, queried only when the game started more than 2 h ago.
+- **Decision.** (c). `lib/server/games.ts` `findLastMove(admin, gameId)`; `isStaleActiveGame`
+  is async. Last activity = the newest move, else `started_at`; stale when that is older than
+  the existing 2 h threshold. The `clock_deadline` branch is unchanged. A failed moves read
+  keeps the game (abandonment is irreversible, SEC-09). No migration.
+- **Why.** A game younger than the threshold cannot be stale, so the common path costs no
+  extra query and the worst case one.
+- **Consequences.** A game whose last move is more than 2 h old is now closed by this route
+  (before, in intent, a game with any move was kept forever). The legacy fields are removed
+  from the column list and the `Game` type.
+- **Not verified.** The `moves` query shape is asserted against the mock only; whether
+  `(game_id, created_at)` is indexed in production was not checked. The server's move insert
+  is fire-and-forget (it logs on failure), so a game whose move rows failed to insert can look
+  idle.
+- *Implemented on a side branch by a helper agent (`wip/medium-web`, commit `44cfb7f`) and
+  cherry-picked here; tests updated: three `GET /api/games/active` fixtures now express "has
+  moves" as a `moves` row instead of `*_time_ms`.*
+
+## F-045
+
+**One `CORS_ORIGINS` allow-list for Express and the Socket.IO handshake; rejections are a plain 403 (S13).**
+
+- **Context.** Express allowed `localhost`, `FRONTEND_URL` and **any** `*.vercel.app` origin with
+  credentials (anyone can create a Vercel project); a rejected origin produced Express's 500
+  HTML error page with a stack trace outside production. Socket.IO accepted every origin with
+  credentials.
+- **Decision.**
+  - `CORS_ORIGINS`: comma-separated exact origins (`scheme://host[:port]`); a wildcard, a path
+    or a malformed entry stops the server at startup. `FRONTEND_URL` is read only when
+    `CORS_ORIGINS` is unset. In production one of them is required (fail fast); outside
+    production `localhost:3000` / `127.0.0.1:3000` are added.
+  - `CORS_PREVIEW_ORIGIN_REGEX` (optional): this project's Vercel previews. Accepted only if it
+    is anchored, https, ends in `\.vercel\.app$`, compiles, and does **not** match a set of
+    foreign probes (`https://evil.vercel.app`, `https://attacker-gambit.vercel.app`, …).
+  - `services/originPolicy.js` decides; `http/app.js` answers a disallowed browser origin with
+    `403 { error: 'origin_not_allowed' }` before any route, then runs `cors()` with the same
+    policy; Socket.IO's `allowRequest` uses the same `allowsRequest(origin)` and its CORS uses
+    `isAllowed`. A request without an `Origin` header (curl, server-to-server, native clients)
+    is not a browser request and passes, as before.
+  - The policy is rebuilt from the environment per request (cheap), like the old `FRONTEND_URL`.
+- **Owner action.** Set `CORS_ORIGINS` on Railway before deploying (the production URL and any
+  custom domain). Previews need `CORS_PREVIEW_ORIGIN_REGEX`; without it previews cannot reach
+  the game server (they could before, as could everyone else's).
+
+## F-047
+
+**One FEN check at the HTTP boundary of the engine, answering 400 (G19).**
+
+- **Context.** Six engine endpoints take a FEN; an unparseable one gave 500 (`/classify-move`,
+  `/analyze`), 200 `{ valid: false }` (`/validate-move`) or 400 (the rest).
+- **Options.** (1) a pydantic validator on the field (422); (2) per-endpoint try/except; (3) one
+  helper `routers/fen.py::parse_fen` raising 400.
+- **Decision.** (3), called first in every handler, before an engine is taken from the pool, so
+  a bad request is 400 even when Stockfish is down and never holds a pool slot.
+- **Why.** `/valid-moves` and `/computer-move` already answered 400 "Invalid FEN" and callers
+  rely on it; 422 would be a second convention. `/validate-move` changing from 200 to 400 is
+  safe: nothing calls it. "Valid" means python-chess can parse it; position legality (e.g. no
+  kings) is not enforced, as in `/valid-moves`.
+- **Test changed.** `test_validate_move_never_500s_on_bad_input` (garbage FEN → 200) split into
+  "bad move on a valid FEN is still 200 `valid: false`" and "bad FEN is 400".
+
+## F-048
+
+**A mate on the top line scores ±10000 (White's perspective); moves are parsed as UCI first, then SAN (G20).**
+
+- **Context.** `get_top_moves()` returns `Centipawn: None, Mate: N` for a forced mate, which the
+  code scored as 0. The notation of the played move was guessed from its length (4–5
+  characters = UCI), so `Nbd7`, `exd5`, `O-O-O` were misread and classified "Mistake".
+- **Decision.** `top_line_cp`: `+MATE_CP` for `Mate > 0`, `-MATE_CP` for `Mate < 0` (the existing
+  constant). `parse_played_move`: `parse_uci`, else `parse_san`; null moves are rejected.
+- **Why.** The stockfish package reports top lines from White's side (checked in its source and
+  against a real binary). No string is both a legal UCI move and a different legal SAN move.
+- **Found while doing this, NOT fixed (outside the listed items):** `get_evaluation()` is also
+  White-perspective, but `_eval_after_for_mover` always negates; with the real binary every
+  White move in a review is mis-scored (e.g. 1.e4, the engine's own choice, "Inaccuracy",
+  cp loss 89). `computer_engine.py` makes the same assumption when MAVERICK plays Black. The
+  test fake encodes the same wrong assumption, so the suite cannot see it. Listed for the last
+  phase with priority (see the report).
+
+## F-049
+
+**A game without moves is never reviewed; a side without moves has no accuracy (G21).**
+
+- **Context.** python-chess parses non-PGN text into an empty game; the average accuracy of no
+  moves was 100, so 100/100 was written.
+- **Decision.** `parse_game_with_moves` returns None for empty/non-PGN/headers-only/illegal-first
+  -move input; the background review then writes nothing (`no_moves`), and `POST /analyse-game`
+  refuses such a PGN with 422 before queueing. A side that made no move gets `null` accuracy
+  (the column is nullable and the web app already renders null). A partly parseable PGN is
+  reviewed up to the bad token.
+- **Why.** Fail closed in two layers: the endpoint can tell the caller; the task can only log.
+
+## F-050
+
+**Render builds the engine's Dockerfile, which is the only place Stockfish is installed; the MAVERICK weights stay in git with a checksum-verified download as fallback (ENGINE-BUILD).**
+
+- **Context.** Three descriptions disagreed: the Dockerfile installed no Stockfish; the root
+  `render.yaml` ran `apt-get install` in a native Python build with
+  `STOCKFISH_PATH=/usr/bin/stockfish`; `chess-engine/render.yaml` installed nothing.
+  `style_model.pt` (26 MB, tracked) was loaded at import; a corrupt file crashed the process.
+- **Decision (build).** `chess-engine/render.yaml` deleted; the root blueprint is
+  `runtime: docker` with `dockerfilePath: ./chess-engine/Dockerfile`, `dockerContext:
+  ./chess-engine`, `healthCheckPath: /health`. The Dockerfile installs Debian's `stockfish`, sets
+  `STOCKFISH_PATH=/usr/games/stockfish` and fails the build if the binary is missing.
+- **Decision (model).** The tracked file keeps working. Optional `MAVERICK_MODEL_URL` +
+  mandatory `MAVERICK_MODEL_SHA256`: https only, downloaded to a temporary name and renamed only
+  after the SHA-256 matches, capped at 512 MB, one attempt per process; `torch.load(...,
+  weights_only=True)`. Unavailable → `/style-move` 503, `/computer-move` keeps its Stockfish
+  fallback.
+- **Why.** An image is reproducible everywhere and Render's native build cannot `apt-get`.
+  A checkpoint is a pickle: an unverified download would be remote code execution.
+- **Not verified.** No Docker on this machine (image never built); no Render deploy; no real
+  download.
+
+## F-051
+
+**One pure helper decides post-sign-in redirects: a same-origin path with exactly one leading `/` (S6).**
+
+- **Context.** `/auth/callback?next=` (and the login and exchange pages' `redirect`/`next`)
+  followed any URL.
+- **Decision.** `frontend/lib/safeRedirect.ts` (not `server-only`, so client pages can use it):
+  the value must start with one `/`, contain no backslash or control character, and still be a
+  single-slash same-origin path after URL resolution (`/.//evil` resolves to `//evil` and is
+  refused); otherwise `/lobby`. Used by the callback route and both pages.
+- **Why one module.** Two copies of a security rule drift.
+
+## F-052
+
+**No console output from browser code; ESLint enforces it (S14).**
+
+- **Decision.** All console calls removed from client code (signup flow, exchange page, invite
+  helper, private-game hook, socket connection). `no-console: error` everywhere, with an
+  explicit override allowing only `console.error`/`console.warn` in server-only paths
+  (`lib/server/**`, `app/api/**`, route handlers, `proxy.ts`), and `off` for tests, scripts and
+  config. A source-scan test asserts the same.
+- **Why delete rather than replace.** The web app has no error tracker yet (NX-17/SEC-12 open);
+  every removed call sat next to a message already shown to the user.
+- *S6, S14 (and G22) were implemented on a side branch by a helper agent and cherry-picked; the
+  two files that branch could not touch were cleaned here, which removed its temporary lint
+  exemption.*
+
+## F-046
+
+**Rate limits in shared stores: Redis for the game server, Upstash REST for the web app, a bounded queue in the engine; the limiters fail open (RATE-LIMITS).**
+
+- **Context.** No endpoint, socket event or engine path had a limit (NODE-12). The game server
+  can run several instances, and Vercel runs many function instances, so per-process counters
+  would not limit anything.
+- **Game server.**
+  - `domain/rateLimits.js`: one table of named rules and the pure decision. Socket events, per
+    user and event type: moves 20 per 2 s, chat 5 per 10 s, queue joins 10 per minute,
+    challenges/rematch requests 10 per minute, any other event 60 per 10 s. HTTP, per client IP:
+    analysis 20 per minute, username checks 60 per minute, invite look-ups and joins 30 per
+    minute.
+  - Fixed windows in Redis: one MULTI (`SET key 0 PX window NX`, `INCR`, `PTTL`), so every
+    instance shares the counter and every key expires with its window.
+  - Sockets: a `socket.use` middleware runs before validation; a limited event is acked
+    `{ ok: false, error: 'rate_limited', retryAfterMs }` and goes no further. HTTP: a middleware
+    answers `429 { error: 'rate_limited' }` with `Retry-After` (seconds). Express trusts one
+    proxy hop (Railway) so `req.ip` is the client.
+- **Web app (Vercel).** Upstash REST pipeline (`INCR`, `PEXPIRE … NX`, `PTTL`) with `fetch`, a
+  1 s timeout, keys `gambit:rl:<rule>:<sha256(subject)>` (no raw IP or e-mail stored). Rules:
+  `/api/maverick-move` 60/min per IP; login 20 per 10 min per IP and 10 per 15 min per e-mail;
+  signup 5/hour per IP; friend requests 30/hour per verified user. Client IP: the first
+  `x-forwarded-for` entry, then `x-real-ip`. `maverick-move` is the web app's only engine proxy.
+- **Engine.** An admission gate of `STOCKFISH_POOL_SIZE + ENGINE_MAX_QUEUE` (default twice the
+  pool) and a wait of at most `ENGINE_QUEUE_TIMEOUT_SECONDS` (5): beyond either, `503 "Engine
+  busy"` with `Retry-After`. `/health` no longer takes an instance. A full-game review is
+  admitted (or refused with 503) when it is requested; once admitted, its background task waits
+  up to 600 s rather than being dropped after "Analysis queued".
+- **Fail open (the brief asks for this choice to be documented).** If a limiter's store is
+  unconfigured (web: no Upstash variables) or failing, the request is allowed and logged.
+  Rate limiting is overload and abuse protection, not authentication or authorization, which
+  SEC-09 requires to fail closed. Failing closed would turn an Upstash or Redis hiccup, or a
+  missing variable on a preview deploy, into an outage of sign-in, chat and moves. The
+  protected resources keep their own defences meanwhile (Supabase Auth's limits, the engine's
+  bounded queue, authentication).
+- **Behaviour changes.** Bursts beyond these limits get 429 / `rate_limited` acks. A saturated
+  engine answers 503 quickly instead of holding requests for 10 s; the web app's computer
+  opponent currently maps that to 502 (passing 503 + Retry-After through is a follow-up).
+- **Not verified.** A real Upstash database (`PEXPIRE … NX` support is inferred from "Redis
+  protocol up to 8.4"); Vercel's `x-forwarded-for` handling; behaviour with several uvicorn
+  workers (the engine gate is per process).
+- *The web and engine parts were implemented on a side branch by a helper agent
+  (`wip/medium-3-limits`) and squashed into this item's single commit.*
+
+## F-053
+
+**Ratings and statistics are written once per game, atomically, by `public.apply_game_result` (RATING-ATOMIC). Closes the SEC-04 deviation recorded in F-017.**
+
+- **Context.** `ratingService` read both profiles, computed Glicko-2 in Node and wrote each
+  profile with its own UPDATE. Two games of the same player finishing together both read the
+  same old values and the second write overwrote the first (a lost rating change and a lost
+  `games_played`). Nothing recorded that a game had been rated, so a retry rated it twice.
+- **Options.** (a) port Glicko-2 to plpgsql; (b) keep Glicko-2 in Node, and let a database
+  function apply the values under row locks with a compare-and-set on the inputs, setting
+  `games.rated_at` in the same transaction; (c) `SELECT … FOR UPDATE` from Node (impossible:
+  supabase-js has no interactive transactions).
+- **Decision.** (b). Migration `20261113100000_rating_atomic.sql`: `games.rated_at`, and
+  `public.apply_game_result(p_game_id, p_white_id, p_black_id, p_result, p_rating_field,
+  p_white jsonb, p_black jsonb) returns text`, `security definer`, `set search_path = ''`,
+  schema-qualified names, EXECUTE revoked from `public`/`anon`/`authenticated`, granted to
+  `service_role`. In one transaction it locks the game row, refuses a game that is not
+  `completed` or whose players, colours, result or rated flag do not match, returns
+  `already_applied` if `rated_at` is set, locks both profiles in id order, compares the stored
+  rating/rd/vol/games_played with what the server computed from (`stale` on any difference),
+  updates both profiles (stats always; rating, rd, vol when rated) and sets `rated_at`. The
+  server re-reads and recomputes on `stale`, at most 5 times; it broadcasts `rating_updated` only
+  for an `applied` result. `profilesRepository.updateById` is removed: the game server has no
+  other way to write a profile.
+- **Why.** One Glicko implementation, unit-tested in `domain/rating/glicko.js`; the
+  compare-and-set makes concurrent games equal to applying them one after another;
+  `rated_at` under the game-row lock makes a second call a no-op; a fixed lock order prevents
+  deadlocks; even the service role cannot rate an aborted, active or mismatched game.
+- **Consequences / rollout.** Existing completed games are backfilled `rated_at =
+  coalesce(ended_at, now())`. **Apply the migration before deploying the server**: it is
+  additive, and older servers keep rating the old way. A server deployed before the migration
+  rates nothing (every call fails, logged). A game that stays `stale` after 5 attempts or is
+  refused stays unrated and is logged with its id. `service_role` still has table-level UPDATE
+  on `profiles` (the web app's routes use it), so "only through the function" holds for the game
+  server's code, not yet as a database privilege.
+- **Tests.** Server: concurrent games of one player both count; double calls apply once;
+  unrated games go through the function; refusals and endless `stale` are bounded and logged.
+  pgTAP `03_rating_function.test.sql` (31 assertions). Run locally on a throwaway Postgres 17
+  through a pgTAP shim, plus a two-session probe (blocked, then `stale`, then `applied`); real
+  `supabase test db` runs in CI only.
+- **Not verified.** PostgREST `rpc` end to end, in particular that float8 rd/vol round-trip
+  exactly for the compare-and-set. If they do not, every rated game would come back `stale`
+  and stay unrated after 5 attempts; check one rated game on staging first.
+- *Implemented on a side branch by a helper agent (`wip/medium-3-rating`) and cherry-picked.*
+## F-054
+
+**Express 5; one error middleware; routes throw instead of wrapping (EXPRESS-5).**
+
+- **Context.** NODE-02 asks for Express 5 (Express 4 is in maintenance). Every async route
+  wrapped its body in try/catch because Express 4 did not forward a rejected promise.
+- **Decision.**
+  - `express` `^5.2.0` (resolves 5.3.0, released 2026-10-09).
+  - `http/app.js` `attachErrorHandler(app)`, called after the routes: a JSON
+    `404 { error: 'not_found' }` and one error middleware that calls `sendError` (AppError →
+    its status and code; anything else → logged, generic 500). Express 5 forwards rejected
+    async handlers to it, so the analysis and username routes lost their try/catch.
+  - `express.json({ limit: '16kb' })` (NODE-12); a malformed body → `400 invalid_request` JSON,
+    an oversized one → `413 payload_too_large` JSON (they were Express's HTML error pages).
+  - `x-powered-by` disabled (NODE-09).
+- **Kept on purpose.** The invite routes (`/api/games/join/:token`) still catch and answer 400
+  with the service's message: that is their documented contract (the web app shows the
+  message), not a wrapper. Turning those messages into codes is a client change.
+- **Path syntax.** All routes use plain `:param` segments; nothing uses the patterns Express 5
+  changed (`*`, optional `?`, regex strings), checked by search.
+- **Not verified.** No deploy; Railway runs the same `node server.js`.
+
+## F-055
+
+**Structured logs with pino; `/livez` and `/readyz` (OBSERVABILITY).**
+
+- **Context.** The game server logged with `console.*` (33 calls): plain text, no request or
+  socket context, nothing redacted. There was one health route, `/api/health`, which said "ok"
+  even with Redis down.
+- **Decision.**
+  - `src/observability/log.js`: pino, JSON lines on stdout, ISO time, `service: 'gambit-server'`,
+    `redact` for authorization/cookie/engine-key headers and token/password/secret fields
+    (`[REDACTED]`). Code uses a two-argument port, `log.error(message, detail?)`, written as
+    `{ detail, msg }`, so every former console call kept its message and argument and tests
+    assert the same pair on the logger. `log.child(bindings)` adds context.
+  - Level from `LOG_LEVEL` (default `info`; `silent` under test). The config module cannot import
+    the logger (the logger reads its level from config), so config warnings go through a sink
+    the logger registers (`env.setWarningSink`).
+  - Requests: `pino-http` with a request id (a sane incoming `X-Request-Id` is kept, otherwise a
+    UUID), echoed as `X-Request-Id`. Sockets: a child logger with `socketId` and
+    `userId` writes the connection line (not kept on `socket.data`, see F-059); finalizer lines name the game id in the message.
+  - `/livez` (process up), `/readyz` (Redis `PING` and a one-row PostgREST `HEAD` request, 2 s
+    timeout each; 503 naming the failed check; 503 while draining). `/api/health` stays for the
+    current Railway healthcheck setting.
+  - No `console` call is left in `server/src` or the legacy facades.
+- **Not done.** The socket handler wrapper (`wrap`) logs through the process logger, not the
+  socket's child (it does not receive the socket); the request id is not propagated to Supabase
+  or engine calls. An error tracker (SEC-12) is not part of this item.
+- **Owner action.** Point Railway's healthcheck at `/readyz` when convenient (NODE-21); keep
+  `/api/health` until then. Optional `LOG_LEVEL`.
+
+## F-056
+
+**Graceful shutdown on SIGTERM within a drain window; fatal errors exit for a restart (SHUTDOWN).**
+
+- **Context.** The process had no SIGTERM handling: a deploy killed live sockets mid-move.
+  An unhandled rejection was logged and the process kept running (F-003 recorded that as a
+  deviation from NODE-07).
+- **Decision.** `src/shutdown.js`, wired in `start()`:
+  1. `/readyz` starts answering 503 (the platform stops routing new connections here);
+  2. matchmaking and clock intervals stop;
+  3. every socket is told `server_shutdown { reconnect: true }`;
+  4. `io.close()`, then the HTTP server closes (in-flight requests finish);
+  5. Redis `QUIT`; logs are flushed; exit 0.
+  A step that throws is logged and the next one runs. If the whole sequence takes longer than
+  `DEFAULT_DRAIN_MS` (20 s, inside Railway's default 30 s drain), the process exits 1. A second
+  signal does not start a second shutdown. An uncaught exception or unhandled rejection is
+  logged at `fatal`, logs are flushed, and the process exits 1.
+- **Clients.** The web client already reconnects after a server-side disconnect (TOKEN-LIFETIME,
+  F-041); with a second instance (M4 MULTI-INSTANCE) it lands on the other one and re-joins its
+  game. With one instance it reconnects when the new deploy is up; the 20 s disconnect grace
+  period covers a fast deploy, a slower one can end games by abandonment.
+- **The Dockerfile runs `node server.js` directly** (M1), so SIGTERM reaches Node rather than
+  stopping at `npm`.
+- **Not verified.** No real Railway deploy; Railway's drain window was not measured.
+
+## F-057
+
+**Dependabot, CodeQL (advanced setup) and a dependency-audit gate with an expiring allow-list (SUPPLY-CHAIN).**
+
+- **Dependabot** (`.github/dependabot.yml`): npm `/server`, npm `/frontend`, pip `/chess-engine`,
+  github-actions `/`; weekly (Mondays 06:00 UTC); one grouped minor+patch PR per ecosystem,
+  majors individually; at most 5 open PRs per npm/pip entry, 3 for actions; target `preprod`.
+  Security-update PRs ignore `target-branch` and open against the default branch: retarget them
+  by hand.
+- **CodeQL** (`.github/workflows/codeql.yml`): `javascript-typescript` and `python`,
+  `build-mode: none`, `security-extended` queries, on PRs, pushes to `main`/`preprod` and weekly;
+  `security-events: write` on that job only. *Deviation from GIT-06* ("default setup"): a
+  workflow file keeps triggers and queries reviewable in the repo; default setup and a workflow
+  cannot both be on, so keep the repository on advanced setup.
+- **Dependency audit** (`.github/workflows/dependency-audit.yml`, job `Dependency audit`):
+  `npm audit --omit=dev --audit-level=high` (server, frontend) and `pip-audit -r requirements.txt`
+  (engine), through `scripts/dependency-audit.js`, which subtracts approved exceptions from
+  `.github/dependency-audit-allowlist.json`. An exception needs `id`, `scope`, a reason of at
+  least 20 characters, `approvedBy` and an `expires` date at most 90 days ahead; an invalid or
+  expired entry fails the job; an audit that cannot run fails closed. pip-audit reports no
+  severity, so the engine gate fails on **any** known vulnerability (stricter than SEC-11).
+  Runs on every PR, pushes, Mondays and on demand; it is a separate workflow so it does not
+  lengthen the test jobs (TEST-10).
+- **State at the time of writing.** The audit is **red**: the server lockfile had 29 blocking
+  advisories (28 high, 1 critical), the frontend 4 high, all transitive (ws, socket.io-parser,
+  axios, body-parser, qs, …). Some are fixed by this phase's upgrades (Express 5, Next 16), the
+  rest need dependency bumps that Dependabot will propose. Re-run after merging and either
+  upgrade or add dated exceptions.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-058
+
+**Schema drift is checked against the linked Supabase project on a schedule, not on every PR (SCHEMA-DRIFT).**
+
+- `scripts/schema-drift.sh` runs `supabase db diff` against the remote project for schema
+  `public` (`--remote` on CLI v3+, where `--linked` is deprecated; `--linked` on 2.x; overridable
+  with `SCHEMA_DRIFT_TARGET` / `SCHEMA_DRIFT_SCHEMAS`). Any non-comment line in the diff is drift:
+  exit 1 and the SQL is printed; exit 2 when the check cannot run. `supabase migration list` is
+  printed for information.
+- `.github/workflows/schema-drift.yml` (job `Schema drift (Supabase)`): daily and on manual
+  dispatch only, because it needs `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
+  `SUPABASE_PROJECT_REF`; without them it passes with a "skipped" notice. Do not make it a
+  required check. The manual command is in DEPLOY.md.
+- **Tested** with a fake CLI on `PATH` (`scripts/schema-drift.test.js`, run in the `Server (Node)`
+  job): no drift → 0, SQL in the diff → 1, a failing diff → 2 (never "clean"), `--remote` on CLI
+  v3 and `--linked` on 2.x, missing link or credentials → 2.
+- **Not verified.** The real CLI never ran here (no Docker, CLI download not permitted); flags
+  were taken from the CLI v3.1 reference. `supabase link` writes `supabase/.temp/`, which is not
+  git-ignored. Run the workflow once by hand after adding the secrets.
+- *Implemented on a side branch by a helper agent and cherry-picked.*
+
+## F-059
+
+**The game server can run as several replicas behind one Redis (MULTI-INSTANCE).**
+
+Context: every replica kept its own copy of the parts that must be global: the matchmaking
+queue (a `Map`), a per-process lock around each game's read-modify-write, the clock ticker,
+and Socket.IO rooms. Two replicas meant players who never meet, moves applied twice, clocks
+charged twice and broadcasts that reach half the room (NODE-15, NODE-17, TEST-06).
+
+- **Game state: compare-and-set on the stored value, not a lock.** `mutateGame` reads the JSON,
+  runs the pure mutation, then writes with the `casSetGame` Lua script, which writes only if the
+  key still holds exactly the JSON that was read (`''` = absent) and keeps the TTL. On a lost
+  race it re-reads and re-runs the mutation, with a jittered growing pause, at most 10 attempts,
+  then throws; the socket handler's error path (F-042) turns that into an error ack, never a silent drop.
+  Rejected: `WATCH`/`MULTI` (needs a dedicated connection per transaction with ioredis); a
+  Redlock-style lock (correctness would depend on lock expiry and clock assumptions). A version
+  counter was rejected as unnecessary: the whole value is the version and the script compares it
+  in one step.
+- **Clock ticker: one replica per game per tick.** Every replica keeps ticking its active set;
+  before checking a game it takes `SET clocktick:<id> 1 PX 900 NX`. The verdict itself still
+  runs inside `endGameIf`'s compare-and-set, so the lock only saves work; a lock that expires
+  early cannot end a game twice.
+- **Matchmaking queue in Redis.** One sorted set `{mm}:queue` (member user id, score
+  `joined_at`) plus `{mm}:entry:<userId>` JSON with a 2-minute TTL refreshed every second by the
+  instance that queued it (a crashed instance's players lapse). Five Lua scripts: join (no-op if
+  queued), leave (only if the socket id matches), **claimPair** (both or neither, and only if
+  each score still equals the `joined_at` the pass read), prune, unlock (compare-and-delete). A
+  pairing lock `SET NX PX 5000` lets one replica run the pass and broadcast `queue_status`; the
+  claim, not the lock, is what makes pairing correct: tests pass with the lock removed. The
+  pairing rules stay in the pure `planPairs` (SOLID-07) instead of Lua. One sorted set rather
+  than one per time control, because `position` and `players_searching` count the whole queue.
+  `{mm}` is a hash tag so every key is in one Redis Cluster slot.
+- **Socket.IO: `@socket.io/redis-streams-adapter`.** Chosen over the Pub/Sub adapter because it
+  supports connection-state recovery (a client that reconnects within 2 minutes to any replica
+  gets the missed events) and survives a short Redis disconnect (streams are replayed). Cost: one
+  blocking `XREAD` connection per replica. `SOCKET_ADAPTER=none` (the default under test) keeps
+  the in-memory adapter. `socket.data` must hold plain data only: the adapter serializes it for
+  recovery (a stored pino logger made every disconnect throw; found by the two-instance test).
+  The adapter connection closes with `quit` so recovery sessions written during shutdown are not
+  dropped. The adapter fires some writes without awaiting them (recovery-session `SET`,
+  heartbeat and response `XADD`/`PUBLISH`); with Redis unreachable each was an unhandled
+  rejection, which F-056 makes fatal, so a Redis blip would have restarted every replica.
+  `handleUnawaitedWrites` attaches a logging handler to those calls (found by the two-instance
+  test under load; pinned by `clients/socketAdapter.test.js`). Each real-Redis test suite uses
+  its own key namespace and adapter stream (`streamName`), because CI shares one Redis.
+- **WebSocket transport only, server and client.** HTTP long-polling needs every request of a
+  session to reach the same replica (sticky sessions), which Railway does not offer. All
+  supported browsers have WebSocket; a network that blocks it cannot play (accepted). The
+  frontend must be deployed before the server is scaled.
+- **Presence across replicas.** Each player socket joins `player:<gameId>:<userId>`. A disconnect
+  starts the abandonment countdown only if no socket of that player is left in that room on any
+  replica (`fetchSockets`), so a second tab on another replica keeps the game alive.
+- **Pending challenges and rematches** already lived in Redis (high-risk phase).
+- **Proof.** `__tests__/integration/twoInstances.test.js`: two full server instances (game
+  service, finalizer, CAS store, adapter) over one real Redis; White on A, Black on B play Fool's
+  mate: every move reaches both, one `game_end`, the result is written once; the same move sent to
+  both replicas at once is applied once; a resign racing the mating move ends the game once.
+  `multiInstance.test.js` (concurrent moves and finalize on real Redis), `adapter.test.js`
+  (cross-server rooms), `matchmakingTwoInstances.test.js` (31 players, two services, overlapping
+  passes, with and without the lock: nobody paired twice). CI gets a `redis:7-alpine` service and
+  `REDIS_TEST_URL`; without a Redis the real-Redis tests skip with a message.
+- **Not verified:** Redis Cluster; Redis failover and network partitions; Upstash's handling of
+  blocking `XREAD` (supported per its docs, but each call is billed: DEPLOY.md recommends a
+  Railway Redis add-on for two or more replicas); the matchmaking test uses fake emitters, so
+  `match_found` to a socket on another replica relies on the adapter (covered by
+  `adapter.test.js`, not end to end).
+- **Behaviour.** `joinQueue`/`leaveQueue` are async; `/api/matchmaking/status` reads a snapshot
+  that may be up to ~1 s stale on a replica that does not hold the pairing lock.
+- *The matchmaking part was implemented on a side branch by a helper agent and merged here.*

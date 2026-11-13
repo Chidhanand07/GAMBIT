@@ -85,13 +85,46 @@ test('a failed update releases the lock for the next caller', async () => {
     await expect(repo.updateGame('missing', { a: 1 })).resolves.toEqual({ a: 1 });
 });
 
-test('active-set helpers log and swallow Redis errors', async () => {
-    const redis = createRedisMock();
-    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
-    const repo = createGameStateRepository(redis);
-    redis._failNext('sadd');
-    await repo.addActiveGame('g1');
-    redis._failNext('smembers');
-    await expect(repo.getActiveGameIds()).resolves.toEqual([]);
-    expect(err).toHaveBeenCalledWith('[gameStore] addActiveGame error:', 'redis sadd failed');
+describe('Redis failures are errors, not silent successes [ERRORS]', () => {
+    const repoWith = () => {
+        const redis = createRedisMock();
+        return { redis, repo: createGameStateRepository(redis) };
+    };
+
+    test('setGame rejects when the write fails (it used to resolve as if stored)', async () => {
+        const { redis, repo } = repoWith();
+        redis._failNext('setex');
+        await expect(repo.setGame('g1', { id: 'g1' })).rejects.toThrow('redis setex failed');
+    });
+
+    test('mutateGame rejects when its write fails, and the lock is released', async () => {
+        const { redis, repo } = repoWith();
+        await repo.setGame('g1', { id: 'g1', n: 0 });
+        redis._failNext('setex');
+        await expect(repo.mutateGame('g1', (g) => ({ ...g, n: 1 }))).rejects.toThrow('redis setex failed');
+        expect((await repo.getGame('g1')).n).toBe(0);
+        expect(await repo.mutateGame('g1', (g) => ({ ...g, n: 2 }))).toMatchObject({ n: 2 });
+    });
+
+    test('getGame rejects when Redis cannot be read: "could not look" is not "no such game"', async () => {
+        const { redis, repo } = repoWith();
+        redis._failNext('get');
+        await expect(repo.getGame('g1')).rejects.toThrow('redis get failed');
+    });
+
+    test('a corrupt stored value is an error too', async () => {
+        const { redis, repo } = repoWith();
+        await redis.set('game:g1', '{oops');
+        await expect(repo.getGame('g1')).rejects.toThrow();
+    });
+
+    test('the active-set calls reject on failure', async () => {
+        const { redis, repo } = repoWith();
+        redis._failNext('sadd');
+        await expect(repo.addActiveGame('g1')).rejects.toThrow('redis sadd failed');
+        redis._failNext('srem');
+        await expect(repo.removeActiveGame('g1')).rejects.toThrow('redis srem failed');
+        redis._failNext('smembers');
+        await expect(repo.getActiveGameIds()).rejects.toThrow('redis smembers failed');
+    });
 });

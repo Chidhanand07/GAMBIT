@@ -55,7 +55,8 @@ function isProvisional(gamesPlayed) {
 }
 
 /**
- * The queue record for a player. A falsy rating (0, null, undefined) becomes 1200.
+ * The queue record for a player. A missing rating (null, undefined) becomes 1200;
+ * 0 is a rating like any other (G12).
  * @param {object} params
  * @param {{ id: string, username: string, rating?: number | null, games_played?: number | null }} params.user
  * @param {string} params.socketId
@@ -69,7 +70,7 @@ function createQueueEntry({ user, socketId, timeControl, increment, isRated, now
     return {
         user_id: user.id,
         username: user.username,
-        rating: user.rating || DEFAULT_QUEUE_RATING,
+        rating: user.rating ?? DEFAULT_QUEUE_RATING,
         isProvisional: isProvisional(user.games_played),
         time_control: timeControl,
         increment,
@@ -77,6 +78,17 @@ function createQueueEntry({ user, socketId, timeControl, increment, isRated, now
         joined_at: now,
         socketId,
     };
+}
+
+/**
+ * What one player is told about the other in `match_found`: public facts
+ * only. The queue entry itself also holds the opponent's socket id and queue
+ * timing, which are nobody else's business (G12).
+ * @param {QueueEntry} entry
+ * @returns {{ user_id: string, username: string, rating: number, isProvisional: boolean }}
+ */
+function opponentView({ user_id, username, rating, isProvisional }) {
+    return { user_id, username, rating, isProvisional };
 }
 
 /**
@@ -125,6 +137,18 @@ function waitedSeconds(entry, now) {
 }
 
 /**
+ * Same game on offer: base time AND increment (G4). The service queues the
+ * canonical "M+S" text, which already carries both; the increment is compared
+ * as well so entries built any other way cannot be mixed.
+ * @param {{ time_control: unknown, increment: unknown }} a
+ * @param {{ time_control: unknown, increment: unknown }} b
+ * @returns {boolean}
+ */
+function sameTimeControl(a, b) {
+    return a.time_control === b.time_control && a.increment === b.increment;
+}
+
+/**
  * First candidate (in the given order) with the same time control and a
  * compatible rating, or null. `clock` is read once for `player` and once per
  * candidate with a matching time control, mirroring the original loop.
@@ -137,18 +161,48 @@ function waitedSeconds(entry, now) {
 function findOpponent(player, candidates, clock) {
     const radius = getSearchRadius(waitedSeconds(player, clock()));
     for (const other of candidates) {
-        if (player.time_control !== other.time_control) continue;
+        if (!sameTimeControl(player, other)) continue;
         const otherRadius = getSearchRadius(waitedSeconds(other, clock()));
         if (isRatingCompatible(player, other, radius, otherRadius)) return other;
     }
     return null;
 }
 
+/**
+ * One pairing pass over a queue snapshot: longest-waiting first, each player
+ * meets the longest-waiting compatible candidate after them, nobody twice.
+ * The pairs come back in the order the pass chose them.
+ * @template {QueueEntry} T
+ * @param {T[]} entries
+ * @param {() => number} clock
+ * @returns {Array<[T, T]>}
+ */
+function planPairs(entries, clock) {
+    const players = sortByLongestWaiting([...entries]);
+    /** @type {Set<string>} */
+    const paired = new Set();
+    /** @type {Array<[T, T]>} */
+    const pairs = [];
+    players.forEach((player, i) => {
+        if (paired.has(player.user_id)) return;
+        const candidates = players.slice(i + 1).filter((p) => !paired.has(p.user_id));
+        const opponent = findOpponent(player, candidates, clock);
+        if (!opponent) return;
+        paired.add(player.user_id);
+        paired.add(opponent.user_id);
+        pairs.push([player, opponent]);
+    });
+    return pairs;
+}
+
 module.exports = {
+    planPairs,
     getSearchRadius,
     isProvisional,
     createQueueEntry,
+    opponentView,
     isRatingCompatible,
     sortByLongestWaiting,
+    sameTimeControl,
     findOpponent,
 };

@@ -76,11 +76,12 @@ describe('GET /api/matchmaking/status', () => {
 });
 
 describe('GET /api/users/check-username', () => {
-    test('queries profiles.username with .single(); no row → available', async () => {
+    test('queries profiles.username with .maybeSingle(); no row → available', async () => {
         const res = await request(ctx.app).get('/api/users/check-username?u=newbie');
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ available: true });
-        expect(opsFor('profiles')).toEqual([[['select', 'username'], ['eq', 'username', 'newbie'], ['single']]]);
+        // maybeSingle: "no row" is a normal answer, so every error result is a real failure.
+        expect(opsFor('profiles')).toEqual([[['select', 'username'], ['eq', 'username', 'newbie'], ['maybeSingle']]]);
     });
 
     test('row found → { available: false }', async () => {
@@ -88,33 +89,39 @@ describe('GET /api/users/check-username', () => {
         expect((await request(ctx.app).get('/api/users/check-username?u=bob')).body).toEqual({ available: false });
     });
 
-    test('a DB error result is reported as available (pinned)', async () => {
+    test('a DB error is never reported as available: 503 with an error code [G14]', async () => {
+        // Was: "a DB error result is reported as available (pinned)" — 200 { available: true }.
         supabase.queue('profiles', { data: null, error: { message: 'db down' } });
         const res = await request(ctx.app).get('/api/users/check-username?u=bob');
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ available: true });
+        expect(res.status).toBe(503);
+        expect(res.body).toEqual({ error: 'username_check_unavailable' });
+        expect(res.body).not.toHaveProperty('available');
     });
 
-    test('a thrown error → 500 { error: message }', async () => {
+    test('a thrown error → 503, and the internal message is not sent to the caller', async () => {
         supabase.queue('profiles', () => {
             throw new Error('client exploded');
         });
         const res = await request(ctx.app).get('/api/users/check-username?u=bob');
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'client exploded' });
+        expect(res.status).toBe(503);
+        expect(res.body).toEqual({ error: 'username_check_unavailable' });
+        expect(JSON.stringify(res.body)).not.toContain('exploded');
     });
 
-    test.each(['/api/users/check-username', '/api/users/check-username?u='])('%s → 400 without touching the DB', async (path) => {
-        const res = await request(ctx.app).get(path);
-        expect(res.status).toBe(400);
-        expect(res.body).toEqual({ error: 'Missing username parameter' });
-        expect(supabase.calls).toEqual([]);
-    });
+    test.each(['/api/users/check-username', '/api/users/check-username?u=', `/api/users/check-username?u=${'x'.repeat(65)}`])(
+        '%s → 400 without touching the DB',
+        async (path) => {
+            const res = await request(ctx.app).get(path);
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual({ error: 'invalid_request' });
+            expect(supabase.calls).toEqual([]);
+        },
+    );
 });
 
 describe('POST /api/analysis/engine', () => {
     test('proxies { fen, depth } to ENGINE /analyze and returns the engine JSON', async () => {
-        ctx.fetch.mockResolvedValue({ ok: true, json: async () => ({ best_move: 'e2e4', eval: 0.3 }) });
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ best_move: 'e2e4', eval: 0.3 }) });
         const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN, depth: 12, ignored: true });
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ best_move: 'e2e4', eval: 0.3 });
@@ -130,47 +137,68 @@ describe('POST /api/analysis/engine', () => {
         ]);
     });
 
-    test('depth 0 / missing → 18; ENGINE_URL is honoured', async () => {
+    test('missing depth → 18; ENGINE_URL is honoured', async () => {
         process.env.ENGINE_URL = 'http://engine.test:9000';
-        ctx.fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-        await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F', depth: 0 });
-        await request(ctx.app).post('/api/analysis/engine').send({});
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
         expect(ctx.fetch.mock.calls.map(([url, opts]) => [url, opts.body])).toEqual([
-            ['http://engine.test:9000/analyze', JSON.stringify({ fen: 'F', depth: 18 })],
-            ['http://engine.test:9000/analyze', JSON.stringify({ depth: 18 })],
+            ['http://engine.test:9000/analyze', JSON.stringify({ fen: START_FEN, depth: 18 })],
         ]);
     });
 
-    test('engine error status is NOT propagated: 200 with the engine body (pinned)', async () => {
-        ctx.fetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: 'busy' }) });
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ detail: 'busy' });
+    test.each([
+        ['no fen', {}],
+        ['a non-string fen', { fen: { $ne: 1 } }],
+        ['an oversized fen', { fen: 'x'.repeat(200) }],
+        ['depth 0', { fen: START_FEN, depth: 0 }],
+        ['an absurd depth', { fen: START_FEN, depth: 99 }],
+        ['a fractional depth', { fen: START_FEN, depth: 12.5 }],
+    ])('%s → 400 before the engine is called [G14]', async (_label, body) => {
+        const res = await request(ctx.app).post('/api/analysis/engine').send(body);
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'invalid_request' });
+        expect(ctx.fetch).not.toHaveBeenCalled();
     });
 
-    test('unparseable engine body → 500 { error }', async () => {
+    test('an engine error status is propagated, not returned as 200 [G14]', async () => {
+        // Was: "engine error status is NOT propagated: 200 with the engine body (pinned)".
+        ctx.fetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: 'busy' }) });
+        const busy = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(busy.status).toBe(503);
+        expect(busy.body).toEqual({ error: 'engine_busy' });
+
+        ctx.fetch.mockResolvedValue({ ok: false, status: 400, json: async () => ({ detail: 'Invalid FEN' }) });
+        const rejected = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'not a fen' });
+        expect(rejected.status).toBe(400);
+        expect(rejected.body).toEqual({ error: 'engine_rejected' });
+    });
+
+    test('unparseable engine body → 502, without the parser message', async () => {
         ctx.fetch.mockResolvedValue({
             ok: true,
+            status: 200,
             json: async () => {
                 throw new SyntaxError('Unexpected token < in JSON');
             },
         });
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'Unexpected token < in JSON' });
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(502);
+        expect(res.body).toEqual({ error: 'engine_unavailable' });
     });
 
-    test('engine unreachable → 500 { error }', async () => {
-        ctx.fetch.mockRejectedValue(new Error('ECONNREFUSED'));
-        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: 'F' });
-        expect(res.status).toBe(500);
-        expect(res.body).toEqual({ error: 'ECONNREFUSED' });
+    test('engine unreachable → 502, without the socket error', async () => {
+        ctx.fetch.mockRejectedValue(new Error('ECONNREFUSED 10.0.0.5:8001'));
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(502);
+        expect(res.body).toEqual({ error: 'engine_unavailable' });
+        expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
     });
 
-    test('malformed JSON request body → 400 from express.json (HTML error page)', async () => {
+    test('malformed JSON request body → 400 invalid_request JSON (was an HTML error page) [EXPRESS-5]', async () => {
         const res = await request(ctx.app).post('/api/analysis/engine').set('Content-Type', 'application/json').send('{bad');
         expect(res.status).toBe(400);
-        expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
+        expect(res.headers['content-type']).toMatch(/^application\/json/);
+        expect(res.body).toEqual({ error: 'invalid_request' });
         expect(ctx.fetch).not.toHaveBeenCalled();
     });
 });
@@ -202,7 +230,6 @@ describe('GET /api/games/join/:token', () => {
     test.each([
         ['not found', () => ({ data: null, error: null })],
         ['expired > 5 min', () => ({ data: { game_id: 'pg-1', expires_at: inMinutes(-6) }, error: null })],
-        ['null expiry (epoch)', () => ({ data: { game_id: 'pg-1', expires_at: null }, error: null })],
         ['DB error', () => ({ data: null, error: { message: 'boom' } })],
     ])('%s → 404 { error: "Not found or expired" }, and the game is never read', async (_label, invite) => {
         supabase.queue('game_invites', invite());
@@ -211,6 +238,21 @@ describe('GET /api/games/join/:token', () => {
         expect(res.status).toBe(404);
         expect(res.body).toEqual({ error: 'Not found or expired' });
         expect(opsFor('games')).toEqual([]);
+    });
+
+    test('an invite without an expiry is served: null means "does not expire" [G15]', async () => {
+        // Was listed above as "null expiry (epoch)" → 404.
+        supabase.queue('game_invites', { data: { game_id: 'pg-1', expires_at: null }, error: null });
+        supabase.queue('games', { data: waitingGame(), error: null });
+        expect((await request(ctx.app).get('/api/games/join/t')).status).toBe(200);
+    });
+
+    test.each(['active', 'completed', 'aborted'])('the invite page of a game that is %s → 404: only waiting games are invites [G15]', async (status) => {
+        queueInvite();
+        supabase.queue('games', { data: waitingGame({ status, black_id: 'bob' }), error: null });
+        const res = await request(ctx.app).get('/api/games/join/t');
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ error: 'Not found or expired' });
     });
 
     test('the invite exists but its game does not (or cannot be read) → 404', async () => {
@@ -229,12 +271,6 @@ describe('GET /api/games/join/:token', () => {
         const res = await request(ctx.app).get('/api/games/join/t');
         expect(res.status).toBe(400);
         expect(res.body).toEqual({ error: 'kaput' });
-    });
-
-    test('a non-waiting game is still returned (status not checked on GET)', async () => {
-        queueInvite();
-        supabase.queue('games', { data: waitingGame({ status: 'completed' }), error: null });
-        expect((await request(ctx.app).get('/api/games/join/t')).body).toMatchObject({ status: 'completed' });
     });
 });
 
@@ -299,6 +335,7 @@ describe('POST /api/games/join/:token', () => {
             isRated: true,
             lastMoveAt: null,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
         expect(await getActiveGameIds()).toEqual(['pg-1']);
     });
@@ -312,17 +349,19 @@ describe('POST /api/games/join/:token', () => {
         expect(supabase.op(supabase.callsFor('games')[1], 'update')[0]).toMatchObject({ white_id: 'bob', black_id: 'alice' });
     });
 
-    test('the creator re-joining gets the waiting row back, with NO update — game_start still emitted (pinned)', async () => {
+    test('the creator re-joining gets the waiting row back, with NO update and NO game_start [G15]', async () => {
+        // Was: "game_start still emitted (pinned)" — the creator was sent into a game with no opponent.
         const host = await roomListener('pg-1');
         supabase.setUsers({ 'fake-test-token': 'alice' });
         const row = waitingGame();
         queueInvite();
         supabase.queue('games', { data: row, error: null });
-        const started = once(host, 'game_start');
+        const starts = record(host, 'game_start');
         const res = await request(ctx.app).post('/api/games/join/t').set(AUTH);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(publicView(row));
-        expect(await started).toEqual(publicView(row));
+        await sleep(60);
+        expect(starts).toEqual([]);
         expect(opsFor('games')).toHaveLength(1);
     });
 
@@ -341,13 +380,9 @@ describe('POST /api/games/join/:token', () => {
     });
 });
 
-describe('CORS (Express)', () => {
-    test.each([
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'https://gambit.vercel.app',
-        'https://anyone-else.vercel.app', // any vercel.app subdomain, with credentials (pinned)
-    ])('allows %s with credentials', async (origin) => {
+describe('CORS (Express) [S13]', () => {
+    // The harness runs with NODE_ENV=test and no CORS_ORIGINS: the local development origins apply.
+    test.each(['http://localhost:3000', 'http://127.0.0.1:3000'])('allows %s with credentials', async (origin) => {
         const res = await request(ctx.app).get('/api/health').set('Origin', origin);
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBe(origin);
@@ -355,20 +390,27 @@ describe('CORS (Express)', () => {
         expect(res.headers.vary).toBe('Origin');
     });
 
-    test('FRONTEND_URL is read per request', async () => {
+    test('CORS_ORIGINS lists the allowed origins exactly (read per request)', async () => {
         const origin = 'https://gambit.example.org';
-        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(500);
-        process.env.FRONTEND_URL = origin;
+        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(403);
+        process.env.CORS_ORIGINS = `${origin}, https://www.gambit.example.org`;
         const res = await request(ctx.app).get('/api/health').set('Origin', origin);
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBe(origin);
+        delete process.env.CORS_ORIGINS;
+    });
+
+    test('FRONTEND_URL still works as a one-origin fallback when CORS_ORIGINS is not set', async () => {
+        const origin = 'https://legacy.example.org';
+        process.env.FRONTEND_URL = origin;
+        expect((await request(ctx.app).get('/api/health').set('Origin', origin)).status).toBe(200);
+        delete process.env.FRONTEND_URL;
     });
 
     test('no Origin header → allowed, no allow-origin header', async () => {
         const res = await request(ctx.app).get('/api/health');
         expect(res.status).toBe(200);
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
-        expect(res.headers['access-control-allow-credentials']).toBe('true');
     });
 
     test('allowed preflight → 204 with the default method list', async () => {
@@ -381,27 +423,117 @@ describe('CORS (Express)', () => {
         expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
     });
 
-    test.each(['https://evil.example.com', 'http://localhost:3001', 'https://vercel.app'])(
-        'rejected origin %s → 500 HTML error page, route never runs (pinned)',
-        async (origin) => {
-            const res = await request(ctx.app).post('/api/analysis/engine').set('Origin', origin).send({ fen: 'F' });
-            expect(res.status).toBe(500);
-            expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
-            expect(res.headers['access-control-allow-origin']).toBeUndefined();
-            expect(res.text).toContain('Error: Not allowed by CORS');
-            expect(ctx.fetch).not.toHaveBeenCalled();
-        },
-    );
+    test.each([
+        'https://evil.example.com',
+        'http://localhost:3001',
+        'https://vercel.app',
+        // Was allowed with credentials (pinned): any *.vercel.app subdomain.
+        'https://gambit.vercel.app',
+        'https://anyone-else.vercel.app',
+    ])('rejected origin %s → 403 JSON, no stack trace, route never runs', async (origin) => {
+        // Was: 500 HTML error page with "Error: Not allowed by CORS" and a stack trace (pinned).
+        const res = await request(ctx.app).post('/api/analysis/engine').set('Origin', origin).send({ fen: START_FEN });
+        expect(res.status).toBe(403);
+        expect(res.headers['content-type']).toMatch(/^application\/json/);
+        expect(res.body).toEqual({ error: 'origin_not_allowed' });
+        expect(res.text).not.toMatch(/at \w+ \(|node_modules|Error:/);
+        expect(res.headers['access-control-allow-origin']).toBeUndefined();
+        expect(ctx.fetch).not.toHaveBeenCalled();
+    });
 });
 
-describe('CORS (Socket.IO handshake)', () => {
-    test('every origin is accepted with credentials (permissive fallback, pinned)', async () => {
-        const res = await request(ctx.server)
-            .get('/socket.io/?EIO=4&transport=polling')
-            .set('Origin', 'https://evil.example.com');
+describe('CORS (Socket.IO handshake) [S13]', () => {
+    // WebSocket only since MULTI-INSTANCE: the handshake is the WebSocket upgrade, so it is driven
+    // with a real client that sends an Origin header (was: a long-polling GET through supertest).
+    const ioClient = require('socket.io-client');
+    const handshake = (origin) =>
+        new Promise((resolve) => {
+            const socket = ioClient(ctx.url, {
+                transports: ['websocket'],
+                forceNew: true,
+                reconnection: false,
+                auth: { token: 'test-token:alice' },
+                ...(origin ? { extraHeaders: { Origin: origin } } : {}),
+            });
+            socket.on('connect', () => (socket.disconnect(), resolve('connected')));
+            socket.on('connect_error', (e) => (socket.disconnect(), resolve(`refused: ${e.message}`)));
+        });
+
+    test('an origin that is not on the list is refused by allowRequest', async () => {
+        // Was: "every origin is accepted with credentials (permissive fallback, pinned)".
+        expect(await handshake('https://evil.example.com')).toMatch(/^refused/);
+    });
+
+    test('an allowed origin connects', async () => {
+        expect(await handshake('http://localhost:3000')).toBe('connected');
+    });
+
+    test('a client without an Origin header (a native client, the tests) connects', async () => {
+        expect(await handshake(undefined)).toBe('connected');
+    });
+});
+
+
+describe('rate limits (shared in Redis, per client IP) [RATE-LIMITS]', () => {
+    test('the 21st analysis request in a minute → 429 with Retry-After; the engine is not called', async () => {
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ score: 0.1 }) });
+        for (let i = 0; i < 20; i++) {
+            expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
+        }
+        ctx.fetch.mockClear();
+        const res = await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN });
+        expect(res.status).toBe(429);
+        expect(res.body).toEqual({ error: 'rate_limited' });
+        expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+        expect(Number(res.headers['retry-after'])).toBeLessThanOrEqual(60);
+        expect(ctx.fetch).not.toHaveBeenCalled();
+    });
+
+    test('limits are per client: another IP is not affected', async () => {
+        for (let i = 0; i < 61; i++) await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.1');
+        const other = await request(ctx.app).get('/api/users/check-username?u=x').set('X-Forwarded-For', '10.0.0.2');
+        expect(other.status).toBe(200);
+    });
+
+    test('routes without a rule are not limited', async () => {
+        for (let i = 0; i < 100; i++) expect((await request(ctx.app).get('/api/health')).status).toBe(200);
+    });
+
+    test('Redis failing → allowed (fail open, ADR F-046)', async () => {
+        require('../../lib/redis')._failNext('exec');
+        ctx.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        expect((await request(ctx.app).post('/api/analysis/engine').send({ fen: START_FEN })).status).toBe(200);
+    });
+});
+
+describe('health endpoints [OBSERVABILITY] (NODE-21)', () => {
+    test('/livez: the process is up', async () => {
+        const res = await request(ctx.app).get('/livez');
         expect(res.status).toBe(200);
-        expect(res.headers['access-control-allow-origin']).toBe('https://evil.example.com');
-        expect(res.headers['access-control-allow-credentials']).toBe('true');
-        expect(res.text).toMatch(/^0\{"sid":/);
+        expect(res.body).toEqual({ status: 'ok' });
+    });
+
+    test('/api/health still answers for the Railway healthcheck', async () => {
+        expect((await request(ctx.app).get('/api/health')).body).toEqual({ status: 'ok' });
+    });
+
+    test('/readyz: 200 with each check, or 503 naming the failed one', async () => {
+        const ready = await request(ctx.app).get('/readyz');
+        expect(ready.status).toBe(200);
+        expect(ready.body).toMatchObject({ ready: true, checks: { redis: 'ok', supabase: 'ok' } });
+
+        supabase.queue('profiles', { data: null, error: { message: 'connection refused' } });
+        const notReady = await request(ctx.app).get('/readyz');
+        expect(notReady.status).toBe(503);
+        expect(notReady.body).toMatchObject({ ready: false, checks: { supabase: 'failed' } });
+    });
+
+    test('every response carries a request id; a sane incoming X-Request-Id is kept', async () => {
+        const fresh = await request(ctx.app).get('/api/health');
+        expect(fresh.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+        const kept = await request(ctx.app).get('/api/health').set('X-Request-Id', 'abc-123');
+        expect(kept.headers['x-request-id']).toBe('abc-123');
+        const junk = await request(ctx.app).get('/api/health').set('X-Request-Id', 'x'.repeat(300));
+        expect(junk.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
     });
 });

@@ -5,12 +5,21 @@
  * `server/lib/gameStore.js`, which is now the singleton facade over this
  * factory (so its per-game lock map stays process-wide).
  *
- * Errors are logged and swallowed exactly as before: reads return null / [],
- * writes resolve anyway. Only `updateGame` throws (unknown game).
+ * A Redis failure is an error (ERRORS): every call rejects when Redis cannot
+ * be read or written. "Could not look" is not "no such game", and a write
+ * that did not happen is not a stored state. Callers decide what a failure
+ * means: socket handlers ack `internal_error`, the ticker logs and moves on.
  */
 
 const GAME_TTL = 86400; // 24 hours
 const ACTIVE_SET = 'active_games';
+/** Re-reads allowed when other instances keep writing the same game. */
+const MAX_CAS_ATTEMPTS = 10;
+/** Base pause between compare-and-set attempts (grows with each attempt, with jitter). */
+const CAS_BACKOFF_MS = 2;
+
+/** @param {number} ms */
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** @param {string} gameId */
 function gameKey(gameId) {
@@ -25,6 +34,7 @@ function gameKey(gameId) {
  * @property {(key: string, member: string) => Promise<unknown>} sadd
  * @property {(key: string, member: string) => Promise<unknown>} srem
  * @property {(key: string) => Promise<string[]>} smembers
+ * @property {(key: string, expected: string, next: string, ttl: number) => Promise<unknown>} casSetGame
  */
 
 /**
@@ -61,50 +71,33 @@ function createGameLock() {
 }
 
 /**
- * The `active_games` set the clock ticker walks. Errors are logged and swallowed.
+ * The `active_games` set the clock ticker walks.
  * @param {RedisLike} redis
  */
 function createActiveGameSet(redis) {
-    /**
-     * Add a game to the set the clock ticker walks (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function addActiveGame(gameId) {
-        try {
+    return {
+        /**
+         * Add a game to the set the clock ticker walks.
+         * @param {string} gameId
+         * @returns {Promise<void>}
+         */
+        async addActiveGame(gameId) {
             await redis.sadd(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] addActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Remove a game from the active set (errors logged).
-     * @param {string} gameId
-     * @returns {Promise<void>}
-     */
-    async function removeActiveGame(gameId) {
-        try {
+        },
+        /**
+         * Remove a game from the active set.
+         * @param {string} gameId
+         * @returns {Promise<void>}
+         */
+        async removeActiveGame(gameId) {
             await redis.srem(ACTIVE_SET, gameId);
-        } catch (e) {
-            console.error('[gameStore] removeActiveGame error:', /** @type {Error} */ (e).message);
-        }
-    }
-
-    /**
-     * Ids of all active games; [] when Redis fails.
-     * @returns {Promise<string[]>}
-     */
-    async function getActiveGameIds() {
-        try {
-            return await redis.smembers(ACTIVE_SET);
-        } catch (e) {
-            console.error('[gameStore] getActiveGameIds error:', /** @type {Error} */ (e).message);
-            return [];
-        }
-    }
-
-    return { addActiveGame, removeActiveGame, getActiveGameIds };
+        },
+        /**
+         * Ids of all active games.
+         * @returns {Promise<string[]>}
+         */
+        getActiveGameIds: () => redis.smembers(ACTIVE_SET),
+    };
 }
 
 /**
@@ -115,34 +108,26 @@ function createGameStateRepository(redis) {
     const withGameLock = createGameLock();
 
     /**
-     * Read a game's state; null when missing, unreadable or Redis fails.
+     * Read a game's state; null when there is none.
      * @param {string} gameId
      * @returns {Promise<any>}
+     * @throws when Redis cannot be read or the stored value is not JSON
      */
     async function getGame(gameId) {
-        try {
-            const raw = await redis.get(gameKey(gameId));
-            if (!raw) return null;
-            return JSON.parse(raw);
-        } catch (e) {
-            console.error('[gameStore] getGame error:', /** @type {Error} */ (e).message);
-            return null;
-        }
+        const raw = await redis.get(gameKey(gameId));
+        return raw ? JSON.parse(raw) : null;
     }
 
     /**
-     * Store a game's state (24 h TTL); resolves with `game` even if Redis fails.
+     * Store a game's state (24 h TTL).
      * @template T
      * @param {string} gameId
      * @param {T} game
      * @returns {Promise<T>}
+     * @throws when the write fails: the state is NOT stored
      */
     async function setGame(gameId, game) {
-        try {
-            await redis.setex(gameKey(gameId), GAME_TTL, JSON.stringify(game));
-        } catch (e) {
-            console.error('[gameStore] setGame error:', /** @type {Error} */ (e).message);
-        }
+        await redis.setex(gameKey(gameId), GAME_TTL, JSON.stringify(game));
         return game;
     }
 
@@ -170,8 +155,11 @@ function createGameStateRepository(redis) {
      * read and the write share one lock, two callers can never both act on
      * the same state (a move applied twice, a game finalized twice).
      *
-     * The lock is per process (see createGameLock); a multi-instance deploy
-     * needs a Redis-side transition (NODE-17).
+     * Across instances the write is a compare-and-set in Redis (`casSetGame`,
+     * clients/redisCommands): it only succeeds if the stored state is still the
+     * one `mutate` decided on; otherwise the state is re-read and `mutate` runs
+     * again, at most MAX_CAS_ATTEMPTS times (NODE-17, MULTI-INSTANCE). The
+     * per-process lock stays, so one instance does not race itself.
      * @template T
      * @param {string} gameId
      * @param {(game: any) => T | null | Promise<T | null>} mutate
@@ -179,24 +167,26 @@ function createGameStateRepository(redis) {
      */
     async function mutateGame(gameId, mutate) {
         return withGameLock(gameId, async () => {
-            const next = await mutate(await getGame(gameId));
-            if (!next) return null;
-            await setGame(gameId, next);
-            return next;
+            for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+                const raw = await redis.get(gameKey(gameId));
+                const next = await mutate(raw ? JSON.parse(raw) : null);
+                if (!next) return null;
+                const written = await redis.casSetGame(gameKey(gameId), raw ?? '', JSON.stringify(next), GAME_TTL);
+                if (Number(written) === 1) return next;
+                // Another instance wrote in between: back off a little, then decide again on its state.
+                await pause(CAS_BACKOFF_MS * (attempt + 1) * (1 + Math.random()));
+            }
+            throw new Error(`game ${gameId}: too much contention, gave up after ${MAX_CAS_ATTEMPTS} attempts`);
         });
     }
 
     /**
-     * Delete a game's state (errors logged).
+     * Delete a game's state.
      * @param {string} gameId
      * @returns {Promise<void>}
      */
     async function deleteGame(gameId) {
-        try {
-            await redis.del(gameKey(gameId));
-        } catch (e) {
-            console.error('[gameStore] deleteGame error:', /** @type {Error} */ (e).message);
-        }
+        await redis.del(gameKey(gameId));
     }
 
     return { getGame, setGame, updateGame, mutateGame, deleteGame, ...createActiveGameSet(redis) };

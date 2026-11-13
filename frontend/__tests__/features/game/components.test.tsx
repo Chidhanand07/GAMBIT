@@ -1,13 +1,14 @@
 import { clockStyle, getFormatRating } from '@/features/game/components/PlayerStrip'
 import { squareBackground } from '@/features/game/components/Square'
-import { outcomeFlags } from '@/features/game/components/GameOverModal'
+import { render, screen } from '@testing-library/react'
+import GameOverModal, { outcomeFlags } from '@/features/game/components/GameOverModal'
 
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children }: any) => children }))
 
-describe('getFormatRating (game page buckets: <3 / <10 / >=30 / else rapid, ADR 0200)', () => {
+describe('getFormatRating (the shared categories: ≤2 bullet, ≤5 blitz, ≤29 rapid, ≥30 classical) [F7]', () => {
     const p = { username: 'u', rating_bullet: 1001.6, rating_blitz: 1100, rating_rapid: 1200.4, rating_classical: 1300 }
     test.each([
-        ['1', 1002], ['2+1', 1002], ['3', 1100], ['9', 1100], ['10', 1200], ['29', 1200], ['30', 1300], ['abc', 1200], [undefined, 1200], ['', 1200],
+        ['1', 1002], ['2+1', 1002], ['3', 1100], ['5', 1100], ['6', 1200], ['9', 1200], ['10', 1200], ['29', 1200], ['30', 1300], ['abc', 1200], [undefined, 1200], ['', 1200],
     ])('%s → %s', (tc, expected) => expect(getFormatRating(p, tc as string | undefined)).toBe(expected))
 
     test('no player → 1200; missing bucket → 1200', () => {
@@ -32,7 +33,34 @@ test('squareBackground: check overrides selection, selection overrides last move
 })
 
 test('outcomeFlags: spectators never win or lose but can see a draw', () => {
-    expect(outcomeFlags('White wins', 'white')).toEqual({ isSpectator: false, isWin: true, isDraw: false, isLoss: false })
-    expect(outcomeFlags('White wins', 'black')).toEqual({ isSpectator: false, isWin: false, isDraw: false, isLoss: true })
-    expect(outcomeFlags('Draw', 'spectator')).toEqual({ isSpectator: true, isWin: false, isDraw: true, isLoss: false })
+    const none = { isAborted: false }
+    expect(outcomeFlags('White wins', 'white')).toEqual({ isSpectator: false, isWin: true, isDraw: false, isLoss: false, ...none })
+    expect(outcomeFlags('White wins', 'black')).toEqual({ isSpectator: false, isWin: false, isDraw: false, isLoss: true, ...none })
+    expect(outcomeFlags('Draw', 'spectator')).toEqual({ isSpectator: true, isWin: false, isDraw: true, isLoss: false, ...none })
+})
+
+describe('an aborted game is nobody\'s loss [FIRST-MOVE]', () => {
+    test.each(['white', 'black'] as const)('outcomeFlags for %s: neither win, draw nor loss', (color) => {
+        expect(outcomeFlags('Aborted', color)).toEqual({ isSpectator: false, isWin: false, isDraw: false, isLoss: false, isAborted: true })
+    })
+
+    test('the modal says "Game aborted" and that nothing was rated, not "You Lost"', () => {
+        const noop = () => {}
+        render(
+            <GameOverModal
+                gameOver={{ result: 'Aborted', reason: 'Aborted' }}
+                myColor="white"
+                ratingChange={null}
+                rematchState="idle"
+                onClose={noop}
+                onReview={noop}
+                onNewGame={noop}
+                onRematch={noop}
+            />,
+        )
+        expect(screen.getByText('Game aborted')).toBeInTheDocument()
+        expect(screen.getByText('No game was played · not rated')).toBeInTheDocument()
+        expect(screen.queryByText('You Lost')).not.toBeInTheDocument()
+        expect(screen.queryByText(/^by /)).not.toBeInTheDocument()
+    })
 })
