@@ -43,11 +43,28 @@ export function resolveColor(choice: Side | 'random'): Side {
     return Math.random() < 0.5 ? 'w' : 'b';
 }
 
-/** Undo MAVERICK's reply and the player's move so it is the player's turn again; returns the new last move. */
-export function undoToPlayerTurn(game: Chess, playerColor: Side): LastMove | null {
-    game.undo();
-    if (game.turn() !== playerColor) game.undo();
+/** How many of the moves played so far are the player's (White moves on even plies). */
+export function playerMoveCount(game: Chess, playerColor: Side): number {
+    const plies = game.history().length;
+    const whiteMoves = Math.ceil(plies / 2);
+    return playerColor === 'w' ? whiteMoves : plies - whiteMoves;
+}
+
+function lastMoveOf(game: Chess): LastMove | null {
     const hist = game.history({ verbose: true });
     const last = hist[hist.length - 1];
     return last ? { from: last.from, to: last.to } : null;
+}
+
+/**
+ * Undo MAVERICK's reply (if it came) and the player's last move so it is the player's turn
+ * again; returns the new last move. With no move of the player's to take back (as Black,
+ * only MAVERICK's opening move) nothing is undone: undoing that move would hand the turn to
+ * MAVERICK with nothing asking it to move (F13).
+ */
+export function undoToPlayerTurn(game: Chess, playerColor: Side): LastMove | null {
+    if (playerMoveCount(game, playerColor) === 0) return lastMoveOf(game);
+    game.undo();
+    if (game.turn() !== playerColor) game.undo();
+    return lastMoveOf(game);
 }
