@@ -97,6 +97,15 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-077](#f-077) | One queue request; reconnect re-sends it with an ack | L2 | F8 |
 | [F-078](#f-078) | Offline engine errors: bounded manual retry | L2 | F13 |
 | [F-079](#f-079) | Disconnect countdown keyed on "counting" | L2 | EXHAUSTIVE-DEPS |
+| [F-080](#f-080) | Profile Online badge reads the shared presence set | L3 | F11 |
+| [F-081](#f-081) | One outcome reader; aborted is not a loss | L3 | F12 |
+| [F-082](#f-082) | Peak from `peak_<category>`, hidden without one | L3 | F12 |
+| [F-083](#f-083) | Analysis client parses the engine's real `/analyze` body | L3 | F14 |
+| [F-084](#f-084) | A different end-of-game clip for a win | L3 | F17 |
+| [F-085](#f-085) | Images through `next/image`; 0 frontend lint warnings | L3 | LINT |
+| [F-086](#f-086) | Profile edits as the user; `service_role` loses UPDATE on profiles | L3 | S8-PRIV |
+| [F-087](#f-087) | `/login` shows OAuth errors by known code | L3 | F17 |
+| [F-088](#f-088) | `/api/maverick-move` relays 503 Engine busy | L3 | MAVERICK-503 |
 
 ---
 
@@ -2237,3 +2246,72 @@ their own to undo, which removes the stuck-as-Black case.
 on nothing (behind a disable) to keep one interval per disconnect, so a second disconnect after a
 countdown had run out never ticked. `counting = opponentDisconnected && countdown > 0` is the only
 dependency; the interval decrements (clamped at 0) and stops when counting turns false.
+
+## F-080
+
+**The profile Online badge reads the shared presence set (F11).** The profile opened its own
+`presence-watch-<id>-<Date.now()>` channel that nobody tracks into, so the badge never showed.
+`PresenceProvider` now exposes `onlineUserIds` through context and the profile reads it. Rejected:
+watching the shared topic from the page, because realtime-js reuses one channel per topic and the
+page's cleanup would end the viewer's own presence. Signed-out viewers have no presence
+subscription and never see the badge.
+
+## F-081
+
+**One reader for a player's outcome (F12).** `lib/chess/gameOutcome.playerOutcome` mirrors the
+server's `outcomeOfRow`: status or result `aborted` → aborted; otherwise `result`, then `winner_id`
+decide; a row with neither is a draw. Lists show "Aborted"; per-category stats skip aborted games
+(they were counted as losses). History queries still exclude aborted rows (a product decision).
+
+## F-082
+
+**Peak = max(peak_<category>, current rating), hidden when there is no peak (F12).** "Peak" showed
+the current rating. No migration creates `peak_*` columns yet, so the line stays hidden until one does.
+
+## F-083
+
+**The analysis client parses the engine's real `/analyze` body (F14).** The page read a `score`
+field the engine never sends, so every evaluation showed 0.0. A zod adapter at the client boundary
+maps `{ best_move, evaluation: { type, value } }` (White's view, F-060): centipawns / 100 → pawns; a
+mate keeps `mate: n`, fills the bar at ±100 and shows "M<n>". A non-OK status or a missing/invalid
+evaluation shows "Engine unavailable". The engine body has no PV, so no PV chips. Loading a position
+clears the selection; the arrow-key hook only reports a step (no setters inside updaters).
+
+## F-084
+
+**`playGameEndSound(won)` plays a different clip for a win (F17):** promote.mp3 for a win,
+checkmate.mp3 otherwise. No dedicated win clip exists; adding assets was out of scope.
+
+## F-085
+
+**Images through `next/image` (lint).** Avatars render at their box size, optimized only when the URL
+matches `lib/imageHosts.json` (the single list `next.config` `remotePatterns` reads too) and
+`unoptimized` otherwise, because avatar URLs are user data and `next/image` throws on an unlisted
+host. Pieces use `next/image` `unoptimized`: 140 px static sprites, up to 32 per board; the optimizer
+would add a request each and save nothing. Sign-up's intentional full reload (F-024) goes to an
+absolute URL built from `location.origin`. The frontend now has 0 lint warnings and no
+`eslint-disable` lines.
+
+## F-086
+
+**Profile edits run as the user; `service_role` loses UPDATE on `profiles` (S8-PRIV, closes the
+F-053 deviation).** `PATCH /api/profile/me` writes through the signed-in user's session client (RLS
+`profiles_update` plus column grants); migration
+`20261114200000_profiles_revoke_service_role_update.sql` revokes `UPDATE` from `service_role`.
+Ratings change only through `apply_game_result` (security definer, runs as its owner). INSERT (signup,
+OAuth, auto-create) is kept. **Rollout: web app first, then the migration** (before it, edits from the
+old web app fail with 42501). Rollback: `GRANT UPDATE ON TABLE public.profiles TO service_role;`.
+pgTAP `05_profiles_service_role.test.sql`; `01_profiles_rls` now expects the direct service-role
+rating write to fail. The PATCH also stopped nulling omitted fields (the avatar upload was wiping the
+display name, bio and country, F18).
+
+## F-087
+
+**`/login` shows the `?error=` the OAuth flow sends back (F17).** Known codes (`oauth_failed`,
+`no_code`) get a specific message, anything else a generic one; the raw parameter is never echoed
+(attacker-controllable). `?error=` is removed from the URL, `?redirect=` kept.
+
+## F-088
+
+**`/api/maverick-move` passes the engine's 503 "Engine busy" through** as 503 with `Retry-After`
+(only when it is plain delay-seconds, 1–4 digits). A 400 stays 400; any other status stays 502.
