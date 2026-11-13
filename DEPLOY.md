@@ -261,3 +261,43 @@ Make sure `REDIS_URL` uses `rediss://` (TLS) not `redis://` for Upstash. Railway
 
 ### Invite link generates but /join/[token] shows "not found"
 The game row in Supabase may not have the `invite_token` or `invite_expires_at` columns. Re-run the migrations that add those columns.
+
+---
+
+## 8. CI Security Checks (GitHub)
+
+### 8a. Repository settings (one-time, owner)
+1. **Settings → Advanced Security**: enable **Dependency graph**, **Dependabot alerts**, **Dependabot security updates**, **Secret scanning** and **Push protection** (SEC-10, GIT-06).
+2. **Code scanning → CodeQL analysis**: leave it on **Advanced** (the repo ships `.github/workflows/codeql.yml`). If "Default" setup is switched on, GitHub rejects the workflow's uploads.
+3. **Rulesets** for `main` and `preprod`: add the required checks `Dependency audit`, `CodeQL (javascript-typescript)` and `CodeQL (python)` next to the test checks.
+4. Create the labels `dependencies`, `server`, `frontend`, `chess-engine` and `ci` (Dependabot applies them to its PRs).
+
+Dependabot (`.github/dependabot.yml`) opens its weekly PRs against `preprod`. Dependabot *security* updates ignore that setting and target the default branch: retarget them to `preprod` before merging.
+
+### 8b. Dependency audit and approved exceptions (SEC-11)
+The `Dependency audit` check fails when:
+- `server` or `frontend` has a **high or critical** advisory in its production dependencies (`npm audit --omit=dev --audit-level=high`);
+- `chess-engine` has **any** known vulnerability (`pip-audit -r requirements.txt`; pip-audit reports no severity, so it cannot be limited to high/critical).
+
+Run it locally from the repo root (no `npm install` needed; the pip audit needs `pip install pip-audit`):
+```bash
+node scripts/dependency-audit.js npm server
+node scripts/dependency-audit.js npm frontend
+node scripts/dependency-audit.js pip chess-engine
+```
+
+The fix is to upgrade the dependency. When that is not possible yet, add an exception to `.github/dependency-audit-allowlist.json` in a reviewed PR:
+```json
+{
+  "exceptions": [
+    {
+      "id": "GHSA-xxxx-xxxx-xxxx",
+      "scope": "server",
+      "reason": "Why it is not exploitable here, or why the fix cannot ship yet.",
+      "approvedBy": "github-handle",
+      "expires": "2026-12-31"
+    }
+  ]
+}
+```
+Every field is required. `scope` is `server`, `frontend` or `chess-engine` (one entry per package tree), and `expires` may be at most 90 days ahead. An expired or incomplete entry fails the check; an entry that no longer matches a finding only warns, so delete it once the upgrade lands.
