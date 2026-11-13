@@ -31,6 +31,11 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-014](#f-014) | Response DTOs are allow-lists; invite token never leaves the server in a game response | 2 | S8 |
 | [F-015](#f-015) | Engine endpoints require `X-Engine-Key`; reviews only for existing, completed games | 2 | ENG-AUTH |
 | [F-016](#f-016) | `/health` returns its Stockfish instance to the pool | 2 | G18 |
+| [F-017](#f-017) | Profiles: column privileges + owner policies; no client INSERT; dead server action removed | 3 | S11 |
+| [F-018](#f-018) | Invite tokens move to `game_invites` (service-role only), expand → deploy → contract | 3 | INV-TOKEN |
+| [F-019](#f-019) | Drop `matchmaking_queue`; a migration-time guard that every public table has RLS | 3 | MATCHMAKING-QUEUE |
+| [F-020](#f-020) | Database CI job; `supabase/config.toml`; duplicate migration version `00005` renamed | 3 | Tests |
+| [F-021](#f-021) | New Supabase key names with legacy fallbacks; JS client pinned to the last Node 20 line; `supabase-py` 2.34.1 | 3 | SUPABASE-KEYS |
 
 ---
 
@@ -599,3 +604,239 @@ instead of one file per ADR under `docs/refactor/adr/`.
 - **Test.** `tests/test_health_pool.py` runs against the *real* pool functions (filled with fake
   engines), not the acquire/release doubles the other tests patch in: it probes `/health` five
   times the pool size and then runs an analysis successfully. The old code fails it.
+
+## F-017
+
+**`profiles`: users can change four cosmetic columns of their own row and nothing else (S11).**
+
+- **Context.** RLS decides which *rows* a role may touch, not which *columns*. The
+  `profiles_update` policy (`USING (auth.uid() = id)`) therefore let any signed-in user update
+  every column of their own row with the public API key: `rating_rapid`, `wins`,
+  `games_played`, … The `profiles_insert` policy was `WITH CHECK (true)`: anyone, signed in or
+  not, could insert a profile row for any id.
+- **Options.**
+  1. Protect ratings with: (a) a trigger that rejects changes to rating columns; (b) column
+     privileges; (c) move ratings to a separate table.
+  2. `INSERT` for `authenticated`: (a) grant it on the non-rating columns; (b) grant nothing.
+  3. Revoke only `INSERT, UPDATE` (the brief's wording), or also `DELETE` / `TRUNCATE`.
+- **Decision.** 1b, 2b, and revoke everything but `SELECT`.
+  - `REVOKE ALL … FROM PUBLIC, anon, authenticated`; `GRANT SELECT` to both API roles;
+    `GRANT UPDATE (display_name, bio, country, avatar_url)` to `authenticated`;
+    `GRANT ALL` to `service_role`.
+  - `profiles_insert`: `TO authenticated WITH CHECK ((select auth.uid()) = id)`.
+    `profiles_update`: `TO authenticated`, the same predicate on `USING` and `WITH CHECK`.
+- **Why.**
+  - *Column privileges*: this is the mechanism Postgres has for exactly this, it is enforced
+    before any policy or trigger runs, and it fails loudly (`42501`) rather than silently.
+    SEC-04 asks for it by name. A separate ratings table is the cleaner long-term shape but a
+    much larger change (every reader), so it is left for later.
+  - *Which columns*: derived from the code. `PATCH /api/profile/me` is the only profile edit
+    path and writes exactly `display_name`, `bio`, `country`, `avatar_url`. `sex` and
+    `is_public` exist in the schema but no code edits them, so they are not granted.
+  - *No INSERT grant*: every profile insert in the app goes through the service role (signup,
+    the OAuth callback, the auto-create in `GET /api/profile/me`); `grep` finds no client-side
+    `.from('profiles').insert`. The corrected policy stays in place as the second line of
+    defence if a grant is ever added back.
+  - *DELETE / TRUNCATE too*: no client path uses them, and `TRUNCATE` is not subject to RLS at
+    all. Least privilege costs nothing here.
+- **Unaffected.** The game server (ratings, statistics) and the Next.js routes use the
+  service-role / secret key, which bypasses RLS and keeps full privileges. Reading profiles is
+  unchanged.
+- **Also removed: `frontend/app/actions/auth.ts`.** A `'use server'` action,
+  `createProfile({ userId, username, email })`, that inserted a profile for **any caller-supplied
+  user id** with the service-role key and no authentication. Nothing imports it, so Next.js
+  does not expose it today and it could not have worked (it writes an `email` column that does
+  not exist). It was found while listing every writer of `profiles` for this item; leaving a
+  ready-made, unauthenticated service-role insert one import away from being live is the kind of
+  thing this phase exists to remove.
+- **Deviation from SEC-04, on purpose.** SEC-04 has two halves: revoke table-level `UPDATE` on
+  `profiles` and re-grant cosmetic columns (done here), and write ratings and results only
+  through a `security definer` function. The second half is not done: the game server still
+  writes them directly with the secret key. Moving those writes into a database function
+  changes the rating path of every finished game and is not needed to close S11 (clients can
+  no longer write the columns either way), so it is left for the next phase.
+- **Tests.** `supabase/tests/01_profiles_rls.test.sql` (31 assertions, as `authenticated`, `anon`
+  and `service_role`): rating/statistics updates raise `42501` and the row is checked unchanged;
+  display fields update; another user's row is affected 0 times; inserts are refused; the policy
+  definitions and the exact set of updatable columns are asserted. Run against the old schema,
+  22 of the 31 fail.
+
+## F-018
+
+**Invite tokens live in `public.game_invites`, not on `public.games` (INV-TOKEN).**
+
+- **Context.** `games` has the policy "Games are viewable by everyone" (`USING (true)`), and it
+  carried `invite_token` and `invite_expires_at`. With nothing but the public API key anyone
+  could `select invite_token from games where status = 'waiting'` and join other people's
+  private games. S8 stopped the *application* from returning the token; the *database* still
+  handed it out.
+- **Options.**
+  1. (a) column privileges on `games` (revoke `SELECT (invite_token)`); (b) a narrower `SELECT`
+     policy on `games`; (c) move the token to its own table.
+  2. Rollout: (a) one migration that adds the table and drops the columns; (b) expand →
+     deploy → contract in two files.
+  3. Invites created by the *old* code between "expand" and the new deploy: (a) accept that
+     they are lost; (b) mirror them with a trigger until "contract".
+- **Decision.** 1c, 2b, 3b.
+  - **(a) `20261112100100_game_invites_expand.sql`**: `game_invites(game_id pk → games on delete
+    cascade, token unique not null, expires_at, created_at)`, RLS enabled with **no policies**,
+    `REVOKE ALL` from `PUBLIC, anon, authenticated`, backfill from `games`, and a trigger that
+    mirrors `games.invite_token` writes into the new table.
+  - **Code**: the game server (`gameInvitesRepository`, `privateGameService`) and the Next.js
+    `POST /api/games/private/create` insert the game without any token column and store the
+    invite separately; a lookup goes token → `game_invites` → `games` by id. If the invite
+    cannot be stored the game row is deleted again.
+  - **(b) `20261112100300_game_invites_contract.sql`**: one more backfill, drop the trigger, the
+    function, the index and both columns.
+- **Why.**
+  - *Own table*: column-level `SELECT` revokes break `select *` for the API roles (PostgREST
+    answers 401/403 for the whole request), and every existing reader of `games` uses `*`. A
+    row policy cannot hide a column. A separate table with RLS and no policies is invisible to
+    the API roles by construction, which is also what the brief specifies.
+  - *Two steps*: dropping the columns in the same migration would break the running server (it
+    filters `games` by `invite_token`) for as long as the deploy takes, and makes the migration
+    impossible to roll back without data loss.
+  - *Mirror trigger*: invites are valid for 48 hours. Without it, an invite created in the
+    minutes between applying (a) and the new server going live would be a dead link.
+- **Deploy order (also in the report).**
+  1. Apply `20261112100000`, `…100100` (expand) and `…100200`.
+  2. Deploy the game server and the frontend from this PR.
+  3. Apply `…100300` (contract).
+  `supabase db push` applies every pending file at once, so do not use it for this release
+  unless step 2 is already done; apply the files individually (SQL editor or `psql -f`) and then
+  record them with `supabase migration repair --status applied <version>`.
+- **Rollback.** Before (b): redeploy the old code; the columns are still there and the trigger
+  kept them authoritative for anything the old code wrote, but invites created by the *new*
+  code exist only in `game_invites`, so those links stop working (they can be copied back with
+  one `UPDATE … FROM game_invites`). After (b): re-add the two columns and copy the tokens back
+  from `game_invites` before redeploying old code.
+- **Behaviour.** None visible. The creator still gets the token once, from the create route;
+  the join page still resolves it through the game server. The server no longer logs the token
+  when an invite has expired.
+- **Tests.** `supabase/tests/02_game_invites.test.sql` (13 assertions): `anon` and `authenticated`
+  get `42501` on any access to `game_invites`; a `games` row has no token columns;
+  `service_role` reads the invite; one invite per game; cascade on delete.
+
+## F-019
+
+**`public.matchmaking_queue` is dropped; a guard fails the migration if any public table lacks RLS (MATCHMAKING-QUEUE).**
+
+- **Context.** The initial schema created `matchmaking_queue` and never enabled RLS on it. With
+  Supabase's default grants that means the public API key could read and write it freely.
+  Matchmaking has always run in the game server's memory; `grep -rn matchmaking_queue` over the
+  whole repository finds only the `CREATE TABLE` line.
+- **Options.** (a) enable RLS and leave the table; (b) drop it. For the "all tables have RLS"
+  check: (a) a pgTAP test only; (b) a check inside a migration; (c) both.
+- **Decision.** Drop the table (`DROP TABLE IF EXISTS`), and (c): the migration ends with a `DO`
+  block that raises, naming the tables, if any ordinary or partitioned table in `public` has
+  RLS disabled; `supabase/tests/00_schema_guards.test.sql` asserts the same thing.
+- **Why.** Dead, unprotected, API-reachable tables should not exist. The in-migration guard
+  catches drift on the *real* database at the moment the migration is applied (the live schema
+  has diverged from these files before), which a CI test against a freshly built database
+  cannot. The pgTAP test keeps the property true for every future migration.
+- **Operational note.** If the live database has some other table in `public` without RLS, this
+  migration stops with `Row level security is not enabled on: …`. That is intended: enable RLS
+  on it (or drop it) and re-run. Nothing has been changed at that point, because the migration
+  runs in one transaction.
+
+## F-020
+
+**A "Database (Supabase)" CI job; `supabase/config.toml`; one existing migration file renamed.**
+
+- **Context.** There was no automated check of the database at all (TEST-04), no
+  `supabase/config.toml` (so the CLI could not start a local stack), and two migration files
+  shared the version prefix `00005` (`00005_fix_rating_precision.sql`, `00005_schema_fixes.sql`).
+- **Decision.**
+  - `.github/workflows/tests.yml` gains a job that runs `supabase start`, `supabase db reset`
+    and `supabase test db` (pgTAP) on every pull request and on pushes to `main` / `preprod`.
+  - `supabase/config.toml` with only `project_id`; everything else is the CLI's default.
+  - `00005_schema_fixes.sql` is renamed to `00006_schema_fixes.sql`. **Its content is unchanged**
+    (`git` records a pure rename).
+- **Why the rename, given "never edit an existing migration".** The Supabase CLI keys applied
+  migrations by the numeric prefix. Two files with the same prefix cannot both be recorded, so
+  `supabase db reset` cannot build the database from these files, and the new CI job could not
+  run. The rename keeps the original order (`00005_fix_rating_precision` then the schema fixes),
+  changes no SQL, and is the one-time reconciliation SEC-08 itself asks for. It is the smallest
+  change that makes the listed CI job possible, so it is logged here rather than left out.
+- **What the owner must do because of it.** Nothing if the remote project has no migration
+  history (the old files say "run this in the SQL editor", which suggests it does not). If
+  `supabase migration list` does show `00005` as applied remotely, run
+  `supabase migration repair --status applied 00006` once so the renamed file is not re-run.
+- **What was and was not run.** The pgTAP tests have **not** been executed with pgTAP on this
+  machine: there is no Docker or Supabase CLI here, and downloading pgTAP was not permitted.
+  What *was* run locally, on a throwaway Postgres 17 cluster with hand-made stand-ins for the
+  Supabase roles, `auth.uid()` and the default grants:
+  - every migration, old and new, applied in order from an empty database;
+  - an invite created between "expand" and "contract" ends up in `game_invites`;
+  - the three test files, through a small local stand-in for the pgTAP functions they call:
+    8 + 31 + 13 assertions pass on the migrated schema, and 5 + 22 fail on the old one (the
+    third file cannot even start there, the table does not exist).
+  The first real pgTAP run is this PR's "Database (Supabase)" check. If it fails on something
+  the stand-in could not model (the real `auth.users` columns, the exact text pgTAP expects),
+  that is the place to look.
+
+## F-021
+
+**Publishable / secret keys under their documented names, with the legacy names as fallbacks (SUPABASE-KEYS).**
+
+- **Context.** Supabase is deprecating the `anon` and `service_role` JWT keys by the end of 2026
+  in favour of `sb_publishable_…` and `sb_secret_…` keys
+  ([API keys guide](https://supabase.com/docs/guides/api/api-keys)). The app read only the legacy
+  variable names, under three different spellings.
+- **Decision: variable names.** New name first, legacy names as fallbacks; when both are set the
+  new one wins.
+
+  | Service | New (canonical) | Fallbacks |
+  |---|---|---|
+  | Frontend, browser + server | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+  | Frontend, server only | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SERVICE_KEY` |
+  | Game server | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+  | Engine | `SUPABASE_SECRET_KEY` | `SUPABASE_SERVICE_KEY` |
+
+  The names are the ones Supabase's guide recommends. Each service keeps its *own* historical
+  fallback order, so a deployment that has two legacy names set resolves exactly as before.
+- **Decision: keeping the secret key out of the browser.**
+  - The secret key is read in one `server-only` module (`frontend/lib/server/env.ts`); the public
+    key in `frontend/lib/supabase/publicEnv.ts`, which **throws** if the value starts with
+    `sb_secret_` (a secret pasted into a public variable is refused, not shipped).
+  - `createAdminClient()` throws when no secret key is configured, instead of building a client
+    that fails later.
+  - A test scans the source: no file outside `lib/server`, `app/api` and `app/auth/callback`
+    mentions a secret variable, every `lib/server` module is marked `server-only`, and no
+    `NEXT_PUBLIC_*SECRET*` / `*SERVICE*` name exists. A production build with new-style keys was
+    checked by hand: the publishable key is inlined into client chunks, the secret key appears
+    nowhere under `.next/static`.
+- **Decision: client library versions.**
+  - **`@supabase/supabase-js` `~2.109.0` in the frontend and the game server**, and
+    **`@supabase/ssr` `0.12.0`** in the frontend. This *revises PR 2*, which had taken
+    `@supabase/ssr` 0.12.7 and with it `supabase-js` 2.119.
+  - **`supabase` (Python) 2.0.2 → 2.34.1** in the engine, with `httpx` 0.24.1 → 0.27.2 and an
+    explicit `websockets==15.0.1`.
+- **Why those versions.**
+  - *Why not the newest `supabase-js`*: every release from 2.110 on declares `engines.node >= 22`
+    (checked on the registry), and 2.119 prints a deprecation warning on Node 20 at every cold
+    start. CI runs Node 20, the server's Dockerfile says Node 18, and the brief says not to
+    upgrade Node. 2.109.0 is the last release that supports Node 20, and `@supabase/ssr` 0.12.0
+    is the newest `ssr` release whose peer range (`^2.108.0`) accepts it. The game server's
+    lockfile already resolved to 2.103.3, so this is a small step for it.
+  - *Do the new keys need a newer JS client at all?* Supabase's guide states no minimum version.
+    The pinned line was released in 2026, long after the new keys shipped, so I did not look
+    for the oldest version that would work.
+  - *Why the engine really had to move*: `supabase==2.0.2` validates the key against a JWT-shaped
+    regular expression and raises `Invalid API key` for `sb_secret_…` (reproduced locally).
+    2.34.1 has no such check and accepts both formats. It needs `httpx >= 0.26`; 0.27.2 is the
+    newest that FastAPI 0.104's test client still works with. `websockets` is pinned because
+    the realtime client imports `websockets.asyncio` (≥ 13) without requiring it: an upgrade in
+    place kept 12.0 and failed on import, while a fresh install passed. All 191 engine tests
+    pass on a fresh install and on an upgraded one.
+- **What I could not verify.** No real `sb_publishable_…` / `sb_secret_…` key was available, so
+  nothing here has talked to Supabase with one. What is verified is the plumbing (which variable
+  wins, that the clients are constructed with it, that the Python client accepts the format, and
+  that the secret stays out of the bundle).
+- **Known follow-ups.**
+  - Node: when the runtimes move to Node 22+, lift the `~2.109.0` pin (and `@supabase/ssr`).
+  - `auth.getUser(token)` on the game server and `getUser()` in the route handlers work the same
+    with either key type. Moving to `getClaims()` after enabling asymmetric JWT signing keys
+    would remove an Auth round trip per request (SEC-05); not done here.
+  - The Supabase *Realtime* presence channel in the browser uses the public key; with a
+    publishable key, unauthenticated connections are limited to 24 hours by Supabase.

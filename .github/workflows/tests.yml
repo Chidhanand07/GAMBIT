@@ -100,3 +100,25 @@ jobs:
         run: ruff format --check .
       # Tests fake Stockfish; no binary is installed on purpose.
       - run: python -m pytest -q
+
+  database:
+    name: Database (Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # Local Supabase stack (Postgres + Auth schema + API roles) in Docker.
+      - name: Start Supabase
+        run: supabase start
+      # Rebuild the database from supabase/migrations, from scratch (SEC-08).
+      - name: Apply every migration to an empty database
+        run: supabase db reset
+      # pgTAP: RLS, column privileges and schema guards (TEST-04), supabase/tests/*.sql.
+      - name: Database tests (pgTAP)
+        run: supabase test db
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup

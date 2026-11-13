@@ -9,9 +9,11 @@ patches e.g. `engine.POOL_SIZE` or `style_engine.MODEL_PATH` keeps working.
 
 import os
 
-# Supabase (service role, used to write post-game analysis back to `games`).
+# Supabase secret key (bypasses RLS; used to write post-game analysis back to `games`).
+# Canonical name SUPABASE_SECRET_KEY (Supabase's new `sb_secret_...` key); the legacy
+# SUPABASE_SERVICE_KEY is still read so an existing deployment keeps working.
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY: str = os.environ.get("SUPABASE_SERVICE_KEY", "")
+SUPABASE_KEY: str = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 # Shared secret callers must send in the X-Engine-Key header (see auth.py).
 # Empty -> every endpoint except /health answers 503.

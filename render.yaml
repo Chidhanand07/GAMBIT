@@ -14,7 +14,8 @@ services:
         value: "/usr/bin/stockfish"
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_KEY
+      # Secret key (sb_secret_...). The legacy SUPABASE_SERVICE_KEY is still read as a fallback.
+      - key: SUPABASE_SECRET_KEY
         sync: false
       # Shared secret for X-Engine-Key; set the same value on Railway and Vercel.
       - key: ENGINE_SHARED_SECRET

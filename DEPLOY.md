@@ -31,10 +31,13 @@
    - Redirect URLs: add `https://your-app.vercel.app/auth/callback`
 
 ### 1d. Get Your Keys
-From **Settings → API**:
+From **Settings → API Keys**:
 - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_URL`
-- `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_SERVICE_KEY` (**never expose this client-side**)
+- **Publishable key** (`sb_publishable_…`) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- **Secret key** (`sb_secret_…`) → `SUPABASE_SECRET_KEY` on Vercel, Railway and Render (**never expose this client-side, never prefix it with `NEXT_PUBLIC_`**)
+
+The legacy `anon` / `service_role` keys are deprecated at the end of 2026. The old variable names are still read as fallbacks, so an existing deployment keeps working until you switch:
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` (frontend), `SUPABASE_SERVICE_ROLE_KEY` (frontend server code), `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (game server), `SUPABASE_SERVICE_KEY` (engine). When both a new and an old name are set, the new one wins.
 
 ---
 
@@ -73,7 +76,7 @@ apt-get install -y stockfish && pip install -r requirements.txt
 | Key | Value |
 |-----|-------|
 | `SUPABASE_URL` | your Supabase project URL |
-| `SUPABASE_SERVICE_KEY` | service role key |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`); legacy `SUPABASE_SERVICE_KEY` still read |
 | `STOCKFISH_PATH` | `/usr/bin/stockfish` |
 | `STOCKFISH_POOL_SIZE` | `2` (free tier) or `4` (paid) |
 | `ENGINE_SHARED_SECRET` | a long random string (`openssl rand -hex 32`). **Required**: until it is set every endpoint except `GET /health` answers 503. Use the same value on Railway and Vercel. |
@@ -99,7 +102,7 @@ Go to your service → **Variables** tab and add:
 | Key | Value |
 |-----|-------|
 | `SUPABASE_URL` | your Supabase project URL |
-| `SUPABASE_SERVICE_KEY` | service role key |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`); legacy `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` still read |
 | `REDIS_URL` | `rediss://...` from Upstash |
 | `FRONTEND_URL` | `https://your-app.vercel.app` (set after Vercel deploy) |
 | `GAMBIT_ENGINE_URL` | `https://gambit-engine.onrender.com` (canonical; the old `ENGINE_URL` is read as a deprecated fallback and logs a warning) |
@@ -128,8 +131,8 @@ Go to **Settings → Environment Variables** and add all of these for **Producti
 | Key | Value |
 |-----|-------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (`sb_publishable_…`); legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` still read |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (`sb_secret_…`), server-side only; legacy `SUPABASE_SERVICE_ROLE_KEY` still read |
 | `NEXT_PUBLIC_SOCKET_URL` | Railway server URL (e.g. `https://gambit-server.up.railway.app`) |
 | `GAMBIT_ENGINE_URL` | Render engine URL. Server-side only (used by `/api/maverick-move`); the old `ENGINE_URL` still works. |
 | `ENGINE_SHARED_SECRET` | the same value as on Render. Server-side only: **never** prefix with `NEXT_PUBLIC_`. Without it "play the computer" answers 503. |
@@ -178,7 +181,7 @@ Make sure `FRONTEND_URL` in Railway exactly matches your Vercel URL (with `https
 Render free tier spun down. Wait 30s for cold start, or upgrade to Starter plan.
 
 ### Profile not created after signup
-Check Supabase SQL Editor → `profiles` table. If empty after signup, verify `SUPABASE_SERVICE_ROLE_KEY` is set correctly in Vercel env vars.
+Check Supabase SQL Editor → `profiles` table. If empty after signup, verify `SUPABASE_SECRET_KEY` (or the legacy `SUPABASE_SERVICE_ROLE_KEY`) is set correctly in Vercel env vars.
 
 ### Redis connection errors in Railway logs
 Make sure `REDIS_URL` uses `rediss://` (TLS) not `redis://` for Upstash. Railway Redis add-on uses `redis://` (no TLS) — check which you're using.

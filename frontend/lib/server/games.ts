@@ -96,6 +96,19 @@ export function insertGame(admin: SupabaseClient, row: Record<string, unknown>) 
     return admin.from('games').insert(row).select().single();
 }
 
+/** Stores a game's invite (service-role only table; RLS on, no policies). */
+export function insertGameInvite(
+    admin: SupabaseClient,
+    invite: { game_id: string; token: string; expires_at: string },
+) {
+    return admin.from('game_invites').insert(invite);
+}
+
+/** Deletes a game by id (undoes a private game whose invite could not be stored). */
+export function deleteGame(admin: SupabaseClient, gameId: string) {
+    return admin.from('games').delete().eq('id', gameId);
+}
+
 /** One page of a player's finished games, newest first. */
 export function listFinishedGamesPage(admin: SupabaseClient, profileId: string, offset: number, limit: number) {
     return admin

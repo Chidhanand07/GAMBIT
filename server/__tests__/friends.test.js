@@ -14,18 +14,22 @@ const { START_FEN } = require('./helpers/fixtures');
 
 const HOUR = 3600 * 1000;
 
+/** A `games` row. It carries no invite columns: the token lives in `game_invites` [INV-TOKEN]. */
 function waitingGame(overrides = {}) {
     return {
         id: 'game-1',
         status: 'waiting',
         white_id: 'creator',
         black_id: null,
-        invite_token: 'tok',
-        invite_expires_at: new Date(Date.now() + HOUR).toISOString(),
         is_rated: true,
         time_control: '5+3',
         ...overrides,
     };
+}
+
+/** Queue the `game_invites` row the token lookup finds (default: valid for another hour). */
+function queueInvite(expiresAt = new Date(Date.now() + HOUR).toISOString()) {
+    supabase.queue('game_invites', { data: { game_id: 'game-1', expires_at: expiresAt }, error: null });
 }
 
 beforeEach(() => {
@@ -57,9 +61,19 @@ describe('createPrivateGame', () => {
     });
 
     test('creates a waiting game with a 10-char token that expires in 48h', async () => {
-        supabase.queue('games', (call) => ({ data: supabase.op(call, 'insert')[0], error: null }));
+        supabase.queue('games', (call) => ({ data: { id: 'g', ...supabase.op(call, 'insert')[0] }, error: null }));
         const before = Date.now();
         const game = await friendsService.createPrivateGame('u1', '3+2', 'white', false);
+
+        // The games row itself has no token columns; the invite is its own row [INV-TOKEN].
+        const inserted = supabase.op(supabase.callsFor('games')[0], 'insert')[0];
+        expect(inserted).not.toHaveProperty('invite_token');
+        expect(inserted).not.toHaveProperty('invite_expires_at');
+        expect(supabase.op(supabase.callsFor('game_invites')[0], 'insert')[0]).toEqual({
+            game_id: 'g',
+            token: game.invite_token,
+            expires_at: game.invite_expires_at,
+        });
 
         expect(game.status).toBe('waiting');
         expect(game.time_control).toBe('3+2');
@@ -86,38 +100,44 @@ describe('createPrivateGame', () => {
 });
 
 describe('getGameByToken', () => {
-    test('returns the game for a valid token', async () => {
+    test('returns the game for a valid token: token → game_invites → games by id [INV-TOKEN]', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame(), error: null });
         await expect(friendsService.getGameByToken('tok')).resolves.toMatchObject({ id: 'game-1' });
-        const call = supabase.callsFor('games')[0];
-        expect(supabase.op(call, 'eq')).toEqual(['invite_token', 'tok']);
+        // The token is looked up in game_invites; games is only ever read by id.
+        expect(supabase.op(supabase.callsFor('game_invites')[0], 'eq')).toEqual(['token', 'tok']);
+        expect(supabase.op(supabase.callsFor('games')[0], 'eq')).toEqual(['id', 'game-1']);
     });
 
     test('returns null for an unknown token', async () => {
-        supabase.queue('games', { data: null, error: null });
         await expect(friendsService.getGameByToken('nope')).resolves.toBeNull();
+        expect(supabase.callsFor('games')).toHaveLength(0);
     });
 
     test('returns null on a database error', async () => {
+        supabase.queue('game_invites', { data: null, error: { message: 'boom' } });
+        await expect(friendsService.getGameByToken('tok')).resolves.toBeNull();
+        queueInvite();
         supabase.queue('games', { data: null, error: { message: 'boom' } });
         await expect(friendsService.getGameByToken('tok')).resolves.toBeNull();
     });
 
     test('accepts a token expired by less than the 5-minute grace period', async () => {
-        const expires = new Date(Date.now() - 4 * 60 * 1000).toISOString();
-        supabase.queue('games', { data: waitingGame({ invite_expires_at: expires }), error: null });
+        queueInvite(new Date(Date.now() - 4 * 60 * 1000).toISOString());
+        supabase.queue('games', { data: waitingGame(), error: null });
         await expect(friendsService.getGameByToken('tok')).resolves.not.toBeNull();
     });
 
     test('rejects a token expired by more than the grace period', async () => {
-        const expires = new Date(Date.now() - 6 * 60 * 1000).toISOString();
-        supabase.queue('games', { data: waitingGame({ invite_expires_at: expires }), error: null });
+        queueInvite(new Date(Date.now() - 6 * 60 * 1000).toISOString());
+        supabase.queue('games', { data: waitingGame(), error: null });
         await expect(friendsService.getGameByToken('tok')).resolves.toBeNull();
     });
 });
 
 describe('joinPrivateGame', () => {
     test('second player takes the empty seat and the game starts', async () => {
+        queueInvite();
         supabase.queue('games',
             { data: waitingGame(), error: null },
             (call) => ({ data: { ...waitingGame(), ...supabase.op(call, 'update')[0] }, error: null }),
@@ -132,6 +152,7 @@ describe('joinPrivateGame', () => {
     });
 
     test('joiner takes white when the creator chose black', async () => {
+        queueInvite();
         supabase.queue('games',
             { data: waitingGame({ white_id: null, black_id: 'creator' }), error: null },
             (call) => ({ data: { ...waitingGame(), ...supabase.op(call, 'update')[0] }, error: null }),
@@ -141,6 +162,7 @@ describe('joinPrivateGame', () => {
     });
 
     test('writes the initial game state to Redis with clocks and increment', async () => {
+        queueInvite();
         supabase.queue('games',
             { data: waitingGame(), error: null },
             (call) => ({ data: { ...waitingGame(), ...supabase.op(call, 'update')[0] }, error: null }),
@@ -164,6 +186,7 @@ describe('joinPrivateGame', () => {
     });
 
     test('creator re-opening their own link gets the game back without joining', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame(), error: null });
         const game = await friendsService.joinPrivateGame('tok', 'creator');
         expect(game.white_id).toBe('creator');
@@ -171,22 +194,24 @@ describe('joinPrivateGame', () => {
     });
 
     test('rejects an invalid or expired token', async () => {
-        supabase.queue('games', { data: null, error: null });
         await expect(friendsService.joinPrivateGame('bad', 'u')).rejects.toThrow('Invalid or expired token');
     });
 
     test('rejects a game that has already started', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame({ status: 'active', black_id: 'x' }), error: null });
         await expect(friendsService.joinPrivateGame('tok', 'u')).rejects.toThrow('Game already started');
     });
 
     test('loses the race cleanly when someone else joined first', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame(), error: null }, { data: null, error: null });
         await expect(friendsService.joinPrivateGame('tok', 'late')).rejects.toThrow('Game already started or not found');
         expect(await getGame('game-1')).toBeNull();
     });
 
     test('propagates a database error from the join update', async () => {
+        queueInvite();
         supabase.queue('games', { data: waitingGame(), error: null }, { data: null, error: new Error('update failed') });
         await expect(friendsService.joinPrivateGame('tok', 'u')).rejects.toThrow('update failed');
     });

@@ -74,7 +74,7 @@ Where things live:
 ### Step 2: Deploy Chess Engine to Render
 1. Connect your repo in Render and choose **New Web Service**.
 2. Render will automatically detect the `render.yaml` configuration in the `chess-engine` folder and set up the Python container.
-3. Add the `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` and `ENGINE_SHARED_SECRET` environment variables in Render. `ENGINE_SHARED_SECRET` is a long random string (`openssl rand -hex 32`); every engine endpoint except `/health` refuses callers that do not send it in `X-Engine-Key`.
+3. Add the `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (Supabase secret key, `sb_secret_…`; the legacy `SUPABASE_SERVICE_KEY` is still read) and `ENGINE_SHARED_SECRET` environment variables in Render. `ENGINE_SHARED_SECRET` is a long random string (`openssl rand -hex 32`); every engine endpoint except `/health` refuses callers that do not send it in `X-Engine-Key`.
 4. Note your Render URL (e.g. `https://gambit-engine.onrender.com`).
 
 ### Step 3: Deploy Backend Server to Railway
@@ -83,7 +83,7 @@ Where things live:
 3. Set the following variables in Railway:
    - `PORT=3000` (or leave default, Railway assigns dynamically)
    - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_KEY`
+   - `SUPABASE_SECRET_KEY` (Supabase secret key; legacy `SUPABASE_SERVICE_KEY` still read)
    - `GAMBIT_ENGINE_URL` (points to the Render URL from Step 2)
    - `ENGINE_SHARED_SECRET` (the same value as on Render)
    - `FRONTEND_URL` (Wait until Vercel is deployed, then add it here for CORS)
@@ -94,7 +94,8 @@ Where things live:
 2. Important: Set the `Root Directory` in Vercel settings to `frontend/`.
 3. Add these variables in Vercel:
    - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (Supabase publishable key; the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still read)
+   - `SUPABASE_SECRET_KEY` (Supabase secret key, server-side only, no `NEXT_PUBLIC_` prefix; the legacy `SUPABASE_SERVICE_ROLE_KEY` is still read)
    - `NEXT_PUBLIC_SOCKET_URL` (points to the Railway URL from Step 3)
    - `GAMBIT_ENGINE_URL` and `ENGINE_SHARED_SECRET` (server-side only, no `NEXT_PUBLIC_` prefix; same secret as on Render)
 4. Deploy.

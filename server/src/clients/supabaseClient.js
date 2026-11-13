@@ -12,7 +12,7 @@ const PLACEHOLDER_KEY = 'placeholder';
 /**
  * @param {object} settings
  * @param {string | undefined} settings.url Supabase project URL.
- * @param {string | undefined} settings.key service-role key.
+ * @param {string | undefined} settings.key secret key (`sb_secret_…`, or the legacy service_role JWT).
  * @param {string} settings.keySource name of the env variable the key came from (logged when a key is set).
  * @returns {import('@supabase/supabase-js').SupabaseClient}
  */
@@ -25,7 +25,7 @@ function createSupabaseClient({ url, key, keySource }) {
 
     if (!key) {
         console.error(
-            '[supabase] FATAL: Neither SUPABASE_SERVICE_KEY nor SUPABASE_SERVICE_ROLE_KEY is set. All DB writes will fail (RLS will block them).',
+            '[supabase] FATAL: SUPABASE_SECRET_KEY is not set (nor the legacy SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY). All DB writes will fail (RLS will block them).',
         );
     } else {
         console.log(`[supabase] Using service key from ${keySource}`);

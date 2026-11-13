@@ -30,7 +30,8 @@ Gambit relies heavily on Supabase for data, real-time sync, and authentication.
    - Ensure "Realtime" is toggled **ON** for these tables: `games`, `moves`, `messages`, `notifications`, `profiles`.
 4. **Gather Credentials:**
    - Go to **Project Settings** -> **API**.
-   - Copy your **Project URL** (`SUPABASE_URL`), **anon public key** (`SUPABASE_ANON_KEY`), and **service_role secret key** (`SUPABASE_SERVICE_KEY`). Keep these safe.
+   - Go to **Project Settings** -> **API Keys** and copy your **Project URL** (`SUPABASE_URL`), **publishable key** (`sb_publishable_…`) and **secret key** (`sb_secret_…`). Keep the secret key safe.
+   - The legacy `anon` / `service_role` keys still work until Supabase retires them (end of 2026); the old variable names are read as fallbacks.
 
 ---
 
@@ -46,13 +47,13 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
 2. Add the following keys:
    ```env
    NEXT_PUBLIC_SUPABASE_URL="<your_supabase_url>"
-   NEXT_PUBLIC_SUPABASE_ANON_KEY="<your_supabase_anon_key>"
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="<your_supabase_publishable_key>"
    NEXT_PUBLIC_SOCKET_URL="http://localhost:3001"
-   SUPABASE_SERVICE_ROLE_KEY="<your_supabase_service_role_key>"
+   SUPABASE_SECRET_KEY="<your_supabase_secret_key>"
    GAMBIT_ENGINE_URL="http://127.0.0.1:8001"
    ENGINE_SHARED_SECRET="<any long random string; the same in all three services>"
    ```
-   > **Note:** `SUPABASE_SERVICE_ROLE_KEY` has no `NEXT_PUBLIC_` prefix — it is only used in Server Actions and is never exposed to the browser. This key is required for the signup flow to create user profiles.
+   > **Note:** `SUPABASE_SECRET_KEY` has no `NEXT_PUBLIC_` prefix — it is only used in Server Actions and is never exposed to the browser. This key is required for the signup flow to create user profiles.
 
 ### C. Node Server (`Gambit/server/`)
 1. Create a file named `.env` inside `Gambit/server/`.
@@ -60,7 +61,7 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
    ```env
    PORT=3001
    SUPABASE_URL="<your_supabase_url>"
-   SUPABASE_SERVICE_KEY="<your_supabase_service_key>"
+   SUPABASE_SECRET_KEY="<your_supabase_secret_key>"
    GAMBIT_ENGINE_URL="http://127.0.0.1:8001"
    ENGINE_SHARED_SECRET="<the same value as in frontend/.env.local>"
    FRONTEND_URL="http://localhost:3000"
@@ -72,7 +73,7 @@ The platform uses a unified `.env.example` to ease configuration. You need to di
    ```env
    PORT=8001
    SUPABASE_URL="<your_supabase_url>"
-   SUPABASE_SERVICE_KEY="<your_supabase_service_key>"
+   SUPABASE_SECRET_KEY="<your_supabase_secret_key>"
    ENGINE_SHARED_SECRET="<the same value as in frontend/.env.local and server/.env>"
    ```
    > **Note:** `ENGINE_SHARED_SECRET` is required. Until it is set, every engine endpoint except `GET /health` answers 503, and callers that do not send the same value in the `X-Engine-Key` header get 401.

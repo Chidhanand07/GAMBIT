@@ -3,6 +3,8 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { cookies } from 'next/headers';
 import type { NextRequest, NextResponse } from 'next/server';
+import { supabasePublicKey } from '@/lib/supabase/publicEnv';
+import { supabaseSecretKey } from './env';
 
 /** The `cookies()` store of the current request (next/headers). */
 export type RequestCookieStore = ReturnType<typeof cookies>;
@@ -21,25 +23,30 @@ const noSessionPersistence = () => ({ autoRefreshToken: false, persistSession: f
 export const SESSION_COOKIE_ENCODING = 'raw' as const;
 
 /**
- * Service-role Supabase client (bypasses RLS). Created per call, reading the env at call time.
+ * Secret-key (service-role) Supabase client: bypasses RLS. Created per call, reading the env at call time.
  * Only call it after `requireUser()` has returned a verified user (or from a route that is
  * public on purpose), and scope every query to that user (SEC-01, NX-08).
  */
 export function createAdminClient(): SupabaseClient {
-    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    const secretKey = supabaseSecretKey();
+    // Without the key, supabase-js would build a client that fails later and less clearly.
+    if (!secretKey) {
+        throw new Error('SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) is not set');
+    }
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, secretKey, {
         auth: noSessionPersistence(),
     });
 }
 
 /**
- * Anon-key @supabase/ssr client bound to the request's session cookies. Used only to ask
+ * Public-key (publishable / legacy anon) @supabase/ssr client bound to the request's session cookies. Used only to ask
  * Supabase Auth who the caller is (`auth.getUser()`); it is never used to bypass RLS.
  *
  * `setAll` writes a refreshed session back. That works in Route Handlers; in a Server
  * Component the store is read-only and the write is skipped (the browser client refreshes).
  */
 export function createSessionClient(cookieStore: RequestCookieStore) {
-    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabasePublicKey()!, {
         cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
             getAll: () => cookieStore.getAll(),
@@ -61,7 +68,7 @@ export function createSessionClient(cookieStore: RequestCookieStore) {
  * request cookies and writes every session cookie Supabase sets (or clears) onto `response`.
  */
 export function createResponseCookieClient(request: NextRequest, response: NextResponse) {
-    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabasePublicKey()!, {
         cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
             getAll: () => request.cookies.getAll(),
