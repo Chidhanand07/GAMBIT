@@ -101,6 +101,18 @@ describe('landing page', () => {
     })
 })
 
+describe('landing demo board timers (F17)', () => {
+    test('one reset is scheduled after the last move, and unmount clears every timer', () => {
+        jest.useFakeTimers()
+        const { unmount } = render(<Home />)
+        act(() => { jest.advanceTimersByTime(900 * 8) }) // all 8 demo moves played
+        act(() => { jest.advanceTimersByTime(900 * 2) }) // two idle ticks while the reset is pending
+        expect(jest.getTimerCount()).toBe(2) // the move interval + exactly one reset timeout
+        unmount()
+        expect(jest.getTimerCount()).toBe(0)
+    })
+})
+
 describe('settings page', () => {
     const ME = {
         id: 'u-1', username: 'me1', display_name: 'Me', bio: 'hi', country: 'India', avatar_url: null,
@@ -125,6 +137,25 @@ describe('settings page', () => {
         rerender(<SettingsPage />)
         expect(container.innerHTML).toBe('')
         expect(push.mock.calls).toEqual([['/login']])
+    })
+
+    test('F17: the signed-out redirect runs once, from an effect, not on every render', () => {
+        profileState = { profile: null, loading: false, refetch: jest.fn() }
+        const { rerender } = render(<SettingsPage />)
+        rerender(<SettingsPage />)
+        rerender(<SettingsPage />)
+        expect(push.mock.calls).toEqual([['/login']])
+    })
+
+    test('a refetch of the same profile keeps unsaved edits; a different profile prefills again', () => {
+        const { rerender } = render(<SettingsPage />)
+        fireEvent.change(screen.getByDisplayValue('Me'), { target: { value: 'Edited' } })
+        profileState = { ...profileState, profile: { ...ME, display_name: 'Server copy' } }
+        rerender(<SettingsPage />)
+        expect(screen.getByDisplayValue('Edited')).toBeInTheDocument()
+        profileState = { ...profileState, profile: { ...ME, id: 'u-2', display_name: 'Other' } }
+        rerender(<SettingsPage />)
+        expect(screen.getByDisplayValue('Other')).toBeInTheDocument()
     })
 
     test('form is prefilled from the profile and saves trimmed values with PATCH', async () => {

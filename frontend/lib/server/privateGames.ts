@@ -6,12 +6,25 @@ const INVITE_TTL_HOURS = 48;
 /** Above this `Math.random()` value a random-colour creator plays white. */
 const RANDOM_WHITE_THRESHOLD = 0.5;
 
-/** Random URL-safe invite token (crypto.getRandomValues, modulo the 62-char alphabet). */
+/**
+ * Largest multiple of the alphabet size that fits in a byte (62 × 4 = 248). A byte at or above
+ * it is redrawn: `byte % 62` over all 256 values would make the first 8 characters 25 % more
+ * likely than the rest (F18).
+ */
+const BYTE_VALUES = 256;
+const UNBIASED_BYTE_LIMIT = Math.floor(BYTE_VALUES / INVITE_TOKEN_ALPHABET.length) * INVITE_TOKEN_ALPHABET.length;
+
+/** Random URL-safe invite token: crypto.getRandomValues with rejection sampling (uniform). */
 function generateInviteToken(len: number): string {
     let result = '';
     const bytes = new Uint8Array(len);
-    crypto.getRandomValues(bytes);
-    for (const b of bytes) result += INVITE_TOKEN_ALPHABET[b % INVITE_TOKEN_ALPHABET.length];
+    while (result.length < len) {
+        crypto.getRandomValues(bytes);
+        for (const b of bytes) {
+            if (b < UNBIASED_BYTE_LIMIT && result.length < len)
+                result += INVITE_TOKEN_ALPHABET[b % INVITE_TOKEN_ALPHABET.length];
+        }
+    }
     return result;
 }
 

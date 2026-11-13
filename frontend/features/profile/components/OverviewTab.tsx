@@ -4,22 +4,35 @@ import type { ProfileRecord } from '../format';
 import { RATING_ICONS } from './ratingIcons';
 import { RecentGamesList } from './RecentGamesList';
 
-type RatingProfile = Pick<Profile, 'rating_bullet' | 'rating_blitz' | 'rating_rapid' | 'rating_classical'>;
+type RatingField = 'rating_bullet' | 'rating_blitz' | 'rating_rapid' | 'rating_classical';
+type PeakField = 'peak_bullet' | 'peak_blitz' | 'peak_rapid' | 'peak_classical';
+type RatingProfile = Pick<Profile, RatingField | PeakField>;
 
-const RATING_CARDS: { id: SpeedBucket; label: string; field: keyof RatingProfile }[] = [
-    { id: 'bullet', label: 'Bullet', field: 'rating_bullet' },
-    { id: 'blitz', label: 'Blitz', field: 'rating_blitz' },
-    { id: 'rapid', label: 'Rapid', field: 'rating_rapid' },
-    { id: 'classical', label: 'Classical', field: 'rating_classical' },
+const RATING_CARDS: { id: SpeedBucket; label: string; field: RatingField; peakField: PeakField }[] = [
+    { id: 'bullet', label: 'Bullet', field: 'rating_bullet', peakField: 'peak_bullet' },
+    { id: 'blitz', label: 'Blitz', field: 'rating_blitz', peakField: 'peak_blitz' },
+    { id: 'rapid', label: 'Rapid', field: 'rating_rapid', peakField: 'peak_rapid' },
+    { id: 'classical', label: 'Classical', field: 'rating_classical', peakField: 'peak_classical' },
 ];
+
+const isRating = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+
+/**
+ * Highest rating reached in a category: the stored peak, never below the current rating
+ * (a peak column can lag one game behind). Null when the profile has no peak (F12).
+ */
+export function peakRating(rating: number | null | undefined, peak: number | null | undefined): number | null {
+    if (!isRating(peak)) return null;
+    return Math.round(isRating(rating) ? Math.max(peak, rating) : peak);
+}
 
 function RatingCards({ profile }: { profile: RatingProfile }) {
     return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {RATING_CARDS.map((tc) => {
                 const rating = profile[tc.field];
-                // LEGACY: "Peak" shows the current rating; peak_* columns are ignored.
                 const shown = rating ? Math.round(rating) : '—';
+                const peak = peakRating(rating, profile[tc.peakField]);
                 return (
                     <div
                         key={tc.id}
@@ -39,9 +52,11 @@ function RatingCards({ profile }: { profile: RatingProfile }) {
                         >
                             {shown}
                         </div>
-                        <div className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
-                            Peak {shown}
-                        </div>
+                        {peak !== null && (
+                            <div className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
+                                Peak {peak}
+                            </div>
+                        )}
                     </div>
                 );
             })}

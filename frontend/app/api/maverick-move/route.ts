@@ -23,6 +23,24 @@ const pickDifficulty = (requested: string | undefined) =>
 /** `e?.message ?? String(e)` of whatever the failed fetch threw. */
 const errorDetail = (e: unknown) => (e as { message?: string } | null | undefined)?.message ?? String(e);
 
+/** A Retry-After the engine sent, when it is plain delay-seconds (anything else is dropped). */
+const RETRY_AFTER_SECONDS = /^\d{1,4}$/;
+
+/**
+ * The engine's error, relayed: 400 stays 400; 503 (pool saturated, "Engine busy") stays 503
+ * with the engine's Retry-After so the client can back off; anything else is a 502.
+ */
+async function engineErrorResponse(res: Response): Promise<NextResponse> {
+    const detail = await res.text().catch(() => '');
+    if (res.status === HTTP_SERVICE_UNAVAILABLE) {
+        const retryAfter = res.headers.get('Retry-After');
+        const headers = retryAfter && RETRY_AFTER_SECONDS.test(retryAfter) ? { 'Retry-After': retryAfter } : undefined;
+        return NextResponse.json({ error: 'Engine busy', detail }, { status: HTTP_SERVICE_UNAVAILABLE, headers });
+    }
+    const status = res.status === HTTP_BAD_REQUEST ? HTTP_BAD_REQUEST : HTTP_BAD_GATEWAY;
+    return NextResponse.json({ error: 'Engine error', detail }, { status });
+}
+
 export async function POST(req: Request) {
     // Per client IP, before anything reaches the engine (RATE-LIMITS).
     const limited = await enforceRateLimit(clientIp(req.headers), RATE_LIMITS.maverickMove);
@@ -48,13 +66,7 @@ export async function POST(req: Request) {
             console.error('[maverick-move] ENGINE_SHARED_SECRET is not set; the engine cannot be called');
             return NextResponse.json({ error: 'Engine not configured' }, { status: HTTP_SERVICE_UNAVAILABLE });
         }
-        if (!res.ok) {
-            const detail = await res.text().catch(() => '');
-            return NextResponse.json(
-                { error: 'Engine error', detail },
-                { status: res.status === HTTP_BAD_REQUEST ? HTTP_BAD_REQUEST : HTTP_BAD_GATEWAY },
-            );
-        }
+        if (!res.ok) return engineErrorResponse(res);
         const data = await res.json();
         return NextResponse.json(data);
     } catch (e: unknown) {

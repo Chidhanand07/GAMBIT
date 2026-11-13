@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { Bell } from 'lucide-react';
 import { hoverStyles } from '../hover';
+import type { NotificationError } from '../hooks/useNotifications';
 import type { NavNotification } from '../types';
 
 const MAX_SHOWN = 8;
@@ -10,7 +11,18 @@ const bellHover = hoverStyles(
     { color: 'var(--text-secondary)', background: '' },
 );
 
-function NotificationList({ notifications, loading }: { notifications: NavNotification[]; loading: boolean }) {
+const ERROR_TEXT: Record<Exclude<NotificationError, null>, string> = {
+    load: 'Could not load notifications.',
+    'mark-read': 'Could not mark notifications read. Try again.',
+};
+
+interface NotificationListProps {
+    notifications: NavNotification[];
+    loading: boolean;
+    loadFailed: boolean;
+}
+
+function NotificationList({ notifications, loading, loadFailed }: NotificationListProps) {
     if (loading)
         return (
             <div className="p-4 flex justify-center">
@@ -18,6 +30,12 @@ function NotificationList({ notifications, loading }: { notifications: NavNotifi
                     className="w-5 h-5 border-2 border-t-accent rounded-full animate-spin"
                     style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }}
                 />
+            </div>
+        );
+    if (loadFailed && notifications.length === 0)
+        return (
+            <div role="alert" className="p-4 text-center text-sm" style={{ color: 'var(--red)' }}>
+                {ERROR_TEXT.load}
             </div>
         );
     if (notifications.length === 0)
@@ -47,12 +65,13 @@ interface NotificationBellProps {
     onToggle: () => void;
     notifications: NavNotification[];
     loading: boolean;
+    error: NotificationError;
     hasUnread: boolean;
     onMarkAllRead: () => void;
 }
 
 export function NotificationBell(props: NotificationBellProps) {
-    const { panelRef, isOpen, onToggle, notifications, loading, hasUnread, onMarkAllRead } = props;
+    const { panelRef, isOpen, onToggle, notifications, loading, error, hasUnread, onMarkAllRead } = props;
     return (
         <div className="relative" ref={panelRef}>
             <button
@@ -94,8 +113,17 @@ export function NotificationBell(props: NotificationBellProps) {
                             </button>
                         )}
                     </div>
+                    {error === 'mark-read' && (
+                        <div role="alert" className="px-4 py-2 text-xs" style={{ color: 'var(--red)' }}>
+                            {ERROR_TEXT['mark-read']}
+                        </div>
+                    )}
                     <div className="max-h-72 overflow-y-auto divide-y" style={{ borderColor: 'var(--border)' }}>
-                        <NotificationList notifications={notifications} loading={loading} />
+                        <NotificationList
+                            notifications={notifications}
+                            loading={loading}
+                            loadFailed={error === 'load'}
+                        />
                     </div>
                 </div>
             )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { SettingsProfile } from '../types';
 
@@ -34,22 +34,25 @@ async function uploadAvatarFile(
     return { publicUrl };
 }
 
-/** Editable fields, prefilled when a (different) profile loads. */
+/**
+ * Editable fields, prefilled when a (different) profile loads. Keyed on the profile id, so a
+ * refetch of the same profile does not wipe unsaved edits. The prefill is a state adjustment
+ * during render (React's pattern for "reset state when a prop changes"), not an effect.
+ */
 function useProfileFields(profile: SettingsProfile | null) {
     const [displayName, setDisplayName] = useState('');
     const [bio, setBio] = useState('');
     const [country, setCountry] = useState('');
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+    const [prefilledFor, setPrefilledFor] = useState<string | undefined>(undefined);
 
-    useEffect(() => {
-        if (profile) {
-            setDisplayName(profile.display_name || '');
-            setBio(profile.bio || '');
-            setCountry(profile.country || '');
-            setAvatarUrl(profile.avatar_url || null);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: prefill only when a different user loads, so refetches do not wipe unsaved edits
-    }, [profile?.id]);
+    if (profile && profile.id !== prefilledFor) {
+        setPrefilledFor(profile.id);
+        setDisplayName(profile.display_name || '');
+        setBio(profile.bio || '');
+        setCountry(profile.country || '');
+        setAvatarUrl(profile.avatar_url || null);
+    }
 
     return { displayName, setDisplayName, bio, setBio, country, setCountry, avatarUrl, setAvatarUrl };
 }

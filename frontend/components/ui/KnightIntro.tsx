@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PHASE, initParticles, type Point } from '@/features/knight/introParticles';
 import { sampleKnightPerimeter } from '@/features/knight/introSampling';
 import { clearToBackground, drawPhase1to4, drawPhase5to7, type IntroScene } from '@/features/knight/introDraw';
@@ -35,22 +35,34 @@ function fitCanvas(canvas: HTMLCanvasElement, dpr: number) {
 
 export default function KnightIntro({ onComplete }: { onComplete: () => void }) {
   const { prefersReduced, isLowPerf } = shouldSkipIntro();
-
-  useEffect(() => {
-    if (prefersReduced || isLowPerf) {
-      onComplete();
-    }
-  }, [prefersReduced, isLowPerf, onComplete]);
+  const skipAnimation = prefersReduced || isLowPerf;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<(IntroScene & { rafId: number; startTime: number }) | null>(null);
   const perimeterRef = useRef<Point[]>([]);
+  const doneRef = useRef(false);
   const [overlayAlpha, setOverlayAlpha] = useState(0);
   const [introOpacity, setIntroOpacity] = useState(1);
 
+  // The one way the intro ends (timeline end, Skip, reduced motion): stop the frame loop
+  // and report completion exactly once (F17: Skip used to leave the loop running).
+  const finish = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onComplete();
+  }, [onComplete]);
+  const skip = useCallback(() => {
+    if (stateRef.current) cancelAnimationFrame(stateRef.current.rafId);
+    finish();
+  }, [finish]);
+
+  useEffect(() => {
+    if (skipAnimation) skip();
+  }, [skipAnimation, skip]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || doneRef.current) return;
     const dpr = window.devicePixelRatio || 1;
     let mounted = true;
 
@@ -71,7 +83,7 @@ export default function KnightIntro({ onComplete }: { onComplete: () => void }) 
     };
 
     const loop = () => {
-      if (!mounted || !stateRef.current) return;
+      if (!mounted || doneRef.current || !stateRef.current) return;
       const t = (performance.now() - stateRef.current.startTime) / MS_PER_SECOND;
 
       if (t < PHASE.SOLIDIFY_END) {
@@ -84,7 +96,7 @@ export default function KnightIntro({ onComplete }: { onComplete: () => void }) 
       applyIntroFade(t, setOverlayAlpha, setIntroOpacity);
 
       if (t >= PHASE.SETTLE_END) {
-        if (mounted) onComplete();
+        finish();
         return;
       }
 
@@ -98,7 +110,7 @@ export default function KnightIntro({ onComplete }: { onComplete: () => void }) 
       window.removeEventListener('resize', resize);
       if (stateRef.current) cancelAnimationFrame(stateRef.current.rafId);
     };
-  }, [onComplete]);
+  }, [finish]);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, opacity: introOpacity }}>
@@ -106,7 +118,7 @@ export default function KnightIntro({ onComplete }: { onComplete: () => void }) 
         ref={canvasRef}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       />
-      <IntroOverlay overlayAlpha={overlayAlpha} onSkip={onComplete} />
+      <IntroOverlay overlayAlpha={overlayAlpha} onSkip={skip} />
     </div>
   );
 }

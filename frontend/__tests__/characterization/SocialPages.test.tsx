@@ -232,6 +232,16 @@ describe('join/[token]', () => {
         expect(push.mock.calls).toEqual([['/login?redirect=/join/tok_FAKE_0001']])
     })
 
+    test('F17: without a session the button is not left on "Joining..."', async () => {
+        session = null
+        routes(GAME, { id: 'guest' })
+        await renderJoin()
+        fireEvent.click(screen.getByRole('button', { name: /Accept & Play/ }))
+        await flush()
+        expect(screen.queryByText(/Joining/)).toBeNull()
+        expect(screen.getByRole('button', { name: /Accept & Play/ })).not.toBeDisabled()
+    })
+
     test('creator joins the room (identity comes from the socket handshake) and follows game_start', async () => {
         routes({ ...GAME, white_id: null, black_id: 'creator', white: null, black: { username: 'carl' }, time_control: '1' }, { id: 'creator' })
         await renderJoin()

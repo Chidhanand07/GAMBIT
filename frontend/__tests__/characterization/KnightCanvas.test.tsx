@@ -142,15 +142,27 @@ describe('KnightIntro', () => {
         expect(rafQueue.size).toBe(0)
     })
 
+    test('F17: Skip stops the frame loop at once, and onComplete never fires a second time', () => {
+        const onComplete = jest.fn()
+        render(<KnightIntro onComplete={onComplete} />)
+        frame(16)
+        fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+        expect(rafQueue.size).toBe(0)
+        for (let t = 0; t <= 18000; t += 250) frame(250)
+        expect(onComplete).toHaveBeenCalledTimes(1)
+    })
+
+    // F17 (was: '... completes immediately (and still starts the canvas)', rafQueue.size 1):
+    // a completed intro runs no frame loop.
     test.each([
         ['reduced motion', () => { (window as any).matchMedia = jest.fn(() => ({ matches: true })) }],
         ['low-end CPU', () => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }) }],
-    ])('%s completes immediately (and still starts the canvas)', (_name, setup) => {
+    ])('%s completes immediately and starts no frame loop', (_name, setup) => {
         setup()
         const onComplete = jest.fn()
         render(<KnightIntro onComplete={onComplete} />)
         expect(onComplete).toHaveBeenCalledTimes(1)
-        expect(rafQueue.size).toBe(1)
+        expect(rafQueue.size).toBe(0)
     })
 })
 

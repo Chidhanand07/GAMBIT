@@ -67,3 +67,22 @@ describe('registerAndSignIn logs nothing [S14]', () => {
         expect(appConsoleCalls()).toEqual([])
     })
 })
+
+describe('after a signed-in sign-up (F-024 full reload, lint-clean)', () => {
+    test('navigates once, with a full page load, to the absolute /lobby URL on this origin', async () => {
+        signInWithPassword.mockResolvedValue({
+            data: { user: { email: INPUT.email }, session: { expires_at: SESSION_EXPIRY } },
+            error: null,
+        })
+        const navigate = jest.fn()
+        expect(await registerAndSignIn(INPUT, navigate)).toBeNull()
+        expect(navigate.mock.calls).toEqual([[`${window.location.origin}/lobby`]])
+    })
+
+    test('no navigation when the flow stops early', async () => {
+        signInWithPassword.mockResolvedValue({ data: { user: null, session: null }, error: { message: 'nope' } })
+        const navigate = jest.fn()
+        await registerAndSignIn(INPUT, navigate)
+        expect(navigate).not.toHaveBeenCalled()
+    })
+})

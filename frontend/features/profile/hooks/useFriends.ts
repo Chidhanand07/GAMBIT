@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-import { fetchFriendsOf, fetchPendingFriendRequests, respondToFriendRequest } from '@/lib/api/profile';
+import {
+    fetchFriendsOf,
+    fetchPendingFriendRequests,
+    respondToFriendRequest,
+    type TypedResponse,
+} from '@/lib/api/profile';
 import type { Friend, PendingFriendRequest } from '@/types/friendship';
 import type { Profile } from '@/types/profile';
 import type { ProfileTab } from '../types';
@@ -12,6 +17,23 @@ interface FriendsArgs {
 
 export type FriendRequestAction = 'accept' | 'decline';
 
+/** Loads one list with its loading flag; a failed request (status or network) is an empty list. */
+async function loadList<T>(
+    request: () => Promise<TypedResponse<T[]>>,
+    setList: (list: T[]) => void,
+    setLoading: (loading: boolean) => void,
+): Promise<void> {
+    setLoading(true);
+    try {
+        const res = await request();
+        setList(res.ok ? await res.json() : []);
+    } catch {
+        setList([]);
+    } finally {
+        setLoading(false);
+    }
+}
+
 /**
  * Friends tab data: the profile's friends (loaded on every visit to the tab)
  * and, on the viewer's own profile, incoming requests with accept/decline.
@@ -23,40 +45,32 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
     const [pendingRequests, setPendingRequests] = useState<PendingFriendRequest[]>([]);
     const [pendingLoading, setPendingLoading] = useState(false);
     const [friendSearch, setFriendSearch] = useState('');
+    const [respondError, setRespondError] = useState<string | null>(null);
 
-    // Keyed on profile?.id rather than the profile object (legacy dependency list, kept on purpose).
+    const profileId = profile?.id;
+
+    // Keyed on the profile id rather than the profile object, so a refetch does not reload.
     useEffect(() => {
-        if (activeTab !== 'friends' || !profile) return;
+        if (activeTab !== 'friends' || !profileId) return;
         const loadFriends = async () => {
-            setFriendsLoading(true);
-            try {
-                // Pass userId so public profiles can also show friends
-                const res = await fetchFriendsOf(profile.id);
-                setFriends(res.ok ? await res.json() : []);
-            } catch {
-                setFriends([]);
-            } finally {
-                setFriendsLoading(false);
-            }
-
-            if (isOwnProfile) {
-                setPendingLoading(true);
-                try {
-                    const res = await fetchPendingFriendRequests();
-                    setPendingRequests(res.ok ? await res.json() : []);
-                } catch {
-                    setPendingRequests([]);
-                } finally {
-                    setPendingLoading(false);
-                }
-            }
+            // Pass userId so public profiles can also show friends
+            await loadList(() => fetchFriendsOf(profileId), setFriends, setFriendsLoading);
+            if (isOwnProfile) await loadList(fetchPendingFriendRequests, setPendingRequests, setPendingLoading);
         };
         void loadFriends();
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: legacy deps [activeTab, profile?.id, isOwnProfile]
-    }, [activeTab, profile?.id, isOwnProfile]);
+    }, [activeTab, profileId, isOwnProfile]);
 
     const respondToRequest = async (friendshipId: string, action: FriendRequestAction) => {
-        await respondToFriendRequest(friendshipId, action);
+        setRespondError(null);
+        const ok = await respondToFriendRequest(friendshipId, action).then(
+            (res) => res.ok,
+            () => false,
+        );
+        if (!ok) {
+            // The request is still pending on the server: keep it on screen so it can be retried (F12).
+            setRespondError(`Could not ${action} the request. Try again.`);
+            return;
+        }
         setPendingRequests((prev) => prev.filter((r) => r.id !== friendshipId));
         if (action === 'accept') {
             const requester = pendingRequests.find((r) => r.id === friendshipId)?.requester;
@@ -72,5 +86,6 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
         friendSearch,
         setFriendSearch,
         respondToRequest,
+        respondError,
     };
 }

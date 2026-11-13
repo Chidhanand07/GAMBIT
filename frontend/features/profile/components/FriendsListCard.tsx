@@ -2,6 +2,10 @@ import Link from 'next/link';
 import { Swords } from 'lucide-react';
 import type { Friend } from '@/types/friendship';
 import { AvatarImg } from './AvatarImg';
+import { challengeHref, profileHref } from '../links';
+
+/** The friend avatar box is w-10. */
+const FRIEND_AVATAR_PX = 40;
 
 const DEFAULT_RATING = 1200;
 
@@ -18,14 +22,14 @@ function FriendRow({ friend: f, canChallenge }: { friend: Friend; canChallenge: 
             <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-elevated border border-border-strong flex items-center justify-center overflow-hidden shrink-0">
                     {f.avatar_url ? (
-                        <AvatarImg src={f.avatar_url} />
+                        <AvatarImg src={f.avatar_url} size={FRIEND_AVATAR_PX} />
                     ) : (
                         <span className="text-accent font-medium">{(f.username ?? '?')[0].toUpperCase()}</span>
                     )}
                 </div>
                 <div>
                     <Link
-                        href={`/profile/${f.username}`}
+                        href={profileHref(f.username)}
                         className="text-text-primary text-sm font-medium hover:text-accent transition-colors block"
                     >
                         {f.display_name || f.username}
@@ -37,7 +41,7 @@ function FriendRow({ friend: f, canChallenge }: { friend: Friend; canChallenge: 
             </div>
             {canChallenge && (
                 <Link
-                    href={`/challenge/${f.username}`}
+                    href={challengeHref(f.username)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-surface text-xs font-medium rounded-lg transition-colors"
                 >
                     <Swords size={12} strokeWidth={1.5} /> Challenge

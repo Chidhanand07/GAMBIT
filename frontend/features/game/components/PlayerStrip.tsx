@@ -5,6 +5,10 @@ import Link from 'next/link';
 import { fmtTime } from '@/lib/chess/clock';
 import { ratingFieldFor } from '@/lib/chess/timeControl';
 import type { ProfileSummary } from '@/types/profile';
+import { AvatarImage } from '@/components/ui/AvatarImage';
+
+/** The avatar box is w-9. */
+const STRIP_AVATAR_PX = 36;
 
 const DEFAULT_RATING = 1200;
 const CRITICAL_SECONDS = 30;
@@ -52,7 +56,7 @@ function PlayerAvatar({ player, username }: { player: Player; username?: string 
             style={{ background: 'var(--accent-dim)', border: '1px solid var(--border-accent)' }}
         >
             {player?.avatar_url ? (
-                <img src={player.avatar_url} alt="" className="w-full h-full object-cover" />
+                <AvatarImage src={player.avatar_url} size={STRIP_AVATAR_PX} />
             ) : (
                 <span className="text-accent font-semibold text-sm">{username[0].toUpperCase()}</span>
             )}

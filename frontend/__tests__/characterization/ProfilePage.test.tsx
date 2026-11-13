@@ -7,7 +7,7 @@
  * @/lib/supabase/client and global.fetch. "LEGACY:" marks behaviour that looks
  * wrong but is asserted as-is.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn(), prefetch: jest.fn() }) }))
@@ -43,6 +43,10 @@ jest.mock('@/lib/supabase/client', () => ({
     }),
 }))
 
+// F11: the Online badge reads PresenceProvider's shared presence set.
+let onlineUserIds: ReadonlySet<string> = new Set()
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds }) }))
+
 import ProfilePage from '@/app/profile/[username]/page'
 import { routeParams } from '../helpers/params'
 
@@ -72,6 +76,7 @@ const FAIL = (body: unknown = {}) => () => jsonResponse(body, false)
 beforeEach(() => {
     channels.length = 0
     removeChannel.mockClear()
+    onlineUserIds = new Set()
     window.history.replaceState(null, '', '/')
     routes = {
         '/api/profile/bob': BOB,
@@ -127,27 +132,52 @@ describe('initial load', () => {
         expect(urls()).not.toContain('/api/friends/status/bob')
     })
 
-    test('a missing profile leaves the spinner up forever and fetches nothing more', async () => {
+    // F12 (was: 'a missing profile leaves the spinner up forever and fetches nothing more').
+    test('a missing profile shows a not-found state and fetches nothing more', async () => {
         routes['/api/profile/ghost'] = FAIL({ error: 'not found' })
         await renderProfile('ghost')
-        expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+        expect(screen.getByRole('heading', { name: 'Player not found' })).toBeInTheDocument()
+        expect(screen.getByText(/ghost/)).toBeInTheDocument()
         expect(urls().slice().sort()).toEqual(['/api/profile/ghost', '/api/profile/me'])
     })
 
-    test('usernames are URI-encoded everywhere EXCEPT the games-tab request', async () => {
+    test('F12: a failed profile request shows an error with Retry, and Retry loads the profile', async () => {
+        let failNext = true
+        routes['/api/profile/bob'] = () => {
+            if (failNext) {
+                failNext = false
+                return { ok: false, status: 500, json: async () => ({ error: 'boom' }) }
+            }
+            return jsonResponse(BOB)
+        }
+        await renderProfile()
+        expect(screen.getByText('Could not load this profile.')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await settle()
+        expect(screen.getByRole('heading', { level: 1, name: 'Bobby' })).toBeInTheDocument()
+    })
+
+    test('F12: a network error loading the profile shows the error state, not a spinner', async () => {
+        routes['/api/profile/bob'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        expect(screen.getByText('Could not load this profile.')).toBeInTheDocument()
+    })
+
+    // F12 (was: 'usernames are URI-encoded everywhere EXCEPT the games-tab request').
+    test('usernames are URI-encoded everywhere, the games-tab request included', async () => {
         const name = 'bob smith'
         routes = {
             '/api/profile/bob%20smith': { ...BOB, username: name },
             '/api/profile/me': ME,
             '/api/profile/bob%20smith/games?limit=5&offset=0': { games: [] },
             '/api/friends/status/bob%20smith': { status: 'none' },
-            '/api/profile/bob smith/games?limit=15&offset=0': { games: [] },
+            '/api/profile/bob%20smith/games?limit=15&offset=0': { games: [] },
         }
         await renderProfile(name)
         click(tab(/^Games/))
         await settle()
-        // LEGACY: loadGames does not encodeURIComponent the username
-        expect(urls()).toContain('/api/profile/bob smith/games?limit=15&offset=0')
+        expect(urls()).toContain('/api/profile/bob%20smith/games?limit=15&offset=0')
+        expect(urls()).not.toContain('/api/profile/bob smith/games?limit=15&offset=0')
         expect(urls()).toContain('/api/friends/status/bob%20smith')
     })
 })
@@ -179,17 +209,27 @@ describe('header and overview tab', () => {
         expect(screen.queryByText('Win rate')).not.toBeInTheDocument()
     })
 
-    test('rating cards show rounded ratings, "—" for missing, and Peak = CURRENT rating (peak_* ignored)', async () => {
+    // F12 (was: 'Peak = CURRENT rating (peak_* ignored)', asserting 'Peak 1100/1251/1400/—'):
+    // Peak reads peak_<category>, never below the current rating, and is hidden when unknown.
+    test('rating cards show rounded ratings, "—" for missing, and Peak from peak_*', async () => {
         await renderProfile()
         expect(screen.getByText('1100')).toBeInTheDocument()
         expect(screen.getByText('1251')).toBeInTheDocument()
         expect(screen.getByText('1400')).toBeInTheDocument()
-        // LEGACY: "Peak" renders tc.rating, not tc.peak
+        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1350')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1500')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1600')).toBeInTheDocument()
+        expect(screen.queryByText('Peak 1100')).not.toBeInTheDocument()
+    })
+
+    test('F12: Peak is never below the current rating and is hidden when the profile has no peak', async () => {
+        routes['/api/profile/bob'] = {
+            ...BOB, peak_bullet: 900, peak_blitz: null, peak_rapid: undefined, peak_classical: undefined,
+        }
+        await renderProfile()
         expect(screen.getByText('Peak 1100')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1251')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1400')).toBeInTheDocument()
-        expect(screen.getByText('Peak —')).toBeInTheDocument()
-        expect(screen.queryByText('Peak 1300')).not.toBeInTheDocument()
+        expect(screen.getAllByText(/^Peak/)).toHaveLength(1)
     })
 
     test('record shows wins / losses / draws and rounded win rate', async () => {
@@ -211,7 +251,9 @@ describe('header and overview tab', () => {
         }
         await renderProfile()
         expect(screen.getByText('Win')).toBeInTheDocument()
-        expect(screen.getAllByText('Loss')).toHaveLength(2) // LEGACY: null winner + non-draw counts as Loss
+        // F12 (was: two 'Loss' rows, "null winner + non-draw counts as Loss"): an aborted game is labelled Aborted
+        expect(screen.getAllByText('Loss')).toHaveLength(1)
+        expect(screen.getByText('Aborted')).toBeInTheDocument()
         expect(screen.getByText('Draw')).toBeInTheDocument()
         expect(screen.getAllByRole('link', { name: 'vs Alice' })[0]).toHaveAttribute('href', '/profile/alice')
         expect(screen.getByRole('link', { name: 'vs alice' })).toHaveAttribute('href', '/profile/alice')
@@ -380,8 +422,29 @@ describe('games tab', () => {
         expect(screen.getByTitle('classical')).toHaveTextContent('📖')
         expect(screen.getByTitle('rapid')).toHaveTextContent('⏱')
         expect(screen.getByText('Unknown')).toBeInTheDocument()
-        expect(screen.getByText('(1200)')).toBeInTheDocument()
+        // F12 (was: one '(1200)', the missing black player): ratings follow the game's category, and the
+        // fixture players only carry rating_rapid, so rows a-c (bullet/blitz/classical) default to 1200 too.
+        expect(screen.getAllByText('(1200)')).toHaveLength(7)
+        expect(screen.getByText('(1400)')).toBeInTheDocument() // row d: 'weird' reads as 10+0, rapid
         expect(screen.getByText('—')).toBeInTheDocument()
+    })
+
+    test('F12: each row shows the players\' rating for the game\'s category, not always rapid', async () => {
+        routes['/api/profile/bob/games?limit=15&offset=0'] = {
+            games: [
+                game('blitz', {
+                    time_control: '3+2',
+                    white: { username: 'bob', rating_rapid: 1400, rating_blitz: 1555 },
+                    black: { username: 'alice', rating_rapid: 1333, rating_blitz: 1444.4 },
+                }),
+            ],
+        }
+        await renderProfile()
+        click(tab(/^Games/))
+        await settle()
+        expect(screen.getByText('(1555)')).toBeInTheDocument()
+        expect(screen.getByText('(1444)')).toBeInTheDocument()
+        expect(screen.queryByText('(1400)')).not.toBeInTheDocument()
     })
 
     test('empty / failed games request shows "No completed games yet."', async () => {
@@ -426,6 +489,30 @@ describe('stats tab', () => {
         click(screen.getByRole('button', { name: 'Stats' }))
         await settle()
         expect(urls().filter(u => u === '/api/profile/bob/stats')).toHaveLength(1)
+    })
+
+    test('F12: a failed stats request shows an error with Retry instead of a spinner forever', async () => {
+        let calls = 0
+        routes['/api/profile/bob/stats'] = () => {
+            calls++
+            return calls === 1 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
+        }
+        await renderProfile()
+        click(screen.getByRole('button', { name: 'Stats' }))
+        await settle()
+        expect(screen.getByText('Could not load stats.')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Retry' }))
+        await settle()
+        expect(screen.getByText('Total Games')).toBeInTheDocument()
+        expect(screen.getByText('3')).toBeInTheDocument()
+    })
+
+    test('F12: a rejected stats fetch is handled (error state, no unhandled rejection)', async () => {
+        routes['/api/profile/bob/stats'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        click(screen.getByRole('button', { name: 'Stats' }))
+        await settle()
+        expect(screen.getByText('Could not load stats.')).toBeInTheDocument()
     })
 })
 
@@ -472,11 +559,11 @@ describe('friends tab', () => {
         expect(screen.getByRole('link', { name: /Challenge/ })).toHaveAttribute('href', '/challenge/carol')
     })
 
-    test('Decline PUTs ?action=decline and just removes the request (even if the PUT fails)', async () => {
+    test('Decline PUTs ?action=decline and removes the request', async () => {
         routes['/api/profile/me'] = { id: 'u-bob', username: 'bob' }
         routes['/api/friends?userId=u-bob'] = []
         routes['/api/friends/pending'] = [PENDING[0]]
-        routes['/api/friends/f-1?action=decline'] = FAIL()
+        routes['/api/friends/f-1?action=decline'] = {}
         await renderProfile()
         click(tab('Friends'))
         await settle()
@@ -484,6 +571,26 @@ describe('friends tab', () => {
         await settle()
         expect(callFor('/api/friends/f-1?action=decline')).toEqual(['/api/friends/f-1?action=decline', { method: 'PUT' }])
         expect(screen.getByText('No pending requests.')).toBeInTheDocument()
+        expect(screen.getByText('No friends yet.')).toBeInTheDocument()
+    })
+
+    // F12 (was: 'Decline ... just removes the request (even if the PUT fails)').
+    test('a failed Decline or Accept keeps the request and says so', async () => {
+        routes['/api/profile/me'] = { id: 'u-bob', username: 'bob' }
+        routes['/api/friends?userId=u-bob'] = []
+        routes['/api/friends/pending'] = [PENDING[0]]
+        routes['/api/friends/f-1?action=decline'] = FAIL()
+        routes['/api/friends/f-1?action=accept'] = () => Promise.reject(new TypeError('offline'))
+        await renderProfile()
+        click(tab('Friends'))
+        await settle()
+        click(screen.getByRole('button', { name: 'Decline' }))
+        await settle()
+        expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument()
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not decline the request')
+        click(screen.getByRole('button', { name: 'Accept' }))
+        await settle()
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not accept the request')
         expect(screen.getByText('No friends yet.')).toBeInTheDocument()
     })
 
@@ -519,29 +626,29 @@ describe('friends tab', () => {
 // ── Presence ────────────────────────────────────────────────────────────────
 
 describe('presence', () => {
-    test('subscribes to presence-watch-<id>-<Date.now()> keyed by profile id; shows Online when present', async () => {
-        const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
-        await renderProfile()
-        now.mockRestore()
-        expect(channels).toHaveLength(1)
-        const ch = channels[0]
-        expect(ch.name).toBe('presence-watch-u-bob-1700000000000')
-        expect(ch.opts).toEqual({ config: { presence: { key: 'u-bob' } } })
-        expect(ch.on).toHaveBeenCalledWith('presence', { event: 'sync' }, expect.any(Function))
-        expect(ch.subscribe).toHaveBeenCalledTimes(1)
+    // F11 (was: 'subscribes to presence-watch-<id>-<Date.now()> keyed by profile id'): the badge now
+    // reads PresenceProvider's shared `gambit-online-users` set, so the page opens no channel itself.
+    test('opens no presence channel of its own; shows Online when the shared presence set has the profile id', async () => {
+        const { rerender } = await renderProfile()
+        const page = () => <ProfilePage params={routeParams({ username: 'bob' })} />
+        expect(channels).toHaveLength(0)
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
 
-        ch.fireSync({ 'u-bob': [{}] })
+        onlineUserIds = new Set(['u-bob'])
+        rerender(page())
         expect(screen.getByText('Online')).toBeInTheDocument()
         expect(screen.getByTitle('Online now')).toBeInTheDocument()
 
-        ch.fireSync({ 'someone-else': [{}] })
+        onlineUserIds = new Set(['someone-else'])
+        rerender(page())
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
     })
 
-    test('unmount removes the channel', async () => {
+    // F11 (was: 'unmount removes the channel'): there is no page-owned channel to remove.
+    test('unmount removes no channel (the shared one belongs to PresenceProvider)', async () => {
         const { unmount } = await renderProfile()
         unmount()
-        await waitFor(() => expect(removeChannel).toHaveBeenCalledWith(channels[0]))
+        await settle()
+        expect(removeChannel).not.toHaveBeenCalled()
     })
 })

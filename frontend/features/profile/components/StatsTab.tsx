@@ -101,14 +101,40 @@ function CategoryCard({ label, icon, rating, record: s }: CategoryCardProps) {
     );
 }
 
-/** Stats tab: a spinner until the stats arrive, then totals and per-speed breakdown cards. */
-export function StatsTab({ stats }: { stats: ProfileStats | null }) {
+function StatsPlaceholder({ failed, onRetry }: { failed: boolean; onRetry: () => void }) {
+    if (!failed) {
+        return (
+            <div className="py-16 flex justify-center">
+                <div className="w-6 h-6 border-2 border-border border-t-accent rounded-full animate-spin" />
+            </div>
+        );
+    }
+    return (
+        <div className="py-16 flex flex-col items-center gap-3">
+            <p className="text-sm text-text-secondary">Could not load stats.</p>
+            <button
+                onClick={onRetry}
+                className="px-4 py-2 bg-elevated hover:bg-hover border border-border rounded-lg text-sm text-text-primary"
+            >
+                Retry
+            </button>
+        </div>
+    );
+}
+
+interface StatsTabProps {
+    stats: ProfileStats | null;
+    /** The last request failed; show the error and Retry instead of the spinner. */
+    failed: boolean;
+    onRetry: () => void;
+}
+
+/** Stats tab: a spinner (or an error with Retry) until the stats arrive, then totals and per-speed cards. */
+export function StatsTab({ stats, failed, onRetry }: StatsTabProps) {
     return (
         <div className="space-y-6">
             {!stats ? (
-                <div className="py-16 flex justify-center">
-                    <div className="w-6 h-6 border-2 border-border border-t-accent rounded-full animate-spin" />
-                </div>
+                <StatsPlaceholder failed={failed} onRetry={onRetry} />
             ) : (
                 <>
                     <Totals stats={stats} />

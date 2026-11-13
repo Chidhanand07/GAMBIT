@@ -1,59 +1,10 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { safeRedirectPath } from '@/lib/safeRedirect'
+import { Suspense } from 'react'
+import { useSignInExchange } from '@/features/auth/hooks/useSignInExchange'
 
 function ExchangeHandler() {
-    const router = useRouter()
-    const searchParams = useSearchParams()
-    const [errMsg, setErrMsg] = useState<string | null>(null)
-
-    useEffect(() => {
-        // S6: only a path on this site is followed; anything else goes to /lobby.
-        const next = safeRedirectPath(searchParams.get('next'))
-        const code = searchParams.get('code')
-
-        // PKCE flow: code is in the URL query string
-        if (code) {
-            const supabase = createClient()
-            void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-                if (error) {
-                    setErrMsg(error.message)
-                    setTimeout(() => router.replace('/login?error=oauth_failed'), 2000)
-                    return
-                }
-                router.replace(next)
-            })
-            return
-        }
-
-        // Implicit flow: access_token is in the URL hash (never sent to server)
-        const hash = window.location.hash.substring(1)
-        if (hash) {
-            const params = new URLSearchParams(hash)
-            const accessToken = params.get('access_token')
-            const refreshToken = params.get('refresh_token')
-
-            if (accessToken && refreshToken) {
-                const supabase = createClient()
-                void supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-                    .then(({ error }) => {
-                        if (error) {
-                            setErrMsg(error.message)
-                            setTimeout(() => router.replace('/login?error=oauth_failed'), 2000)
-                            return
-                        }
-                        router.replace(next)
-                    })
-                return
-            }
-        }
-
-        // Nothing to work with
-        router.replace('/login?error=oauth_failed')
-    }, [router, searchParams])
+    const errMsg = useSignInExchange()
 
     if (errMsg) {
         return (

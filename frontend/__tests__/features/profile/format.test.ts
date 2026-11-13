@@ -52,10 +52,14 @@ describe('avatarInitial', () => {
 });
 
 describe('gameOutcome', () => {
-    test('win, draw and the LEGACY null-winner loss', () => {
-        expect(gameOutcome({ winner_id: 'me', result: 'white' }, 'me')).toEqual({ isWin: true, isDraw: false });
-        expect(gameOutcome({ winner_id: null, result: 'draw' }, 'me')).toEqual({ isWin: false, isDraw: true });
-        expect(gameOutcome({ winner_id: null, result: 'aborted' }, 'me')).toEqual({ isWin: false, isDraw: false });
+    // F12 (was: 'win, draw and the LEGACY null-winner loss' → { isWin, isDraw } with aborted read as a loss).
+    test('win, loss, draw, and an aborted game is its own outcome', () => {
+        const players = { white_id: 'me', black_id: 'them' };
+        expect(gameOutcome({ ...players, winner_id: 'me', result: 'white' }, 'me')).toBe('win');
+        expect(gameOutcome({ ...players, winner_id: 'them', result: 'black' }, 'me')).toBe('loss');
+        expect(gameOutcome({ ...players, winner_id: null, result: 'draw' }, 'me')).toBe('draw');
+        expect(gameOutcome({ ...players, winner_id: null, result: 'aborted' }, 'me')).toBe('aborted');
+        expect(gameOutcome({ ...players, status: 'aborted', winner_id: null, result: null }, 'me')).toBe('aborted');
     });
 });
 

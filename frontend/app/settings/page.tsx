@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft } from 'lucide-react';
 import { useProfile } from '@/components/ProfileProvider';
@@ -33,6 +33,12 @@ export default function SettingsPage() {
     const { profile, loading: profileLoading, refetch } = useProfile();
     const [activeSection, setActiveSection] = useState('profile');
     const form = useProfileSettings(profile, refetch);
+    const signedOut = !profileLoading && !profile;
+
+    // Navigation is a side effect: never call router.push while rendering (F17).
+    useEffect(() => {
+        if (signedOut) router.push('/login');
+    }, [signedOut, router]);
 
     if (profileLoading) return (
         <div className="flex justify-center items-center min-h-[60vh]">
@@ -40,7 +46,7 @@ export default function SettingsPage() {
         </div>
     );
 
-    if (!profile) { router.push('/login'); return null; }
+    if (!profile) return null;
 
     return (
         <div className="max-w-5xl mx-auto px-4 py-8">

@@ -1,32 +1,13 @@
-import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { usePresence } from '@/components/PresenceProvider';
 
 /**
- * Whether `profileId` is currently in the Supabase presence set. Opens a
- * uniquely named `presence-watch-<id>-<Date.now()>` channel keyed by the id and
- * removes it on unmount or id change.
+ * Whether `profileId` is in the shared presence set that every signed-in tab
+ * tracks itself into (PresenceProvider, topic `gambit-online-users`, keyed by
+ * profile id). A separate, uniquely named channel would never contain anyone,
+ * so this reads the provider's set instead of opening its own channel (F11).
+ * Signed-out viewers have no presence subscription, so they never see the badge.
  */
-export function useProfilePresence(profileId: string | undefined) {
-    const [isOnline, setIsOnline] = useState(false);
-
-    useEffect(() => {
-        if (!profileId) return;
-        let mounted = true;
-        const supabase = createClient();
-        const channel = supabase.channel(`presence-watch-${profileId}-${Date.now()}`, {
-            config: { presence: { key: profileId } },
-        });
-        channel.on('presence', { event: 'sync' }, () => {
-            if (!mounted) return;
-            const state = channel.presenceState();
-            setIsOnline(Object.keys(state).includes(profileId));
-        });
-        channel.subscribe();
-        return () => {
-            mounted = false;
-            void supabase.removeChannel(channel);
-        };
-    }, [profileId]);
-
-    return isOnline;
+export function useProfilePresence(profileId: string | undefined): boolean {
+    const { onlineUserIds } = usePresence();
+    return profileId !== undefined && onlineUserIds.has(profileId);
 }

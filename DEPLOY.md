@@ -29,6 +29,13 @@ disconnects; an older web app selects it). The migration refuses to run while a 
 policy or view in `public` still names either column. On a fresh project (nothing deployed
 yet) it is safe to apply with the others. pgTAP: `supabase/tests/04_legacy_clock_columns.test.sql`.
 
+**Rollout order for `20261114200000_profiles_revoke_service_role_update.sql` (S8-PRIV):** deploy
+the frontend first (its `PATCH /api/profile/me` now writes through the signed-in user's session),
+then apply this migration. It revokes `UPDATE` on `profiles` from `service_role`; applied before
+the new frontend is live, profile edits from the old frontend fail with a permission error until
+the deploy (ratings are unaffected: they go through `apply_game_result`). Rollback:
+`GRANT UPDATE ON TABLE public.profiles TO service_role;`.
+
 ### 1c. Enable Google OAuth (optional)
 1. Go to **Authentication → Providers → Google**
 2. Enable it, add your Google Cloud OAuth Client ID and Secret

@@ -14,18 +14,22 @@ interface FriendStatusArgs {
 export function useFriendStatus({ username, profile, meProfile, isOwnProfile }: FriendStatusArgs) {
     const [friendStatus, setFriendStatus] = useState<FriendStatus>('loading');
 
-    // Re-runs only when either profile id changes (legacy dependency list, kept on purpose).
+    const profileId = profile?.id;
+    const meId = meProfile?.id;
+    // The status is asked for the loaded profile's own username, so it re-runs only when a
+    // different profile (or viewer) has loaded, not while the next one is still loading.
+    const profileUsername = profile?.username;
+
     useEffect(() => {
-        if (!profile || !meProfile || isOwnProfile) {
+        if (!profileId || !meId || isOwnProfile || !profileUsername) {
             setFriendStatus('none');
             return;
         }
-        fetchFriendStatus(username)
+        fetchFriendStatus(profileUsername)
             .then((r) => (r.ok ? r.json() : { status: 'none' as const }))
             .then((d) => setFriendStatus(d.status ?? 'none'))
             .catch(() => setFriendStatus('none'));
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: legacy deps [profile?.id, meProfile?.id]
-    }, [profile?.id, meProfile?.id]);
+    }, [profileId, meId, isOwnProfile, profileUsername]);
 
     const addFriend = async () => {
         if (!meProfile) return;

@@ -104,6 +104,28 @@ describe('auth/exchange', () => {
         expect(replace.mock.calls).toEqual([['/login?error=oauth_failed']])
     })
 
+    test('F17: leaving the page cancels the pending error redirect', async () => {
+        jest.useFakeTimers()
+        searchParams = new URLSearchParams('code=c_FAKE')
+        auth.exchangeCodeForSession.mockResolvedValue({ error: { message: 'bad code' } })
+        const { unmount } = render(<ExchangePage />)
+        await flush()
+        unmount()
+        act(() => { jest.advanceTimersByTime(2000) })
+        expect(replace).not.toHaveBeenCalled()
+        expect(jest.getTimerCount()).toBe(0)
+    })
+
+    test('F17: an exchange that settles after the page is gone navigates nowhere', async () => {
+        searchParams = new URLSearchParams('code=c_FAKE')
+        let settle!: (v: unknown) => void
+        auth.exchangeCodeForSession.mockReturnValue(new Promise(r => { settle = r }))
+        const { unmount } = render(<ExchangePage />)
+        unmount()
+        await act(async () => { settle({ error: null }) })
+        expect(replace).not.toHaveBeenCalled()
+    })
+
     test('implicit hash tokens: sets the session and replaces to /lobby by default', async () => {
         window.location.hash = '#access_token=at_FAKE&refresh_token=rt_FAKE'
         auth.setSession.mockResolvedValue({ error: null })
@@ -204,6 +226,21 @@ describe('login', () => {
             options: { redirectTo: `${window.location.origin}/auth/callback` },
         })
         expect(screen.getByText('Google sign-in failed. Please try again.')).toBeInTheDocument()
+    })
+
+    test.each([
+        ['oauth_failed', 'Google sign-in failed. Please try again.'],
+        ['no_code', 'Google sign-in failed. Please try again.'],
+        ['Some <b>raw</b> provider text', 'Sign-in failed. Please try again.'],
+    ])('F17: ?error=%j from the OAuth callback is shown, not dropped', (code, message) => {
+        searchParams = new URLSearchParams({ error: code, redirect: '/game/1' })
+        window.history.replaceState(null, '', `/login?${searchParams}`)
+        const { container } = render(<LoginPage />)
+        expect(screen.getByText(message)).toBeInTheDocument()
+        expect(window.location.search).toBe('?redirect=%2Fgame%2F1')
+        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: 'a' } })
+        expect(screen.queryByText(message)).not.toBeInTheDocument()
+        window.history.replaceState(null, '', '/')
     })
 
     test('static content and links', () => {

@@ -164,7 +164,8 @@ describe('request bodies', () => {
     test('profile PATCH cannot set rating or stats columns (unknown keys are dropped)', async () => {
         db.queue('profiles', { data: { id: ME }, error: null })
         await patchMe(req('/api/profile/me', { method: 'PATCH', body: { bio: 'hi', rating_rapid: 3000, wins: 999 } }))
-        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, bio: 'hi', country: null })
+        // F18 (was: { display_name: null, bio: 'hi', country: null }): omitted fields are no longer nulled.
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ bio: 'hi' })
     })
 
     test.each([['add friend with a non-string name', { addressee_username: 42 }], ['add friend with nothing', {}]])(

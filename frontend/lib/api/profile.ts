@@ -1,7 +1,6 @@
 // Client-side fetch helpers for the profile page. Each helper calls the global
-// `fetch` with exactly the URL and options the page used before the split
-// (including the un-encoded username in `fetchProfileGamesPage`) and returns the
-// raw Response, so callers keep their original `ok` / `json()` handling.
+// `fetch` and returns the raw Response, so callers keep their `ok` / `json()`
+// handling. Every username and id in a URL is URI-encoded (F12).
 import type { Friend, FriendRelation, PendingFriendRequest } from '@/types/friendship';
 import type { Profile } from '@/types/profile';
 import type { ProfileGamesPayload, ProfileStats } from '@/types/profilePage';
@@ -33,16 +32,15 @@ export function fetchRecentGames(username: string): Promise<TypedResponse<Profil
     return fetch(`/api/profile/${encodeURIComponent(username)}/games?limit=5&offset=0`, { ...NO_STORE });
 }
 
-/**
- * Games tab page. LEGACY: the username is NOT URI-encoded here (pinned by the
- * characterization tests); do not "fix" without a behaviour-change PR.
- */
+/** Games tab page (URI-encoded username), no-store. */
 export function fetchProfileGamesPage(
     username: string,
     limit: number,
     offset: number,
 ): Promise<TypedResponse<ProfileGamesPayload>> {
-    return fetch(`/api/profile/${username}/games?limit=${limit}&offset=${offset}`, { ...NO_STORE });
+    return fetch(`/api/profile/${encodeURIComponent(username)}/games?limit=${limit}&offset=${offset}`, {
+        ...NO_STORE,
+    });
 }
 
 /** GET /api/profile/<username>/stats (URI-encoded), no-store. */
@@ -55,9 +53,9 @@ export function fetchFriendStatus(username: string): Promise<TypedResponse<Frien
     return fetch(`/api/friends/status/${encodeURIComponent(username)}`);
 }
 
-/** GET /api/friends?userId=<id> (not encoded), no options. */
+/** GET /api/friends?userId=<id> (URI-encoded), no options. */
 export function fetchFriendsOf(userId: string): Promise<TypedResponse<Friend[]>> {
-    return fetch(`/api/friends?userId=${userId}`);
+    return fetch(`/api/friends?userId=${encodeURIComponent(userId)}`);
 }
 
 /** GET /api/friends/pending, no options. */
@@ -76,5 +74,5 @@ export function sendFriendRequest(addresseeUsername: string): Promise<Response> 
 
 /** PUT /api/friends/<friendshipId>?action=<accept|decline>. */
 export function respondToFriendRequest(friendshipId: string, action: 'accept' | 'decline'): Promise<Response> {
-    return fetch(`/api/friends/${friendshipId}?action=${action}`, { method: 'PUT' });
+    return fetch(`/api/friends/${encodeURIComponent(friendshipId)}?action=${action}`, { method: 'PUT' });
 }

@@ -138,11 +138,14 @@ select is(
   'no profile was created for carol'
 );
 
--- The server path still works: the service role writes ratings and inserts profiles.
+-- The server path: the service role inserts profiles. S8-PRIV (20261114200000) revoked its
+-- UPDATE: ratings go through public.apply_game_result (03, 04), display fields through the
+-- user's own session. (Was: 'service_role can UPDATE ratings and statistics' + 'the
+-- service-role rating write landed' (1216).)
 set local role service_role;
-select lives_ok(
+select throws_ok(
   $$ update public.profiles set rating_rapid = 1216, wins = 5, games_played = 11 where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $$,
-  'service_role can UPDATE ratings and statistics'
+  '42501', null, 'service_role can no longer UPDATE ratings and statistics directly'
 );
 select lives_ok(
   $$ insert into public.profiles (id, username) values ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'carol') $$,
@@ -151,8 +154,8 @@ select lives_ok(
 reset role;
 select is(
   (select rating_rapid::int from public.profiles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
-  1216,
-  'the service-role rating write landed'
+  1200,
+  'no direct service-role rating write landed'
 );
 
 -- ============================ the policies themselves ==========================

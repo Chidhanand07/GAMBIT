@@ -75,6 +75,15 @@ function useDemoGame() {
     useEffect(() => {
         const g = new Chess();
         let idx = 0;
+        // One pending reset at a time, cleared on unmount with the interval (F17).
+        let resetTimer: ReturnType<typeof setTimeout> | null = null;
+        const reset = () => {
+            resetTimer = null;
+            g.reset();
+            setFen(g.fen());
+            setLastMove(null);
+            idx = 0;
+        };
         const tick = () => {
             if (idx < DEMO_MOVES.length) {
                 const uci = DEMO_MOVES[idx];
@@ -84,17 +93,15 @@ function useDemoGame() {
                 setFen(g.fen());
                 setLastMove({ from, to });
                 idx++;
-            } else {
-                setTimeout(() => {
-                    g.reset();
-                    setFen(g.fen());
-                    setLastMove(null);
-                    idx = 0;
-                }, RESET_DELAY_MS);
+            } else if (resetTimer === null) {
+                resetTimer = setTimeout(reset, RESET_DELAY_MS);
             }
         };
         const timer = setInterval(tick, MOVE_INTERVAL_MS);
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+            if (resetTimer !== null) clearTimeout(resetTimer);
+        };
     }, []);
 
     return { fen, lastMove };

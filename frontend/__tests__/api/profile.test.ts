@@ -7,7 +7,7 @@ import { GET as getMe, PATCH as patchMe } from '@/app/api/profile/me/route'
 import { GET as getProfile } from '@/app/api/profile/[username]/route'
 import { GET as getStats } from '@/app/api/profile/[username]/stats/route'
 import { GET as getGames } from '@/app/api/profile/[username]/games/route'
-import { db, req, json, resetHarness, signInWithCookie, uid } from '../helpers/routeHarness'
+import { db, req, json, resetHarness, signInWithCookie, supabaseJsMock, supabaseSsrMock, uid } from '../helpers/routeHarness'
 
 beforeEach(() => {
     resetHarness()
@@ -60,10 +60,43 @@ describe('PATCH /api/profile/me', () => {
         expect(call.ops).toContainEqual(['eq', 'id', uid('me')])
     })
 
-    test('omitted avatarUrl is left unchanged; other omitted fields are cleared', async () => {
+    // F18 (was: 'omitted avatarUrl is left unchanged; other omitted fields are cleared' →
+    // { display_name: null, bio: 'only bio', country: null }).
+    test('omitted fields are left unchanged; only the sent ones are written', async () => {
         signInWithCookie(uid('me'))
         await patch({ bio: 'only bio' })
-        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, bio: 'only bio', country: null })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ bio: 'only bio' })
+    })
+
+    test('F18: an avatar-only PATCH (the settings upload) does not wipe name, bio or country', async () => {
+        signInWithCookie(uid('me'))
+        await patch({ avatarUrl: 'https://x.supabase.co/a.png' })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ avatar_url: 'https://x.supabase.co/a.png' })
+    })
+
+    test('F18: an explicit null still clears a field', async () => {
+        signInWithCookie(uid('me'))
+        await patch({ displayName: null, country: 'IN' })
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({ display_name: null, country: 'IN' })
+    })
+
+    test('F18: a PATCH with no profile field is a 400 and writes nothing', async () => {
+        signInWithCookie(uid('me'))
+        expect((await patch({ rating_rapid: 3000 })).status).toBe(400)
+        expect(db.callsFor('profiles')).toHaveLength(0)
+    })
+
+    // S8-PRIV: the write runs as the signed-in user (RLS + column grants), so service_role
+    // can lose UPDATE on profiles.
+    test('S8-PRIV: the update goes through the session client, never the service-role key', async () => {
+        signInWithCookie(uid('me'))
+        supabaseJsMock.createClient.mockClear()
+        supabaseSsrMock.createServerClient.mockClear()
+        db.queue('profiles', { data: { id: uid('me') }, error: null })
+        expect((await patch({ bio: 'hi' })).status).toBe(200)
+        expect(supabaseJsMock.createClient).not.toHaveBeenCalled()
+        expect(supabaseSsrMock.createServerClient).toHaveBeenCalled()
+        expect(db.callsFor('profiles')[0].ops).toContainEqual(['eq', 'id', uid('me')])
     })
 
     test('database error → 500', async () => {
@@ -127,6 +160,20 @@ describe('GET /api/profile/[username]/stats', () => {
                 classical: { played: 1, wins: 1, losses: 0, draws: 0 },
             },
         })
+    })
+
+    test('F12: an aborted game is not counted, and a game nobody won is a draw, not a loss', async () => {
+        db.queue('profiles', { data: { id: uid('p'), games_played: 0, wins: 0, losses: 0, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                { time_control: '10', status: 'aborted', result: null, winner_id: null },
+                { time_control: '10', status: 'completed', result: 'aborted', winner_id: null },
+                { time_control: '10', status: 'completed', result: null, winner_id: null },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.byCategory.rapid).toEqual({ played: 1, wins: 0, losses: 0, draws: 1 })
     })
 
     test('404 for an unknown user', async () => {

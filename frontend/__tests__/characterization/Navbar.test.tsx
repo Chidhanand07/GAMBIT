@@ -70,8 +70,10 @@ const bell = () => screen.getByText((_, el) => el?.tagName === 'BUTTON' && !!el.
 const avatarButton = () => screen.getByRole('button', { name: 'M' })
 
 describe('layout and auth states', () => {
-    test('logged in: logo, nav links with active marker, online count, avatar initial; no fetch or emit on mount', () => {
+    // F15 (was: '... no fetch or emit on mount'): the unread dot needs the notifications on mount.
+    test('logged in: logo, nav links with active marker, online count, avatar initial; only the notifications fetch on mount', async () => {
         const { container } = render(<Navbar />)
+        await act(async () => {})
         expect(screen.getByText('Gambit')).toBeInTheDocument()
         expect(screen.getByText('7 online')).toBeInTheDocument()
         const play = screen.getByRole('link', { name: 'Play' })
@@ -81,7 +83,7 @@ describe('layout and auth states', () => {
         expect(screen.getByRole('link', { name: 'Analysis' })).toHaveAttribute('href', '/analysis')
         expect(avatarButton()).toBeInTheDocument()
         expect(screen.queryByText('Log In')).toBeNull()
-        expect(fetchMock).not.toHaveBeenCalled()
+        expect(fetchMock.mock.calls).toEqual([['/api/notifications']])
         expect(socket.emit).not.toHaveBeenCalled()
         expect(socket.listenedEvents()).toEqual(['challenge_declined', 'challenge_ready', 'challenge_request'])
         expect(container.querySelector('nav')).toHaveClass('sticky', 'top-0', 'z-50', 'h-[52px]')
@@ -118,11 +120,36 @@ describe('layout and auth states', () => {
 })
 
 describe('notifications', () => {
+    const unreadDot = () => bell().querySelector('span.rounded-full')
+
+    // F15 (new): the dot used to appear only after the bell had been opened once.
+    test('the unread dot shows on load, before the bell is opened', async () => {
+        render(<Navbar />)
+        await waitFor(() => expect(unreadDot()).not.toBeNull())
+        expect(screen.queryByText('Notifications')).toBeNull()
+    })
+
+    test('no unread notification, no dot', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse(NOTIFS.map(n => ({ ...n, read: true }))))
+        render(<Navbar />)
+        await act(async () => {})
+        expect(fetchMock).toHaveBeenCalledWith('/api/notifications')
+        expect(unreadDot()).toBeNull()
+    })
+
+    test('signed out: no notifications request', async () => {
+        profile = null
+        render(<Navbar />)
+        await act(async () => {})
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    // F15 (was: one GET, on opening the bell): one GET on mount, one more on opening.
     test('opening the bell GETs /api/notifications (no options) and lists messages with fallbacks', async () => {
         render(<Navbar />)
         click(bell())
         await waitFor(() => expect(screen.getByText('Payload message')).toBeInTheDocument())
-        expect(fetchMock.mock.calls).toEqual([['/api/notifications']])
+        expect(fetchMock.mock.calls).toEqual([['/api/notifications'], ['/api/notifications']])
         expect(screen.getByText('Top-level message')).toBeInTheDocument()
         expect(screen.getByText('friend_request')).toBeInTheDocument()
         expect(screen.getByText('Notifications')).toBeInTheDocument()
@@ -135,11 +162,24 @@ describe('notifications', () => {
         click(bell())
         await screen.findByText('Payload message')
         await act(async () => { click(screen.getByRole('button', { name: 'Mark all read' })) })
-        expect(fetchMock.mock.calls[1]).toEqual(['/api/notifications/read', { method: 'PUT' }])
+        expect(fetchMock).toHaveBeenLastCalledWith('/api/notifications/read', { method: 'PUT' })
         expect(screen.queryByRole('button', { name: 'Mark all read' })).toBeNull()
         expect(screen.getByText('Payload message')).toHaveClass('opacity-60')
     })
 
+    test('F15: a failed Mark all read puts the unread state back and says so', async () => {
+        fetchMock.mockImplementation(async (url: string) =>
+            url === '/api/notifications' ? jsonResponse(NOTIFS) : jsonResponse({ error: 'x' }, false))
+        render(<Navbar />)
+        click(bell())
+        await screen.findByText('Payload message')
+        await act(async () => { click(screen.getByRole('button', { name: 'Mark all read' })) })
+        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeInTheDocument()
+        expect(screen.getByText('Payload message')).not.toHaveClass('opacity-60')
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not mark notifications read')
+    })
+
+    // F15 (was: two GETs in total): mount + first open + reopen.
     test('closing the bell does not refetch; reopening does', async () => {
         render(<Navbar />)
         click(bell())
@@ -148,14 +188,23 @@ describe('notifications', () => {
         expect(screen.queryByText('Notifications')).toBeNull()
         click(bell())
         await screen.findByText('Payload message')
-        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect(fetchMock).toHaveBeenCalledTimes(3)
     })
 
-    test('empty and failed responses show "No notifications"', async () => {
-        fetchMock.mockImplementation(async () => jsonResponse({ error: 'x' }, false))
+    test('an empty response shows "No notifications"', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse([]))
         render(<Navbar />)
         click(bell())
         await screen.findByText('No notifications')
+    })
+
+    // F15 (was: 'empty and failed responses show "No notifications"').
+    test('a failed response shows an error, not "No notifications"', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse({ error: 'x' }, false))
+        render(<Navbar />)
+        click(bell())
+        await screen.findByText('Could not load notifications.')
+        expect(screen.queryByText('No notifications')).toBeNull()
     })
 
     test('a mousedown outside closes the panel', async () => {

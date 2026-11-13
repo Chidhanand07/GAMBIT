@@ -1,7 +1,7 @@
 import 'server-only';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { cookies } from 'next/headers';
+import { cookies } from 'next/headers';
 import type { NextRequest, NextResponse } from 'next/server';
 import { supabasePublicKey } from '@/lib/supabase/publicEnv';
 import { supabaseSecretKey } from './env';
@@ -60,6 +60,15 @@ export function createSessionClient(cookieStore: RequestCookieStore) {
             },
         },
     });
+}
+
+/**
+ * The current request's session client (route handlers only), for writes a user may make to
+ * their own rows: the query runs as that user, so RLS and column privileges apply instead of
+ * the service role's bypass (S8-PRIV, SEC-03). Call it after `requireUser()`/`requireFreshUser()`.
+ */
+export async function createUserClient(): Promise<SupabaseClient> {
+    return createSessionClient(await cookies());
 }
 
 /**

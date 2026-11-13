@@ -2,16 +2,19 @@ import Link from 'next/link';
 import type { PendingFriendRequest } from '@/types/friendship';
 import type { FriendRequestAction } from '../hooks/useFriends';
 import { AvatarImg } from './AvatarImg';
+import { profileHref } from '../links';
 
 const DEFAULT_RATING = 1200;
+/** The requester avatar box is w-9. */
+const REQUESTER_AVATAR_PX = 36;
 
-type RespondFn = (friendshipId: string, action: FriendRequestAction) => void;
+type RespondFn = (friendshipId: string, action: FriendRequestAction) => Promise<void>;
 
 function RequesterAvatar({ requester }: { requester: PendingFriendRequest['requester'] }) {
     return (
         <div className="w-9 h-9 rounded-full bg-elevated border border-border-strong flex items-center justify-center overflow-hidden shrink-0">
             {requester?.avatar_url ? (
-                <AvatarImg src={requester.avatar_url} />
+                <AvatarImg src={requester.avatar_url} size={REQUESTER_AVATAR_PX} />
             ) : (
                 <span className="text-accent text-sm font-medium">{(requester?.username ?? '?')[0].toUpperCase()}</span>
             )}
@@ -27,7 +30,7 @@ function PendingRow({ req, onRespond }: { req: PendingFriendRequest; onRespond: 
                 <RequesterAvatar requester={requester} />
                 <div>
                     <Link
-                        href={`/profile/${requester?.username}`}
+                        href={profileHref(requester?.username ?? '')}
                         className="text-text-primary text-sm font-medium hover:text-accent transition-colors"
                     >
                         {requester?.display_name || requester?.username}
@@ -39,13 +42,13 @@ function PendingRow({ req, onRespond }: { req: PendingFriendRequest; onRespond: 
             </div>
             <div className="flex gap-2">
                 <button
-                    onClick={() => onRespond(req.id, 'accept')}
+                    onClick={() => void onRespond(req.id, 'accept')}
                     className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-surface text-xs rounded-lg font-medium transition-colors"
                 >
                     Accept
                 </button>
                 <button
-                    onClick={() => onRespond(req.id, 'decline')}
+                    onClick={() => void onRespond(req.id, 'decline')}
                     className="px-3 py-1.5 bg-surface hover:bg-hover border border-border text-text-secondary text-xs rounded-lg transition-colors"
                 >
                     Decline
@@ -59,10 +62,17 @@ interface PendingRequestsCardProps {
     pendingRequests: PendingFriendRequest[];
     pendingLoading: boolean;
     onRespond: RespondFn;
+    /** Why the last Accept/Decline failed; null when it did not. */
+    respondError: string | null;
 }
 
 /** Incoming friend requests (own profile only) with Accept / Decline. */
-export function PendingRequestsCard({ pendingRequests, pendingLoading, onRespond }: PendingRequestsCardProps) {
+export function PendingRequestsCard({
+    pendingRequests,
+    pendingLoading,
+    onRespond,
+    respondError,
+}: PendingRequestsCardProps) {
     return (
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-border bg-elevated">
@@ -75,6 +85,11 @@ export function PendingRequestsCard({ pendingRequests, pendingLoading, onRespond
                     )}
                 </h3>
             </div>
+            {respondError && (
+                <p role="alert" className="px-5 pt-3 text-xs text-red-400">
+                    {respondError}
+                </p>
+            )}
             {pendingLoading ? (
                 <div className="py-8 flex justify-center">
                     <div className="w-5 h-5 border-2 border-border border-t-accent rounded-full animate-spin" />
