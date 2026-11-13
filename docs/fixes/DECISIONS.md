@@ -1866,8 +1866,8 @@ instead of one file per ADR under `docs/refactor/adr/`.
     the logger (the logger reads its level from config), so config warnings go through a sink
     the logger registers (`env.setWarningSink`).
   - Requests: `pino-http` with a request id (a sane incoming `X-Request-Id` is kept, otherwise a
-    UUID), echoed as `X-Request-Id`. Sockets: `socket.data.log` is a child with `socketId` and
-    `userId`; finalizer lines name the game id in the message.
+    UUID), echoed as `X-Request-Id`. Sockets: a child logger with `socketId` and
+    `userId` writes the connection line (not kept on `socket.data`, see F-059); finalizer lines name the game id in the message.
   - `/livez` (process up), `/readyz` (Redis `PING` and a one-row PostgREST `HEAD` request, 2 s
     timeout each; 503 naming the failed check; 503 while draining). `/api/health` stays for the
     current Railway healthcheck setting.
