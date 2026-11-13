@@ -22,6 +22,13 @@
    - `00001_...sql` → `00002_...sql` → ... → latest
 3. Verify: go to **Table Editor** — you should see `profiles`, `games`, `friendships`, `notifications`, `messages` tables
 
+**Order constraint: `20261114100000_drop_legacy_clock_columns.sql`** drops
+`games.white_time_ms` / `black_time_ms`. Apply it **only after every game-server replica and the
+web app run the M2 release or later** (an older server writes `white_time_ms` when a player
+disconnects; an older web app selects it). The migration refuses to run while a function,
+policy or view in `public` still names either column. On a fresh project (nothing deployed
+yet) it is safe to apply with the others. pgTAP: `supabase/tests/04_legacy_clock_columns.test.sql`.
+
 ### 1c. Enable Google OAuth (optional)
 1. Go to **Authentication → Providers → Google**
 2. Enable it, add your Google Cloud OAuth Client ID and Secret
