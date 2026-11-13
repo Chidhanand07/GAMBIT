@@ -86,6 +86,20 @@ describe('ProfileProvider', () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1)
     })
 
+    test('F17: a profile request still in flight at SIGNED_OUT does not bring the profile back', async () => {
+        render(<ProfileProvider><Probe /></ProfileProvider>)
+        await flush()
+        expect(screen.getByTestId('probe')).toHaveTextContent('alice')
+        let resolveLate!: (v: unknown) => void
+        fetchMock.mockImplementationOnce(() => new Promise(r => { resolveLate = r }))
+        await act(async () => { authListener!('TOKEN_REFRESHED') })
+        await act(async () => { authListener!('SIGNED_OUT') })
+        expect(screen.getByTestId('probe')).toHaveTextContent('none')
+        await act(async () => { resolveLate(jsonResponse({ id: 'u1', username: 'alice' })) })
+        await flush()
+        expect(screen.getByTestId('probe')).toHaveTextContent('none')
+    })
+
     test('refetch from context re-requests the profile', async () => {
         render(<ProfileProvider><Probe /></ProfileProvider>)
         await flush()
