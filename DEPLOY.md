@@ -371,6 +371,8 @@ The fix is to upgrade the dependency. When that is not possible yet, add an exce
 ```
 Every field is required. `scope` is `server`, `frontend` or `chess-engine` (one entry per package tree), and `expires` may be at most 90 days ahead. An expired or incomplete entry fails the check; an entry that no longer matches a finding only warns, so delete it once the upgrade lands.
 
+Prefer upgrading (or removing) the direct dependency that pulls a vulnerable package; use an npm `overrides` entry only when no direct upgrade exists, and record why and when it can go. The audit went green on 2026-11-14 with an empty allow-list and no `overrides` (socket.io/socket.io-client 4.8.4, zod 4, nanoid 3.3.20, axios removed from the server, FastAPI 0.162 with Starlette ≥ 1.3.1 in the engine). Each service must be redeployed (the engine image rebuilt) for a dependency fix to reach production.
+
 ---
 
 ## 9. Check for Schema Drift (Supabase)
