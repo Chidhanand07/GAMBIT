@@ -122,6 +122,17 @@ describe('server sync', () => {
         expect(s.blackTime).toBe(600)
     })
 
+    test('clockSynced keeps the local clock within 500 ms of the server and takes the server value beyond it [F5]', () => {
+        const at = (seconds: number, whiteMs: number) =>
+            run([{ type: 'clockPreset', seconds }, { type: 'clockSynced', whiteMs, blackMs: seconds * 1000 }]).whiteTime
+        // Was: overridden on any rounded difference, so exactly 500 ms ahead jumped 60 → 61.
+        expect(at(60, 60_500)).toBe(60)
+        expect(at(60, 59_500)).toBe(60)
+        expect(at(60, 60_501)).toBe(61)
+        expect(at(60, 59_499)).toBe(59)
+        expect(at(60, 58_000)).toBe(58)
+    })
+
     test('clockTicked decrements the side to move and floors at 0; any non-"w" side ticks black', () => {
         const s = run([{ type: 'clockPreset', seconds: 1 }, { type: 'clockTicked', side: 'w' }, { type: 'clockTicked', side: 'w' }])
         expect(s.whiteTime).toBe(0)

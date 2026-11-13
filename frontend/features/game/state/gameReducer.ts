@@ -56,6 +56,8 @@ export interface GameState {
 
 const DEFAULT_CLOCK_SECONDS = 600;
 const MS_PER_SECOND = 1000;
+/** clock_sync overrides the local clock only when it has drifted further than this from the server. */
+export const CLOCK_SYNC_TOLERANCE_MS = 500;
 const WELCOME_LINE: ChatLine = { from: 'System', text: 'Game started. Good luck!' };
 
 export function createInitialGameState(): GameState {
@@ -131,10 +133,13 @@ type Handlers = { [K in GameAction['type']]: (state: GameState, action: ActionOf
 
 const msToSeconds = (ms: number) => Math.round(ms / MS_PER_SECOND);
 
-/** clock_sync rule: take the server value unless the difference is not > 0 (equal, or NaN). */
+/**
+ * clock_sync rule (F5): take the server value when the local clock is more than
+ * CLOCK_SYNC_TOLERANCE_MS away from it; otherwise (or for NaN) keep the local value, so a
+ * sync that agrees within half a second never makes the display jump.
+ */
 function syncedSeconds(prev: number, ms: number): number {
-    const server = msToSeconds(ms);
-    return Math.abs(prev - server) > 0 ? server : prev;
+    return Math.abs(prev * MS_PER_SECOND - ms) > CLOCK_SYNC_TOLERANCE_MS ? msToSeconds(ms) : prev;
 }
 
 /** Fresh empty destination list each time, as the legacy `setLegalDests([])` did. */
