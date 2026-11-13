@@ -22,6 +22,14 @@ BOOK_MAX_PLY = 8
 BOOK_MAX_LOSS = 40
 BOOK_CLASSES = ("Best", "Excellent", "Good")
 CRITICAL_CLASSES = ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]
+# The only `games` columns a review writes (never ratings, result or status).
+REVIEW_COLUMNS = (
+    "white_accuracy",
+    "black_accuracy",
+    "white_move_classifications",
+    "black_move_classifications",
+    "critical_moments",
+)
 
 # Outcomes of `game_review_status`.
 COMPLETED_STATUS = "completed"
@@ -122,6 +130,12 @@ def _review_game(sf: Any, game: chess.pgn.Game) -> dict:
     }
 
 
+def review_pgn(sf: Any, pgn: str) -> dict | None:
+    """The `games` update (REVIEW_COLUMNS) for `pgn`, or None when it has no move to review."""
+    game = parse_game_with_moves(pgn)
+    return None if game is None else _review_game(sf, game)
+
+
 def game_review_status(seams: EngineSeams, game_id: str) -> str:
     """
     Whether a review may be written for `game_id`: one of the REVIEW_* values.
@@ -144,7 +158,7 @@ def game_review_status(seams: EngineSeams, game_id: str) -> str:
     return REVIEW_OK if rows[0].get("status") == COMPLETED_STATUS else REVIEW_GAME_NOT_COMPLETED
 
 
-def _save_review(seams: EngineSeams, game_id: str, update: dict) -> bool:
+def save_review(seams: EngineSeams, game_id: str, update: dict) -> bool:
     """Write the review; True only when the update was sent without an error."""
     db = seams.supabase
     if not db:
@@ -174,11 +188,11 @@ def run_full_game_analysis(game_id: str, pgn: str, seams: EngineSeams) -> str:
         return ANALYSIS_ENGINE_UNAVAILABLE
     # Note: sf is already acquired from pool; release in finally below
     try:
-        game = parse_game_with_moves(pgn)
-        if game is None:
+        update = review_pgn(sf, pgn)
+        if update is None:
             print(f"Skipping analysis for {game_id}, PGN has no moves")
             return ANALYSIS_NO_MOVES
-        saved = _save_review(seams, game_id, _review_game(sf, game))
+        saved = save_review(seams, game_id, update)
         return ANALYSIS_SAVED if saved else ANALYSIS_NOT_SAVED
     finally:
         seams.release_stockfish_instance(sf)

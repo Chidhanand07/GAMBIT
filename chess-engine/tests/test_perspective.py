@@ -168,7 +168,7 @@ def review_of(pgn, monkeypatch, engine_switch):
 
     engine_switch.instance = material_engine()
     captured = {}
-    monkeypatch.setattr(review, "_save_review", lambda _seams, _gid, update: captured.update(update) or True)
+    monkeypatch.setattr(review, "save_review", lambda _seams, _gid, update: captured.update(update) or True)
     main.run_full_game_analysis(GAME_ID, pgn)
     return captured
 

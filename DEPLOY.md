@@ -396,3 +396,17 @@ The script runs `supabase db diff --remote --schema public` (`--linked` on CLI 2
 5. Never fix drift by editing the remote by hand, and never edit an already-applied migration file (SEC-08). If only the history table disagrees (`migration list` shows a version on one side), reconcile it with `supabase migration repair`.
 
 > Not yet verified: the script and workflow follow the Supabase CLI v3.1.0 reference but have not been run against a real project. Confirm the first manual run before relying on the schedule.
+
+---
+
+## 10. Re-run Stored Game Reviews (after the evaluation-perspective fix)
+
+Reviews written before the ENG-PERSPECTIVE fix (ADR F-060) scored every White move wrongly (1.e4 showed as "Inaccuracy") and drew White's moves upside down on the eval graph. `chess-engine/scripts/rereview_games.py` rebuilds the stored reviews of completed games. It writes only the review columns (`white_accuracy`, `black_accuracy`, `white_move_classifications`, `black_move_classifications`, `critical_moments`), only on rows whose `status` is `completed`, and never ratings, results or statuses.
+
+Run it once after the fix is deployed, from a shell on the engine service (Render → the engine → **Shell**), which already has `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `STOCKFISH_PATH`:
+```bash
+cd /app                                                   # chess-engine/ when run locally
+python -m scripts.rereview_games --limit 20               # DRY RUN: prints what would change, writes nothing
+python -m scripts.rereview_games --apply --concurrency 2  # writes the new reviews
+```
+Options: `--since 2026-11-01` (games that ended at or after that time; games without `ended_at` are skipped by it), `--limit N` (newest first), `--game-id <uuid>` (repeatable), `--concurrency N` (1–8, default 2; each worker holds one Stockfish instance, so keep it at or below `STOCKFISH_POOL_SIZE` while the service is serving players). Each game takes a depth-18 Stockfish pass per move, so a large backfill takes a while: start with `--limit`, then widen. Exit code 0 = no failures, 1 = some games failed (listed; rerun with `--game-id`), 2 = Supabase not configured. Re-running is safe: an unchanged review is not rewritten.
