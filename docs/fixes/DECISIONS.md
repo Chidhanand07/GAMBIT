@@ -1767,3 +1767,48 @@ instead of one file per ADR under `docs/refactor/adr/`.
   workers (the engine gate is per process).
 - *The web and engine parts were implemented on a side branch by a helper agent
   (`wip/medium-3-limits`) and squashed into this item's single commit.*
+
+## F-053
+
+**Ratings and statistics are written once per game, atomically, by `public.apply_game_result` (RATING-ATOMIC). Closes the SEC-04 deviation recorded in F-017.**
+
+- **Context.** `ratingService` read both profiles, computed Glicko-2 in Node and wrote each
+  profile with its own UPDATE. Two games of the same player finishing together both read the
+  same old values and the second write overwrote the first (a lost rating change and a lost
+  `games_played`). Nothing recorded that a game had been rated, so a retry rated it twice.
+- **Options.** (a) port Glicko-2 to plpgsql; (b) keep Glicko-2 in Node, and let a database
+  function apply the values under row locks with a compare-and-set on the inputs, setting
+  `games.rated_at` in the same transaction; (c) `SELECT … FOR UPDATE` from Node (impossible:
+  supabase-js has no interactive transactions).
+- **Decision.** (b). Migration `20261113100000_rating_atomic.sql`: `games.rated_at`, and
+  `public.apply_game_result(p_game_id, p_white_id, p_black_id, p_result, p_rating_field,
+  p_white jsonb, p_black jsonb) returns text`, `security definer`, `set search_path = ''`,
+  schema-qualified names, EXECUTE revoked from `public`/`anon`/`authenticated`, granted to
+  `service_role`. In one transaction it locks the game row, refuses a game that is not
+  `completed` or whose players, colours, result or rated flag do not match, returns
+  `already_applied` if `rated_at` is set, locks both profiles in id order, compares the stored
+  rating/rd/vol/games_played with what the server computed from (`stale` on any difference),
+  updates both profiles (stats always; rating, rd, vol when rated) and sets `rated_at`. The
+  server re-reads and recomputes on `stale`, at most 5 times; it broadcasts `rating_updated` only
+  for an `applied` result. `profilesRepository.updateById` is removed: the game server has no
+  other way to write a profile.
+- **Why.** One Glicko implementation, unit-tested in `domain/rating/glicko.js`; the
+  compare-and-set makes concurrent games equal to applying them one after another;
+  `rated_at` under the game-row lock makes a second call a no-op; a fixed lock order prevents
+  deadlocks; even the service role cannot rate an aborted, active or mismatched game.
+- **Consequences / rollout.** Existing completed games are backfilled `rated_at =
+  coalesce(ended_at, now())`. **Apply the migration before deploying the server**: it is
+  additive, and older servers keep rating the old way. A server deployed before the migration
+  rates nothing (every call fails, logged). A game that stays `stale` after 5 attempts or is
+  refused stays unrated and is logged with its id. `service_role` still has table-level UPDATE
+  on `profiles` (the web app's routes use it), so "only through the function" holds for the game
+  server's code, not yet as a database privilege.
+- **Tests.** Server: concurrent games of one player both count; double calls apply once;
+  unrated games go through the function; refusals and endless `stale` are bounded and logged.
+  pgTAP `03_rating_function.test.sql` (31 assertions). Run locally on a throwaway Postgres 17
+  through a pgTAP shim, plus a two-session probe (blocked, then `stale`, then `applied`); real
+  `supabase test db` runs in CI only.
+- **Not verified.** PostgREST `rpc` end to end, in particular that float8 rd/vol round-trip
+  exactly for the compare-and-set. If they do not, every rated game would come back `stale`
+  and stay unrated after 5 attempts; check one rated game on staging first.
+- *Implemented on a side branch by a helper agent (`wip/medium-3-rating`) and cherry-picked.*
