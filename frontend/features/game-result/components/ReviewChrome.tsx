@@ -18,7 +18,7 @@ const Centered = ({ children }: { children: ReactNode }) => (
 const Spinner = () => <div className="w-12 h-12 border-4 border-border border-t-accent rounded-full animate-spin" />;
 
 /** Loading, error and "analysing" screens shown before the review is ready. */
-export function ReviewStatusScreen({ status }: { status: ReviewStatus }) {
+export function ReviewStatusScreen({ status, onRetry }: { status: ReviewStatus; onRetry: () => void }) {
     if (status === 'loading')
         return (
             <Centered>
@@ -30,6 +30,9 @@ export function ReviewStatusScreen({ status }: { status: ReviewStatus }) {
         return (
             <Centered>
                 <p className="text-text-secondary">Couldn&apos;t load this game.</p>
+                <button onClick={onRetry} className="text-accent hover:underline">
+                    Try again
+                </button>
                 <Link href="/lobby" className="text-accent">
                     Back to lobby
                 </Link>
