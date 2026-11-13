@@ -98,12 +98,24 @@ components/           app-wide providers (Socket, Profile, Presence), Navbar ent
 ## Chess engine (`chess-engine/`)
 
 ```
-main.py         FastAPI app; includes routers in the original order; `uvicorn main:app`
-config.py       the only reader of env vars
-routers/        health, moves, analysis, computer  (APIRouter)
-services/       analysis (scoring, classification), review (full-game pipeline)
-engine.py       Stockfish pool API
-seams.py        late-bound dependency lookup through `main` (ADR 0301)
+main.py             FastAPI app (composition root); includes routers; `uvicorn main:app`
+config.py           the only reader of env vars; named limits (e.g. MAX_ANALYSIS_DEPTH)
+auth.py             X-Engine-Key shared-secret check for every route but /health
+seams.py            late-bound dependency lookup through `main` (ADR 0301)
+engine.py           Stockfish pool API (bounded admission, background instances)
+computer_engine.py  MAVERICK computer opponent: style model supervised by Stockfish
+style_engine.py     style-model loading and /style-move
+model.py            style policy network and board encoding; weights in style_model.pt
+routers/            health, moves, fen (FEN/move validation), analysis, computer  (APIRouter)
+services/
+  perspective.py    the one evaluation-perspective convention (package scores are White's view)
+  analysis.py       move scoring and classification
+  review.py         full-game review pipeline; writes the review columns of `games`
+  rereview.py       re-run stored reviews (used by scripts/rereview_games.py)
+  model_store.py    fetch/verify the MAVERICK weights
+scripts/            one-off operator commands (`python -m scripts.rereview_games`, DEPLOY.md §10)
+tests/              pytest; Stockfish faked (FakeStockfish models the package), real-binary tests opt-in
+Dockerfile          the runtime (Python, requirements.txt, Debian Stockfish)
 ```
 
 ## Shared definitions (`shared/`)
