@@ -7,10 +7,11 @@
  */
 
 /** Columns needed to rebuild Redis state after a server restart (join_game). */
-const RESTORE_COLUMNS = 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms';
+const RESTORE_COLUMNS =
+    'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id';
 
-/** Invite lookup with both players' profiles; whitespace kept as originally written. */
-const INVITE_COLUMNS = `
+/** A game with both players' profiles (invite page); whitespace kept as originally written. */
+const WITH_PLAYERS_COLUMNS = `
                 *,
                 white:profiles!white_id(username, avatar_url),
                 black:profiles!black_id(username, avatar_url)
@@ -28,11 +29,18 @@ function createGamesRepository(supabase) {
         findForRestore: (gameId) => supabase.from('games').select(RESTORE_COLUMNS).eq('id', gameId).maybeSingle(),
 
         /**
-         * Private game by invite token, with white/black profile joins.
-         * @param {string} token
+         * A game by id, with white/black profile joins (the invite page). The
+         * invite token itself is in `game_invites` (gameInvitesRepository).
+         * @param {string} gameId
          */
-        findByInviteToken: (token) =>
-            supabase.from('games').select(INVITE_COLUMNS).eq('invite_token', token).maybeSingle(),
+        findByIdWithPlayers: (gameId) =>
+            supabase.from('games').select(WITH_PLAYERS_COLUMNS).eq('id', gameId).maybeSingle(),
+
+        /**
+         * Delete a game by id (used to undo a private game whose invite could not be stored).
+         * @param {string} gameId
+         */
+        deleteById: (gameId) => supabase.from('games').delete().eq('id', gameId),
 
         /**
          * Insert one game and return the created row.

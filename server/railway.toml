@@ -1,8 +1,10 @@
 [build]
-builder = "NIXPACKS"
-buildCommand = "npm install"
+# The Dockerfile pins the Node major (NODE-01); a buildpack would pick its own.
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npm start"
-healthcheckPath = "/api/health"
+# /readyz answers 200 only when Redis and Supabase respond and the process is not draining
+# (NODE-21). A deploy whose replica cannot reach them does not go live; that is intended (ADR F-071).
+healthcheckPath = "/readyz"
 restartPolicyType = "ON_FAILURE"

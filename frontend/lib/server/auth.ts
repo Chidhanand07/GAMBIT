@@ -25,15 +25,38 @@ function signupErrorMessage(error: { message: string }): string {
         : error.message;
 }
 
+/** Outcome of a signup: ok, or the status and message the route returns. */
+export type SignupResult = { ok: true } | { ok: false; status: 400 | 500; message: string };
+
+const HTTP_BAD_REQUEST = 400;
+const HTTP_SERVER_ERROR = 500;
+const ROLLBACK_FAILED_MESSAGE = 'Signup could not be completed. Please contact support before trying again.';
+
+/**
+ * Deletes the auth user of a signup whose profile could not be created. True when it is gone;
+ * a failure (error result or throw) is logged with the user id (never the e-mail), because
+ * that account now exists without a profile and blocks a retry with the same e-mail (F18).
+ */
+async function rollBackAuthUser(admin: SupabaseClient, userId: string): Promise<boolean> {
+    try {
+        const { error } = await admin.auth.admin.deleteUser(userId);
+        if (!error) return true;
+        console.error('[auth/signup] rollback deleteUser failed for user', userId, error.message);
+    } catch (err) {
+        console.error('[auth/signup] rollback deleteUser threw for user', userId, err);
+    }
+    return false;
+}
+
 /**
  * Signup: creates an unconfirmed auth user via the admin API (bypasses the anon email rate
  * limits), then its default profile; deletes the auth user again if the profile insert fails.
- * Returns the 400 error message, or null on success.
+ * A failed rollback is a 500 instead of the insert's 400 (F18).
  */
 export async function createUserWithProfile(
     admin: SupabaseClient,
     input: { email: string; password: string; username: string },
-): Promise<string | null> {
+): Promise<SignupResult> {
     const { email, password, username } = input;
     const { data: created, error: authError } = await admin.auth.admin.createUser({
         email,
@@ -41,16 +64,17 @@ export async function createUserWithProfile(
         email_confirm: false,
     });
 
-    if (authError) return signupErrorMessage(authError);
-    if (!created?.user) return 'Signup failed. Please try again.';
+    if (authError) return { ok: false, status: HTTP_BAD_REQUEST, message: signupErrorMessage(authError) };
+    if (!created?.user) return { ok: false, status: HTTP_BAD_REQUEST, message: 'Signup failed. Please try again.' };
 
     const { error: profileError } = await insertProfile(admin, newProfileRow(created.user.id, username));
+    if (!profileError) return { ok: true };
 
-    if (profileError) {
-        await admin.auth.admin.deleteUser(created.user.id);
-        return profileError.message.includes('unique') ? 'Username already taken' : profileError.message;
+    if (!(await rollBackAuthUser(admin, created.user.id))) {
+        return { ok: false, status: HTTP_SERVER_ERROR, message: ROLLBACK_FAILED_MESSAGE };
     }
-    return null;
+    const message = profileError.message.includes('unique') ? 'Username already taken' : profileError.message;
+    return { ok: false, status: HTTP_BAD_REQUEST, message };
 }
 
 /**

@@ -1,5 +1,6 @@
 import { BarChart2 } from 'lucide-react';
 import { ANALYSIS_DEPTH } from '@/lib/api/analysis';
+import { formatEvaluation } from '../evaluation';
 import type { EngineAnalysis } from '../types';
 
 /** Scores within ±0.2 pawns are shown as neutral. */
@@ -9,6 +10,14 @@ const PV_SHOWN = 8;
 function scoreColor(score: number, neutral: string) {
     if (score > NEUTRAL_BAND) return 'var(--green)';
     return score < -NEUTRAL_BAND ? 'var(--red)' : neutral;
+}
+
+function EngineUnavailable() {
+    return (
+        <p className="text-xs py-1" style={{ color: 'var(--red)' }}>
+            Engine unavailable. It will try again on the next move.
+        </p>
+    );
 }
 
 function EngineResult({ data }: { data: EngineAnalysis }) {
@@ -27,8 +36,7 @@ function EngineResult({ data }: { data: EngineAnalysis }) {
                         className="text-base font-bold tabular-nums"
                         style={{ color: scoreColor(data.score, 'var(--text-secondary)') }}
                     >
-                        {data.score > 0 ? '+' : ''}
-                        {data.score?.toFixed(1) ?? '0.0'}
+                        {formatEvaluation(data)}
                     </span>
                     <span className="text-sm font-medium text-accent">{data.best_move}</span>
                 </div>
@@ -69,14 +77,21 @@ function Analyzing() {
     );
 }
 
+function EngineStatus({ data, failed }: { data: EngineAnalysis | null; failed: boolean }) {
+    if (data) return <EngineResult data={data} />;
+    return failed ? <EngineUnavailable /> : <Analyzing />;
+}
+
 interface EnginePanelProps {
     enabled: boolean;
     onToggle: () => void;
     data: EngineAnalysis | null;
+    /** The last request failed (engine down, busy, or an unreadable answer). */
+    failed: boolean;
 }
 
 /** Stockfish header with the on/off switch and the current evaluation. */
-export function EnginePanel({ enabled, onToggle, data }: EnginePanelProps) {
+export function EnginePanel({ enabled, onToggle, data, failed }: EnginePanelProps) {
     return (
         <div className="shrink-0 p-3 space-y-3" style={{ borderBottom: '0.5px solid var(--border)' }}>
             <div className="flex items-center justify-between">
@@ -113,7 +128,7 @@ export function EnginePanel({ enabled, onToggle, data }: EnginePanelProps) {
                 </button>
             </div>
 
-            {enabled && (data ? <EngineResult data={data} /> : <Analyzing />)}
+            {enabled && <EngineStatus data={data} failed={failed} />}
 
             {!enabled && (
                 <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>

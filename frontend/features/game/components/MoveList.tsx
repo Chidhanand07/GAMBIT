@@ -7,7 +7,7 @@ export interface MoveListProps {
     moveList: string[];
     viewIndex: number | null;
     onSelect: (index: number) => void;
-    scrollRef: RefObject<HTMLDivElement>;
+    scrollRef: RefObject<HTMLDivElement | null>;
 }
 
 const moveClass = (selected: boolean) =>

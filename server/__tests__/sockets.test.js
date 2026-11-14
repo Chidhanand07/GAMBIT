@@ -22,6 +22,8 @@ let server, io, matchmaking, url;
 const clients = [];
 
 beforeAll(async () => {
+    // The engine client refuses to call the engine without its shared secret (ENG-AUTH).
+    process.env.ENGINE_SHARED_SECRET = 'test-engine-secret';
     jest.spyOn(console, 'log').mockImplementation(() => {});
     ({ server, io, matchmaking } = require('../server'));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -37,6 +39,7 @@ afterAll(async () => {
 let fetchMock;
 beforeEach(() => {
     supabase.reset();
+    supabase.auth.getUser.mockImplementation(verifyTestToken);
     redis._reset();
     rating.processGameEnd.mockClear();
     // Default engine: every move is legal and produces AFTER_E4.
@@ -71,14 +74,26 @@ function record(socket, event) {
     return got;
 }
 
-async function connect(userId) {
-    const socket = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+const TOKEN_PREFIX = 'test-token:';
+
+/** Stand-in for Supabase Auth: `test-token:<id>` verifies as user `<id>`; anything else is invalid. */
+async function verifyTestToken(token) {
+    return typeof token === 'string' && token.startsWith(TOKEN_PREFIX)
+        ? { data: { user: { id: token.slice(TOKEN_PREFIX.length) } }, error: null }
+        : { data: { user: null }, error: { message: 'invalid token' } };
+}
+
+/** A client that has not finished its handshake; `auth` is sent as `handshake.auth`. */
+function open(auth) {
+    const socket = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false, auth });
     clients.push(socket);
+    return socket;
+}
+
+/** Connect with a handshake token that verifies as `userId`. */
+async function connect(userId) {
+    const socket = open({ token: `${TOKEN_PREFIX}${userId}` });
     await once(socket, 'connect');
-    if (userId) {
-        socket.emit('authenticate', userId);
-        await once(socket, 'authenticated');
-    }
     return socket;
 }
 
@@ -153,7 +168,7 @@ describe('making moves', () => {
     test('the player to move can move; both players receive it with clocks', async () => {
         const { white, black } = await seatedGame();
         const seenByBlack = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4', fen: 'client-fen-ignored' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', san: 'e4', fen: 'client-fen-ignored' });
 
         const move = await seenByBlack;
         expect(move).toMatchObject({ move: 'e2e4', san: 'e4', fen: AFTER_E4, whiteMs: 600000, blackMs: 600000 });
@@ -164,17 +179,17 @@ describe('making moves', () => {
         expect(state.lastMoveAt).toEqual(expect.any(Number));
     });
 
-    test('the server uses the engine\'s FEN, not the one the client sent', async () => {
+    test('the server computes the FEN itself; the one the client sent is ignored [S1]', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4', fen: '8/8/8/8/8/8/8/K6k w - - 0 1' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', san: 'e4', fen: '8/8/8/8/8/8/8/K6k w - - 0 1' });
         expect((await p).fen).toBe(AFTER_E4);
     });
 
     test('moving out of turn is ignored', async () => {
         const { white, black } = await seatedGame();
         const moves = record(white, 'move_made');
-        black.emit('make_move', { game_id: 'game-1', move: 'e7e5', san: 'e5' });
+        black.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'e5' });
         await sleep(100);
         expect(moves).toHaveLength(0);
         expect((await getGame('game-1')).activeSide).toBe('w');
@@ -184,35 +199,42 @@ describe('making moves', () => {
         const { white } = await seatedGame();
         const stranger = await connect('stranger');
         const moves = record(white, 'move_made');
-        stranger.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        stranger.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
         expect(moves).toHaveLength(0);
     });
 
-    test('an unauthenticated socket cannot move', async () => {
+    test('an unauthenticated socket cannot even connect, so it cannot move [S2]', async () => {
         const { white } = await seatedGame();
-        const anon = await connect(null);
         const moves = record(white, 'move_made');
-        anon.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        const anon = open(undefined);
+        const refused = await once(anon, 'connect_error');
+        expect(refused.message).toBe('unauthorized');
+        anon.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
+        expect(anon.connected).toBe(false);
         expect(moves).toHaveLength(0);
     });
 
-    test('an illegal move (per the engine) is rejected', async () => {
-        fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ valid: false }) }));
+    test('an illegal move is rejected by the server itself, and the sender is resynced [S1]', async () => {
         const { white, black } = await seatedGame();
         const moves = record(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e5', san: 'e5??' });
-        await sleep(100);
+        const rejected = once(white, 'move_rejected');
+        const resync = once(white, 'game_state_sync');
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e5', san: 'e5??' });
+        expect(await rejected).toEqual({ game_id: 'game-1', reason: 'illegal_move' });
+        expect((await resync).fen).toBe(START_FEN);
+        await sleep(50);
         expect(moves).toHaveLength(0);
         expect((await getGame('game-1')).fen).toBe(START_FEN);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('moves on a finished game are ignored', async () => {
         const { white, black } = await seatedGame();
         await setGame('game-1', { ...(await getGame('game-1')), status: 'completed' });
         const moves = record(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await sleep(100);
         expect(moves).toHaveLength(0);
     });
@@ -220,7 +242,7 @@ describe('making moves', () => {
     test('time spent is deducted from the mover and the increment is added', async () => {
         const { white, black } = await seatedGame({ lastMoveAt: Date.now() - 4000, whiteClockMs: 60000, incrementMs: 2000 });
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         const { whiteMs, blackMs } = await p;
         // 60 s - ~4 s thinking + 2 s increment ≈ 58 s
         expect(whiteMs).toBeGreaterThan(57500);
@@ -231,73 +253,109 @@ describe('making moves', () => {
     test('the first move does not consume clock time', async () => {
         const { white, black } = await seatedGame({ lastMoveAt: null, whiteClockMs: 60000 });
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         expect((await p).whiteMs).toBe(60000);
     });
 
     test('each move is persisted to the moves table', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'move_made');
-        white.emit('make_move', { game_id: 'game-1', move: 'e2e4', san: 'e4' });
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4' });
         await p;
         await sleep(20);
         const insert = supabase.op(supabase.callsFor('moves')[0], 'insert')[0];
         expect(insert).toMatchObject({ game_id: 'game-1', move_number: 1, color: 'white', uci: 'e2e4', san: 'e4', fen_after: AFTER_E4 });
     });
 
-    test.todo('when the engine is unreachable, moves are accepted without validation (consider rejecting instead)');
+    test('with the engine unreachable, legal moves still work and illegal ones are still rejected [S10]', async () => {
+        fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+        const { white, black } = await seatedGame();
+        const p = once(black, 'move_made');
+        white.emit('make_move', { game_id: 'game-1', from: 'e2', to: 'e4', fen: 'client-fen' });
+        expect((await p).fen).toBe(AFTER_E4);
+        const rejected = once(black, 'move_rejected');
+        black.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'e2', fen: 'client-fen' });
+        expect((await rejected).reason).toBe('illegal_move');
+        expect((await getGame('game-1')).fen).toBe(AFTER_E4);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('ending a game', () => {
-    test('game_end uses server-side player ids, finalizes once, and rates the game', async () => {
+    /** Answer the "finish if still active" update; any other games write gets an empty result. */
+    function dbFinishAnswers(finished = { data: { id: 'game-1' }, error: null }) {
+        const answer = (call) => (supabase.op(call, 'update')?.[0]?.status ? finished : { data: null, error: null });
+        supabase.queue('games', answer, answer, answer);
+    }
+    const finishUpdate = () => supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
+    const emitAck = (socket, event, payload) => new Promise(resolve => socket.emit(event, payload, resolve));
+
+    test('resign: the server names the winner, finalizes once, and rates the game [S3]', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
-        rating.processGameEnd.mockResolvedValueOnce({ white: { change: 8 }, black: { change: -8 } });
+        dbFinishAnswers();
+        rating.processGameEnd.mockResolvedValueOnce({ white: { change: -8 }, black: { change: 8 } });
 
         const ended = once(black, 'game_end');
         const rated = once(black, 'rating_updated');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins', reason: 'Resignation', white_id: 'evil', black_id: 'evil' });
+        // White resigns; anything else in the payload (a claimed result, player ids) is dropped.
+        white.emit('resign', { game_id: 'game-1', result: 'White wins', white_id: 'evil', black_id: 'evil' });
 
-        expect(await ended).toMatchObject({ result: 'White wins', white_id: 'white-user', black_id: 'black-user' });
+        expect(await ended).toEqual({
+            game_id: 'game-1', result: 'Black wins', reason: 'Resignation', white_id: 'white-user', black_id: 'black-user',
+        });
         await rated;
 
-        expect(await getGame('game-1')).toMatchObject({ status: 'completed', result: 'white' });
+        expect(await getGame('game-1')).toMatchObject({ status: 'completed', result: 'black', reason: 'Resignation' });
         expect(await getActiveGameIds()).not.toContain('game-1');
 
-        const update = supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
-        expect(supabase.op(update, 'update')[0]).toMatchObject({ winner_id: 'white-user', result: null });
+        const update = finishUpdate();
+        expect(supabase.op(update, 'update')[0]).toMatchObject({ winner_id: 'black-user', result: 'black' });
         expect(update.ops).toContainEqual(['eq', 'status', 'active']);
-        expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'white', '10', true);
+        expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'black', '10', true);
     });
 
-    test('a draw has no winner', async () => {
-        const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
+    test('a draw (stalemate) has no winner', async () => {
+        const fen = '7k/4Q3/6K1/8/8/8/8/8 w - - 0 1';
+        const { white, black } = await seatedGame({ fen, startFen: fen });
+        dbFinishAnswers();
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'Draw', reason: 'Agreement' });
-        await p;
+        white.emit('make_move', { game_id: 'game-1', from: 'e7', to: 'f7' });
+        expect(await p).toMatchObject({ result: 'Draw', reason: 'Stalemate' });
         await sleep(20);
-        const update = supabase.callsFor('games').find(c => supabase.op(c, 'update')?.[0]?.status === 'completed');
-        expect(supabase.op(update, 'update')[0]).toMatchObject({ result: 'draw', winner_id: null });
+        expect(supabase.op(finishUpdate(), 'update')[0]).toMatchObject({ result: 'draw', winner_id: null });
     });
 
-    test('a second game_end for the same game is ignored', async () => {
+    test('a client `game_end` is ignored: clients cannot report results [S3]', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
         const ends = record(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins' });
+        white.emit('game_end', { game_id: 'game-1', result: 'White wins', reason: 'Checkmate' });
         black.emit('game_end', { game_id: 'game-1', result: 'Black wins' });
         await sleep(150);
+        expect(ends).toHaveLength(0);
+        expect(rating.processGameEnd).not.toHaveBeenCalled();
+        expect(await getGame('game-1')).toMatchObject({ status: 'active', result: null });
+        expect(finishUpdate()).toBeUndefined();
+    });
+
+    test('a second ending for the same game is ignored', async () => {
+        const { white, black } = await seatedGame();
+        dbFinishAnswers();
+        const ends = record(black, 'game_end');
+        const acks = await Promise.all([
+            emitAck(white, 'resign', { game_id: 'game-1' }),
+            emitAck(black, 'resign', { game_id: 'game-1' }),
+        ]);
+        await sleep(100);
+        expect(acks.filter(a => a.ok)).toHaveLength(1);
         expect(ends).toHaveLength(1);
         expect(rating.processGameEnd).toHaveBeenCalledTimes(1);
-        expect((await getGame('game-1')).result).toBe('white');
     });
 
     test('the game is not rated twice if the database says it was already finalized', async () => {
         const { white, black } = await seatedGame();
-        supabase.queue('games', { data: null, error: null });
+        dbFinishAnswers({ data: null, error: null });
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'White wins' });
+        white.emit('resign', { game_id: 'game-1' });
         await p;
         await sleep(50);
         expect(rating.processGameEnd).not.toHaveBeenCalled();
@@ -305,24 +363,32 @@ describe('ending a game', () => {
 
     test('a finished game with moves is sent to the engine for review', async () => {
         const { white, black } = await seatedGame({ moveLog: [{ san: 'e4' }, { san: 'e5' }] });
-        supabase.queue('games', { data: { id: 'game-1' }, error: null });
+        dbFinishAnswers();
         const p = once(black, 'game_end');
-        white.emit('game_end', { game_id: 'game-1', result: 'Draw' });
+        white.emit('resign', { game_id: 'game-1' });
         await p;
         await sleep(30);
         const review = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/analyse-game'));
         expect(JSON.parse(review[1].body)).toMatchObject({ game_id: 'game-1', pgn: expect.stringContaining('1. e4 e5') });
     });
 
-    test.todo('game_end is accepted from any socket, including non-players and the losing claim of the winner (verify sender + result server-side)');
+    test('only a participant can end a game, and only by resigning their own side [S3]', async () => {
+        const { white } = await seatedGame();
+        const stranger = await connect('stranger');
+        const ends = record(white, 'game_end');
+        expect(await emitAck(stranger, 'resign', { game_id: 'game-1' })).toEqual({ ok: false, error: 'not_a_player' });
+        await sleep(50);
+        expect(ends).toHaveLength(0);
+        expect((await getGame('game-1')).status).toBe('active');
+    });
 });
 
 describe('chat', () => {
     test('players can chat; the sender id is set by the server', async () => {
         const { white, black } = await seatedGame();
         const p = once(black, 'chat_message');
-        white.emit('send_message', { game_id: 'game-1', message: 'gl hf', from_user_id: 'spoofed' });
-        expect(await p).toMatchObject({ message: 'gl hf', from_user_id: 'white-user' });
+        white.emit('send_message', { game_id: 'game-1', text: 'gl hf', from_user_id: 'spoofed' });
+        expect(await p).toMatchObject({ text: 'gl hf', from_user_id: 'white-user' });
         await sleep(20);
         expect(supabase.op(supabase.callsFor('messages')[0], 'insert')[0]).toMatchObject({ user_id: 'white-user', content: 'gl hf' });
     });
@@ -355,11 +421,9 @@ describe('disconnect and reconnect', () => {
         await gone;
 
         const back = once(black, 'opponent_reconnected');
-        const again = ioClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
-        clients.push(again);
-        await once(again, 'connect');
+        // Reconnecting is just connecting again: the handshake token identifies the player [S2].
+        const again = open({ token: `${TOKEN_PREFIX}white-user` });
         const sync = once(again, 'clock_sync');
-        again.emit('authenticate', 'white-user');
 
         expect(await back).toEqual({ userId: 'white-user' });
         await sync;
@@ -371,10 +435,10 @@ describe('disconnect and reconnect', () => {
         supabase.queue('profiles', { data: { id: 'queued', username: 'q', rating_rapid: 1500, games_played: 20 }, error: null });
         s.emit('join_queue', { user: { id: 'queued' }, time_control: '10' });
         await once(s, 'queue_joined');
-        expect(matchmaking.queue.has('queued')).toBe(true);
+        expect(await matchmaking.queuedEntry('queued')).not.toBeNull();
         s.disconnect();
         await sleep(50);
-        expect(matchmaking.queue.has('queued')).toBe(false);
+        expect(await matchmaking.queuedEntry('queued')).toBeNull();
     });
 });
 
@@ -384,20 +448,38 @@ describe('matchmaking queue over sockets', () => {
         supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_blitz: 1650, rating_rapid: 1400, games_played: 30 }, error: null });
         s.emit('join_queue', { user: { id: 'p1', rating: 3000 }, time_control: '3+2' });
         await once(s, 'queue_joined');
-        expect(matchmaking.queue.get('p1')).toMatchObject({ rating: 1650, isProvisional: false });
+        expect(await matchmaking.queuedEntry('p1')).toMatchObject({ rating: 1650, isProvisional: false });
         s.emit('leave_queue', 'p1');
         await sleep(30);
-        expect(matchmaking.queue.has('p1')).toBe(false);
+        expect(await matchmaking.queuedEntry('p1')).toBeNull();
     });
 
     test('join_queue for an unknown user is ignored', async () => {
         const s = await connect('ghost');
         s.emit('join_queue', { user: { id: 'ghost' }, time_control: '10' });
         await sleep(80);
-        expect(matchmaking.queue.has('ghost')).toBe(false);
+        expect(await matchmaking.queuedEntry('ghost')).toBeNull();
     });
 
-    test.todo('authenticate trusts any userId the client sends — verify a Supabase access token instead');
+    test('the queued player is the verified user, whatever id the payload claims [S2]', async () => {
+        const s = await connect('p1');
+        supabase.queue('profiles', { data: { id: 'p1', username: 'p1', rating_rapid: 1400, games_played: 30 }, error: null });
+        s.emit('join_queue', { user: { id: 'victim' }, time_control: '10' });
+        await once(s, 'queue_joined');
+        expect(supabase.op(supabase.callsFor('profiles')[0], 'eq')).toEqual(['id', 'p1']);
+        expect(await matchmaking.queuedUserIds()).toEqual(['p1']);
+    });
+
+    test('leave_queue only removes the caller, not the id in the payload [G13]', async () => {
+        const victim = await connect('victim');
+        supabase.queue('profiles', { data: { id: 'victim', username: 'v', rating_rapid: 1400, games_played: 30 }, error: null });
+        victim.emit('join_queue', { time_control: '10' });
+        await once(victim, 'queue_joined');
+        const attacker = await connect('attacker');
+        attacker.emit('leave_queue', 'victim');
+        await sleep(50);
+        expect(await matchmaking.queuedEntry('victim')).not.toBeNull();
+    });
 });
 
 describe('challenges and rematches', () => {
@@ -412,11 +494,25 @@ describe('challenges and rematches', () => {
         expect(supabase.op(supabase.callsFor('notifications')[0], 'insert')[0]).toMatchObject({ user_id: 'bob', type: 'challenge' });
     });
 
-    test('rematch_decline notifies the requester', async () => {
+    test('rematch_decline notifies the requester of a pending rematch [S4]', async () => {
         const alice = await connect('alice');
         const bob = await connect('bob');
+        const asked = once(bob, 'rematch_request');
+        alice.emit('rematch_request', { to_user_id: 'bob', time_control: '5', is_rated: true });
+        await asked;
         const p = once(alice, 'rematch_declined');
-        bob.emit('rematch_decline', { to_user_id: 'alice' });
+        bob.emit('rematch_decline', { from_user_id: 'alice' });
         await p;
+    });
+
+    test('a rematch nobody asked for cannot be accepted [S4]', async () => {
+        const alice = await connect('alice');
+        const bob = await connect('bob');
+        const ready = record(alice, 'rematch_ready');
+        const ack = await new Promise((resolve) => bob.emit('rematch_accept', { from_user_id: 'alice', is_rated: true }, resolve));
+        expect(ack).toEqual({ ok: false, error: 'no_pending_request' });
+        await sleep(50);
+        expect(ready).toHaveLength(0);
+        expect(supabase.callsFor('games')).toHaveLength(0);
     });
 });

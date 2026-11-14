@@ -19,6 +19,15 @@ jobs:
     name: Server (Node)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A real Redis for the multi-instance tests (Lua compare-and-set, the Socket.IO adapter, TEST-06).
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6379
     defaults:
       run:
         working-directory: server
@@ -26,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
@@ -46,6 +55,8 @@ jobs:
           fi
           npm run lint:baseline
       - run: npx jest --ci
+      - name: Repository script self-tests (schema drift, dependency audit, shared copies, lint baseline)
+        run: node --test ../scripts/*.test.js ../scripts/lint-baseline/*.test.js
 
   frontend:
     name: Frontend (Next.js)
@@ -58,7 +69,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -78,6 +89,15 @@ jobs:
           fi
           npm run lint:baseline
       - run: npx jest --ci
+      # NX-14: the production build type-checks (no ignoreBuildErrors). Placeholder values only:
+      # nothing here is a real key, and the build does not contact Supabase.
+      - name: Production build (next build, with type checking)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
+          NEXT_PUBLIC_SOCKET_URL: http://127.0.0.1:3001
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
 
   engine:
     name: Chess engine (Python)
@@ -100,3 +120,25 @@ jobs:
         run: ruff format --check .
       # Tests fake Stockfish; no binary is installed on purpose.
       - run: python -m pytest -q
+
+  database:
+    name: Database (Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # Local Supabase stack (Postgres + Auth schema + API roles) in Docker.
+      - name: Start Supabase
+        run: supabase start
+      # Rebuild the database from supabase/migrations, from scratch (SEC-08).
+      - name: Apply every migration to an empty database
+        run: supabase db reset
+      # pgTAP: RLS, column privileges and schema guards (TEST-04), supabase/tests/*.sql.
+      - name: Database tests (pgTAP)
+        run: supabase test db
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup

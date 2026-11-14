@@ -51,13 +51,37 @@ describe('resolveSquareClick', () => {
 })
 
 describe('requestEngineAnalysis', () => {
-    test('POSTs {fen, depth: 18} to the default socket URL and returns the JSON without checking ok', async () => {
-        delete process.env.NEXT_PUBLIC_SOCKET_URL
-        const fetchMock = jest.fn(async () => ({ ok: false, json: async () => ({ error: 'x' }) }))
+    const call = ['http://127.0.0.1:3001/api/analysis/engine', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fen: 'FEN', depth: 18 }),
+    }]
+    const respond = (ok: boolean, body: unknown, status = ok ? 200 : 503) => {
+        const fetchMock = jest.fn(async () => ({ ok, status, json: async () => body }))
         ;(global as any).fetch = fetchMock
-        await expect(requestEngineAnalysis('FEN')).resolves.toEqual({ error: 'x' })
-        expect(fetchMock.mock.calls).toEqual([['http://127.0.0.1:3001/api/analysis/engine', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fen: 'FEN', depth: 18 }),
-        }]])
+        return fetchMock
+    }
+    beforeEach(() => { delete process.env.NEXT_PUBLIC_SOCKET_URL })
+
+    // F14 (was: '... returns the JSON without checking ok', resolving to { error: 'x' }).
+    test('POSTs {fen, depth: 18} to the default socket URL and rejects a non-OK status', async () => {
+        const fetchMock = respond(false, { error: 'x' })
+        await expect(requestEngineAnalysis('FEN')).rejects.toThrow('503')
+        expect(fetchMock.mock.calls).toEqual([call])
+    })
+
+    test('F14: reads the engine body: centipawns become pawns from White\'s side', async () => {
+        respond(true, { best_move: 'e2e4', evaluation: { type: 'cp', value: 34 }, lines: [] })
+        await expect(requestEngineAnalysis('FEN')).resolves.toEqual({ score: 0.34, mate: null, best_move: 'e2e4' })
+    })
+
+    test('F14: a mate score keeps the mate distance and fills the bar for the mating side', async () => {
+        respond(true, { best_move: 'h5f7', evaluation: { type: 'mate', value: -2 } })
+        const data = await requestEngineAnalysis('FEN')
+        expect(data.mate).toBe(-2)
+        expect(data.score).toBeLessThan(-6)
+    })
+
+    test('F14: a body without an evaluation is an error, not 0.0', async () => {
+        respond(true, { detail: 'busy' })
+        await expect(requestEngineAnalysis('FEN')).rejects.toThrow()
     })
 })

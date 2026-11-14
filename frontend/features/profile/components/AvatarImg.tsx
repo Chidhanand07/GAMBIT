@@ -1,4 +1,6 @@
-/** Round avatar photo filling its container (plain <img>, as the page always rendered it). */
-export function AvatarImg({ src }: { src: string }) {
-    return <img src={src} alt="" className="w-full h-full object-cover" />;
+import { AvatarImage } from '@/components/ui/AvatarImage';
+
+/** Round avatar photo filling its container; `size` is the container's width in CSS pixels. */
+export function AvatarImg({ src, size }: { src: string; size: number }) {
+    return <AvatarImage src={src} size={size} />;
 }

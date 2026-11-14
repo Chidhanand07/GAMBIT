@@ -94,23 +94,29 @@ Input: FEN string (board position)
    └─ Returns: best move (UCI) + score in centipawns
 ```
 
-### Your current flow in `engine.py`
+### Your current flow (`services/analysis.py`)
 
 ```python
-# 1. Acquire Stockfish instance from pool
-sf = _pool.get(timeout=10)
+# 1. Acquire Stockfish instance from the pool (engine.py)
+with get_engine(depth) as sf: ...
 
-# 2. Set the position
+# 2. Set the position and read the engine
 sf.set_fen_position(board_fen)
+top_moves = sf.get_top_moves(2)     # [{"Move": "e2e4", "Centipawn": 30, "Mate": None}, ...]
+eval_raw = sf.get_evaluation()      # {"type": "cp", "value": 30}
 
-# 3. Get evaluation and top moves
-eval_raw = sf.get_evaluation()      # {"type": "cp", "value": 142}
-top_moves = sf.get_top_moves(3)     # [{"Move": "e2e4", "Centipawn": 142}, ...]
-
-# 4. Classify the move played vs best move
+# 3. Classify the move played vs best move, both from the MOVER's point of view
 cp_loss = max(0, eval_best - eval_after)
-# Brilliant / Great / Best / Excellent / Good / Inaccuracy / Mistake / Blunder
+# Brilliant / Great move / Best / Excellent / Good / Inaccuracy / Mistake / Miss / Blunder
 ```
+
+**Perspective.** The `stockfish` package reports `get_evaluation()` and
+`get_top_moves()` from **White's** point of view whoever is to move (it multiplies
+the engine's side-to-move score by +1 / -1). Never negate a raw score by hand:
+`services/perspective.py` converts every score (`white_score`, `line_white_score`,
+`for_color`, `evaluation_for`), including `mate 0` (the side to move is already
+mated). The review stores `eval_before` / `eval_after` from the mover's view and
+`eval_white` (the eval graph) from White's; `/analyze` returns White's view.
 
 ### Tuning Stockfish for free
 
@@ -135,7 +141,8 @@ sf = get_stockfish_instance(depth=22)  # deeper for post-game reports
 
 ### Improving move classification thresholds
 
-Your current thresholds in `engine.py` at line 126:
+Your current thresholds (`_classify` and `LOSS_BANDS` in `services/analysis.py`; cp values
+from the mover's point of view):
 
 ```python
 if raw_delta < -30:           classification = "Brilliant"
@@ -145,8 +152,11 @@ elif cp_loss <= 25:           classification = "Excellent"
 elif cp_loss <= 50:           classification = "Good"
 elif cp_loss <= 100:          classification = "Inaccuracy"
 elif cp_loss <= 200:          classification = "Mistake"
+elif eval_best >= 150 and eval_after < eval_best - 150: classification = "Miss"
 else:                         classification = "Blunder"
 ```
+
+In a review, the first 8 plies classified Best/Excellent/Good with cp_loss <= 40 become "Book".
 
 These are close to chess.com's thresholds. If you want Lichess-style (stricter):
 

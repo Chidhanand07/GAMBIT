@@ -6,7 +6,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import type { Socket } from 'socket.io-client';
 import { createFakeSocket, jsonResponse } from '../../characterization/fakeSocket';
 import { useActiveGame } from '@/features/lobby/hooks/useActiveGame';
-import { useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
+import { queuePayload, useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
 import { usePrivateGame } from '@/features/lobby/hooks/usePrivateGame';
 import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSelection';
 
@@ -19,6 +19,7 @@ const router = {
     back: jest.fn(),
     forward: jest.fn(),
     refresh: jest.fn(),
+    bfcacheId: 'test',
 };
 const profile = { id: 'me', username: 'me1' } as never;
 let fetchMock: jest.Mock;
@@ -40,7 +41,7 @@ describe('useTimeControlSelection', () => {
         const first = result.current.getTcMinutes;
         expect(result.current.selectedTc).toBe('blitz');
         expect(first()).toEqual({ mins: 3, inc: 0 });
-        expect(result.current.playOnlineTimeControl).toBe('3');
+        expect(result.current.playOnlineTimeControl).toBe('3+0');
         rerender();
         expect(result.current.getTcMinutes).toBe(first);
         act(() => result.current.setCustomInc(4));
@@ -71,16 +72,25 @@ describe('useActiveGame', () => {
 });
 
 describe('useMatchmaking', () => {
-    const setup = (onGameStart = jest.fn()) =>
-        renderHook(() =>
-            useMatchmaking({ socket, router, profile, getTcMinutes: () => ({ mins: 12, inc: 5 }), onGameStart }),
-        );
+    const terms = { timeControl: '12+5', increment: 5 };
+    const payload = { user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true };
+    const setup = (over: Partial<Parameters<typeof useMatchmaking>[0]> = {}) =>
+        renderHook(() => useMatchmaking({ socket, router, profile, onGameStart: jest.fn(), ...over }));
+    const refuseNextEmit = (error: string) =>
+        fake.emit.mockImplementationOnce((_event: string, _payload: unknown, ack?: (res: unknown) => void) => {
+            ack?.({ ok: false, error });
+        });
 
-    test('joinQueue emits the given payload and starts the timer; cancelSearch leaves the queue', () => {
+    test('queuePayload is the one join_queue shape; is_rated defaults to true [F8]', () => {
+        expect(queuePayload('me', terms)).toEqual(payload);
+        expect(queuePayload('me', { ...terms, isRated: false })).toEqual({ ...payload, is_rated: false });
+    });
+
+    test('joinQueue emits the payload with an ack and starts the timer; cancelSearch leaves the queue', () => {
         jest.useFakeTimers();
         const { result } = setup();
-        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '12+5', increment: 5 }));
-        expect(fake.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5 }]);
+        act(() => result.current.joinQueue(terms));
+        expect(fake.emit.mock.calls).toEqual([['join_queue', payload, expect.any(Function)]]);
         act(() => {
             jest.advanceTimersByTime(3000);
         });
@@ -91,20 +101,47 @@ describe('useMatchmaking', () => {
         expect(result.current.searchTime).toBe(0);
     });
 
-    test('reconnect while searching re-queues with { id }, minutes only and is_rated: true', () => {
+    test('reconnect while searching re-sends the same payload, with an ack [F8] [TIME-CONTROL]', () => {
         const { result } = setup();
-        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '12+5', increment: 5 }));
+        act(() => result.current.joinQueue({ ...terms, isRated: false }));
         fake.emit.mockClear();
         fake.serverSends('connect');
-        expect(fake.emitted('join_queue')).toEqual([
-            { user: { id: 'me' }, time_control: '12', increment: 5, is_rated: true },
+        expect(fake.emit.mock.calls).toEqual([
+            ['join_queue', { ...payload, is_rated: false }, expect.any(Function)],
         ]);
+    });
+
+    test('a refused join_queue (first or re-queued) stops the search and reports the code [F8] [ACKS]', () => {
+        const onQueueRefused = jest.fn();
+        const { result } = setup({ onQueueRefused });
+        refuseNextEmit('invalid_time_control');
+        act(() => result.current.joinQueue(terms));
+        expect(result.current.searching).toBe(false);
+        expect(onQueueRefused).toHaveBeenLastCalledWith('invalid_time_control');
+
+        act(() => result.current.joinQueue(terms));
+        refuseNextEmit('rate_limited');
+        fake.serverSends('connect');
+        expect(result.current.searching).toBe(false);
+        expect(onQueueRefused).toHaveBeenLastCalledWith('rate_limited');
+    });
+
+    test('match_failed stops the search and reports it; nothing navigates [G12]', () => {
+        const onMatchFailed = jest.fn();
+        const { result } = setup({ onMatchFailed });
+        act(() => result.current.joinQueue(terms));
+        expect(result.current.searching).toBe(true);
+
+        act(() => fake.serverSends('match_failed', { reason: 'game_creation_failed' }));
+        expect(result.current.searching).toBe(false);
+        expect(onMatchFailed).toHaveBeenCalledWith('game_creation_failed');
+        expect(router.push).not.toHaveBeenCalled();
     });
 
     test('match_found stops searching and navigates (id, else game_id); game_start calls onGameStart', () => {
         const onGameStart = jest.fn();
-        const { result } = setup(onGameStart);
-        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3', increment: 0 }));
+        const { result } = setup({ onGameStart });
+        act(() => result.current.joinQueue(terms));
         fake.serverSends('match_found', { game_id: 'g2' });
         expect(result.current.searching).toBe(false);
         expect(router.push).toHaveBeenCalledWith('/game/g2');
@@ -113,25 +150,37 @@ describe('useMatchmaking', () => {
         expect(router.push).toHaveBeenCalledWith('/game/g3');
     });
 
-    test('unmount removes the listeners without leaving the queue', () => {
+    test('match_found while not searching is ignored [F8]', () => {
+        setup();
+        fake.serverSends('match_found', { id: 'stale' });
+        expect(router.push).not.toHaveBeenCalled();
+    });
+
+    test('listeners are registered once, not again on every state change [F8]', () => {
+        const { result } = setup();
+        const registrations = fake.on.mock.calls.length;
+        act(() => result.current.joinQueue(terms));
+        act(() => result.current.cancelSearch());
+        expect(fake.on.mock.calls.length).toBe(registrations);
+    });
+
+    test('unmount while searching leaves the queue and removes the listeners [F8]', () => {
         const { result, unmount } = setup();
-        act(() => result.current.joinQueue({ user: { id: 'me' }, time_control: '3', increment: 0 }));
+        act(() => result.current.joinQueue(terms));
         fake.emit.mockClear();
         unmount();
         expect(fake.listenedEvents()).toEqual([]);
+        expect(fake.emit.mock.calls).toEqual([['leave_queue', 'me']]);
+    });
+
+    test('unmount while not searching emits nothing', () => {
+        const { unmount } = setup();
+        unmount();
         expect(fake.emit).not.toHaveBeenCalled();
     });
 
     test('registers nothing without a socket', () => {
-        renderHook(() =>
-            useMatchmaking({
-                socket: null,
-                router,
-                profile,
-                getTcMinutes: () => ({ mins: 3, inc: 0 }),
-                onGameStart: jest.fn(),
-            }),
-        );
+        renderHook(() => useMatchmaking({ socket: null, router, profile, onGameStart: jest.fn() }));
         expect(fake.on).not.toHaveBeenCalled();
     });
 });
@@ -159,21 +208,21 @@ describe('usePrivateGame', () => {
         expect(fake.emitted('join_game')).toEqual(['g9']);
     });
 
-    test('a body without a token logs and returns to config; a throw returns silently', async () => {
+    test('a body without a token returns to config without logging; a throw returns silently [S14]', async () => {
         const err = jest.spyOn(console, 'error').mockImplementation(() => {});
         fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }));
         const { result } = setup();
         await act(async () => {
             await result.current.createInvite();
         });
-        expect(err).toHaveBeenCalledWith('Private game error:', 'nope');
+        expect(err).not.toHaveBeenCalled();
         expect(result.current.inviteState).toBe('config');
         fetchMock.mockRejectedValueOnce(new Error('offline'));
         await act(async () => {
             await result.current.createInvite();
         });
         expect(result.current.inviteState).toBe('config');
-        expect(err).toHaveBeenCalledTimes(1);
+        expect(err).not.toHaveBeenCalled();
     });
 
     test('copyInviteLink flags justCopied for 2 s', async () => {

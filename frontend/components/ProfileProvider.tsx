@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 interface Profile {
@@ -42,18 +42,21 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     const [profile, setProfile] = useState<Profile | null>(null)
     const [loading, setLoading] = useState(true)
 
+    // Bumped on SIGNED_OUT: a /me response requested before the sign-out is stale and must not
+    // put the profile back (F17).
+    const generation = useRef(0)
+
     const fetchProfile = useCallback(async () => {
+        const requestedIn = generation.current
+        const isCurrent = () => requestedIn === generation.current
         try {
             const res = await fetch('/api/profile/me')
-            if (res.ok) {
-                setProfile(await res.json())
-            } else {
-                setProfile(null)
-            }
+            const next = res.ok ? await res.json() : null
+            if (isCurrent()) setProfile(next)
         } catch {
-            setProfile(null)
+            if (isCurrent()) setProfile(null)
         } finally {
-            setLoading(false)
+            if (isCurrent()) setLoading(false)
         }
     }, [])
 
@@ -68,6 +71,7 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         const supabase = createClient()
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
             if (event === 'SIGNED_OUT') {
+                generation.current += 1
                 setProfile(null)
                 setLoading(false)
             } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {

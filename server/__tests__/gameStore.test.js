@@ -24,17 +24,17 @@ test('getGame returns null for an unknown game', async () => {
     await expect(store.getGame('missing')).resolves.toBeNull();
 });
 
-test('getGame returns null (not throw) when Redis fails or data is corrupt', async () => {
+test('getGame rejects when Redis fails or data is corrupt: "could not look" is not "no game" [ERRORS]', async () => {
     redis._failNext('get');
-    await expect(store.getGame('game-1')).resolves.toBeNull();
+    await expect(store.getGame('game-1')).rejects.toThrow();
 
     await redis.set('game:bad', '{not json');
-    await expect(store.getGame('bad')).resolves.toBeNull();
+    await expect(store.getGame('bad')).rejects.toThrow();
 });
 
-test('setGame swallows Redis errors', async () => {
+test('setGame rejects when the write fails (it used to resolve as if stored) [ERRORS]', async () => {
     redis._failNext('setex');
-    await expect(store.setGame('game-1', makeGame())).resolves.toBeDefined();
+    await expect(store.setGame('game-1', makeGame())).rejects.toThrow();
 });
 
 test('updateGame merges fields into the stored state', async () => {
@@ -80,7 +80,7 @@ test('active game set: add, list, remove', async () => {
     expect(await store.getActiveGameIds()).toEqual(['b']);
 });
 
-test('getActiveGameIds returns [] when Redis fails', async () => {
+test('getActiveGameIds rejects when Redis fails (the ticker logs it and tries again next second) [ERRORS]', async () => {
     redis._failNext('smembers');
-    await expect(store.getActiveGameIds()).resolves.toEqual([]);
+    await expect(store.getActiveGameIds()).rejects.toThrow();
 });

@@ -9,14 +9,19 @@ jest.mock('../../supabase', () => ({
 jest.mock('../../lib/redis', () => require('../helpers/mockRedis').createRedisMock());
 
 const request = require('supertest');
+const { serveOnLoopback, closeLoopbackServers } = require('../helpers/loopback');
 const { supabase } = require('../../supabase');
 
 let ctx;
-beforeAll(() => {
+/** The app served on 127.0.0.1 (helpers/loopback.js, ADR F-067) [FLAKY]. */
+let loopback;
+beforeAll(async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
     ctx = require('../../server');
+    loopback = await serveOnLoopback(ctx.app);
 });
-afterAll(() => {
+afterAll(async () => {
+    await closeLoopbackServers();
     ctx.matchmaking.destroy();
     require('../../services/clock').stopGlobalClock();
     ctx.io.close();
@@ -25,12 +30,12 @@ afterAll(() => {
 beforeEach(() => supabase.reset());
 
 test('server.js exports the composition root and does not listen when required', () => {
-    expect(Object.keys(ctx).sort()).toEqual(['app', 'buildPgnFromMoveLog', 'io', 'matchmaking', 'server', 'start']);
+    expect(Object.keys(ctx).sort()).toEqual(['app', 'buildPgnFromMoveLog', 'io', 'matchmaking', 'readiness', 'server', 'start']);
     expect(ctx.server.listening).toBe(false);
 });
 
 test('a non-Bearer Authorization header is rejected on a protected route', async () => {
-    const res = await request(ctx.app).post('/api/games/join/tok').set('Authorization', 'Basic abc');
+    const res = await request(loopback).post('/api/games/join/tok').set('Authorization', 'Basic abc');
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Missing Authorization header' });
     expect(supabase.calls).toHaveLength(0);
@@ -51,7 +56,7 @@ test.each([
     ['put', '/api/notifications/read-all'],
     ['put', '/api/notifications/n1/read'],
 ])('deleted dead endpoint %s %s → 404', async (method, path) => {
-    const res = await request(ctx.app)[method](path).set('Authorization', 'Bearer t').send({});
+    const res = await request(loopback)[method](path).set('Authorization', 'Bearer t').send({});
     expect(res.status).toBe(404);
     expect(supabase.calls).toHaveLength(0);
 });

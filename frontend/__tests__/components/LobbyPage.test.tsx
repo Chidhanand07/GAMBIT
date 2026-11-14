@@ -50,7 +50,7 @@ test('Play Online with the default (Blitz) queues for a 3-minute game', async ()
     render(<LobbyPage />)
     await userEvent.click(screen.getByText('Play Online'))
     expect(joinQueueCalls()).toHaveLength(1)
-    expect(joinQueueCalls()[0][1]).toMatchObject({ user: { id: 'me' }, time_control: '3', increment: 0 })
+    expect(joinQueueCalls()[0][1]).toMatchObject({ user: { id: 'me' }, time_control: '3+0', increment: 0 })
     expect(screen.getByText('Finding opponent…')).toBeInTheDocument()
 })
 
@@ -62,7 +62,7 @@ test.each([
     render(<LobbyPage />)
     await userEvent.click(screen.getByText(label))
     await userEvent.click(screen.getByText('Play Online'))
-    expect(joinQueueCalls()[0][1].time_control).toBe(minutes)
+    expect(joinQueueCalls()[0][1].time_control).toBe(`${minutes}+0`)
 })
 
 test('Cancel search leaves the queue', async () => {
@@ -80,11 +80,12 @@ test('a match sends the player to the game page', async () => {
     expect(push).toHaveBeenCalledWith('/game/game-77')
 })
 
-test('signed-out visitors are sent to log in instead of queueing', async () => {
+test('signed-out visitors are sent to log in, and back to the lobby afterwards, instead of queueing [F10]', async () => {
     profile = null
     render(<LobbyPage />)
     await userEvent.click(screen.getByText('Play Online'))
-    expect(push).toHaveBeenCalledWith('/login')
+    // Was: '/login' with no redirect, so signing in landed on the default page.
+    expect(push).toHaveBeenCalledWith('/login?redirect=%2Flobby')
     expect(joinQueueCalls()).toHaveLength(0)
 })
 
@@ -116,7 +117,8 @@ test('creating a private game shows an invite link and joins its room', async ()
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/games/private/create', expect.anything()))
     const body = JSON.parse(fetchMock.mock.calls.find(([u]) => u === '/api/games/private/create')![1].body)
-    expect(body).toEqual({ timeControl: 'rapid', color: 'random', isRated: false })
+    // F9: the real time control of the Rapid option, not the option id.
+    expect(body).toEqual({ timeControl: '10+0', color: 'random', isRated: false })
 
     expect(await screen.findByText(/\/join\/abc123XYZ0/)).toBeInTheDocument()
     expect(socket.emit).toHaveBeenCalledWith('join_game', 'g-priv')
@@ -125,4 +127,4 @@ test('creating a private game shows an invite link and joins its room', async ()
     expect(push).toHaveBeenCalledWith('/game/g-priv')
 })
 
-test.todo('lobby sends time_control "rapid" for private games but minutes ("10") for matchmaking — the server parses both with parseInt, so "rapid" becomes the 10-minute default')
+// The old todo here (private games sent "rapid", which the server played as 10 minutes) is fixed: F9, TIME-CONTROL.

@@ -1,17 +1,23 @@
 // @ts-check
 /**
- * Live game flow: joining, moves, client-reported endings, disconnects and
- * reconnects. Moved out of the `server.js` socket handlers; the handlers now
- * only pass the payload, the socket id and a ClientPort.
+ * Live game flow: joining, moves, resignation, disconnects and reconnects.
+ * The handlers pass the validated payload, the verified user id and a
+ * ClientPort.
  *
- * Known bugs kept on purpose (see the refactor playbook): the client FEN is
- * accepted when the engine is unreachable, `game_end` trusts the client's
- * result text, and the disconnect snapshot writes `white_time_ms`/`black_time_ms`.
+ * The server is the authority: moves are validated here (moveRecorder), the
+ * position after each move is adjudicated here (domain/adjudication), and a
+ * game ends only through gameFinalizer. Clients cannot report a result.
+ * Clocks are persisted in one column pair, `white_clock_ms` / `black_clock_ms`
+ * (G2): the same pair the restore reads.
  */
-const { clocksAt } = require('../domain/clock');
+const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
+const { adjudicate, REASON } = require('../domain/adjudication');
+const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
-const { resultLabel, parseOutcome, colorOfPlayer, winnerIdFor } = require('../domain/result');
-const { gameRoom } = require('./emitter');
+const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
+const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
+const { gameRoom, playerRoom } = require('./emitter');
+const { createGameFinalizer } = require('./gameFinalizer');
 const { createMoveRecorder } = require('./moveRecorder');
 
 const DISCONNECT_TIMEOUT_SECONDS = 20;
@@ -24,21 +30,22 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
 
 /**
  * @typedef {object} GameServiceDeps
- * @property {{ getGame: Function, setGame: Function, updateGame: Function, addActiveGame: Function,
+ * @property {{ getGame: Function, setGame: Function, mutateGame: Function, addActiveGame: Function,
  *   removeActiveGame: Function }} gameStore
  * @property {{ findForRestore: Function, updateById: Function, updateIfActive: Function,
  *   finishIfActive: Function }} gamesRepo
  * @property {{ insert: Function }} movesRepo
- * @property {{ validateMove: (p: { fen: string, move: string }) => Promise<any> }} engineClient
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
- * @property {Pick<SessionRegistry, 'userIdOf' | 'activeGameOf' | 'hasActiveGame' | 'setActiveGame' | 'clearGame'>} sessions
+ * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame' | 'forgetGame'>} sessions
  * @property {Emitter} emitter
+ * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {() => number} [now]
  */
 
 /**
- * @typedef {GameServiceDeps & { now: () => number, moves: ReturnType<typeof createMoveRecorder> }} GameCtx
+ * @typedef {GameServiceDeps & { now: () => number, moves: ReturnType<typeof createMoveRecorder>,
+ *   finalizer: ReturnType<typeof createGameFinalizer> }} GameCtx
  */
 
 /**
@@ -60,10 +67,10 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
         await gameStore.addActiveGame(gameId);
         return restored;
     }
-    if (dbGame && dbGame.status === 'completed') {
+    if (dbGame && (dbGame.status === 'completed' || dbGame.status === 'aborted')) {
         client.emit('game_end', {
             game_id: gameId,
-            result: resultLabel(dbGame.result),
+            result: resultLabel(outcomeOfRow(dbGame)),
             reason: 'Game over',
             white_id: dbGame.white_id,
             black_id: dbGame.black_id,
@@ -73,24 +80,42 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
 }
 
 /**
- * `join_game`: enter the room, link the caller to the game, and send the
- * current state (or the result of a finished game).
+ * `join_game`: enter the room and send the current state (or the result of a
+ * finished game). Only a socket of the white or black player is linked to
+ * the game; losing the last linked socket is what starts the abandonment
+ * countdown, so anyone else is a spectator: they see the game but can never
+ * affect it (NODE-11).
  * @param {GameCtx} ctx
  * @param {string} gameId
  * @param {ClientPort} client
+ * @param {string} userId the connection's verified user
  */
-async function joinGame(ctx, gameId, client) {
+async function joinGame(ctx, gameId, client, userId) {
     client.join(gameRoom(gameId));
-    const userId = ctx.sessions.userIdOf(client.id);
-    if (userId) ctx.sessions.setActiveGame(userId, gameId);
 
     const game = await loadOrRestore(ctx, gameId, client);
     if (!game) return;
+    // Only a live game is linked: a link to a finished game would never be cleaned up (G17).
+    if (game.status === 'active' && isParticipant(game, userId)) {
+        ctx.sessions.linkSocket(client.id, gameId);
+        // Visible to every instance: is any socket of this player still at this board?
+        client.join(playerRoom(gameId, userId));
+    }
+    sendState(ctx, game, client);
+}
 
+/**
+ * Send `client` the authoritative view of `game`: the result when it is over,
+ * otherwise position, move log and clocks (`game_state_sync`).
+ * @param {GameCtx} ctx
+ * @param {any} game
+ * @param {ClientPort} client
+ */
+function sendState(ctx, game, client) {
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
         client.emit('game_end', {
-            game_id: gameId,
+            game_id: game.id,
             result: resultLabel(game.result),
             reason: game.reason || 'Game over',
             white_id: game.whiteId,
@@ -99,12 +124,8 @@ async function joinGame(ctx, gameId, client) {
         return;
     }
 
-    // Compute real remaining time for the active player
-    // (clocks are frozen while a player is disconnected)
-    const at = ctx.now();
-    const { whiteMs, blackMs } = game.disconnectInfo
-        ? { whiteMs: game.whiteClockMs, blackMs: game.blackClockMs }
-        : clocksAt(game, at);
+    // Real remaining time (frozen while a player is disconnected or before the first move).
+    const { whiteMs, blackMs } = clocksAt(game, ctx.now());
 
     client.emit('game_state_sync', {
         fen: game.fen,
@@ -112,14 +133,16 @@ async function joinGame(ctx, gameId, client) {
         whiteMs,
         blackMs,
         activeSide: game.activeSide,
-        clockActive: game.lastMoveAt !== null,
+        clockActive: isClockRunning(game),
         whiteId: game.whiteId,
         blackId: game.blackId,
     });
 }
 
 /**
- * `authenticate` while in an active game: clear the disconnect grace period.
+ * A player connected again while in an active game: clear the disconnect
+ * grace period. The check and the write are one atomic transition, so a move
+ * or an ending that lands at the same moment is neither lost nor undone.
  * @param {GameCtx} ctx
  * @param {string} userId
  * @param {ClientPort} client
@@ -127,134 +150,111 @@ async function joinGame(ctx, gameId, client) {
 async function reconnect({ gameStore, sessions, emitter, now }, userId, client) {
     const gameId = sessions.activeGameOf(userId);
     if (!gameId) return;
-    const game = await gameStore.getGame(gameId);
-    if (game && game.status === 'active' && game.disconnectInfo?.userId === userId) {
-        await gameStore.setGame(gameId, { ...game, disconnectInfo: null, lastMoveAt: now() });
-        client.join(gameRoom(gameId));
-        emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
-        client.emit('clock_sync', { whiteMs: game.whiteClockMs, blackMs: game.blackClockMs });
+    const resumed = await gameStore.mutateGame(gameId, (/** @type {any} */ game) =>
+        game && game.status === 'active' && game.disconnectInfo?.userId === userId
+            ? { ...game, disconnectInfo: null, ...resumeClocks(game, now()) }
+            : null,
+    );
+    if (!resumed) return;
+    // The socket that resumed the game is at the board, even before it re-joins.
+    sessions.linkSocket(client.id, gameId);
+    client.join(gameRoom(gameId));
+    client.join(playerRoom(gameId, userId));
+    emitter.toRoom(gameRoom(gameId), 'opponent_reconnected', { userId });
+    client.emit('clock_sync', { whiteMs: resumed.whiteClockMs, blackMs: resumed.blackClockMs });
+}
+
+/**
+ * `make_move`: apply the move if it is the caller's legal move, then let the
+ * server decide whether that move ended the game (checkmate, stalemate,
+ * insufficient material, threefold repetition, fifty-move rule). Otherwise
+ * tell the sender why (`move_rejected`) and resend the authoritative state so
+ * its board snaps back; a move that arrives after the mover's flag fell ends
+ * the game on time instead. Nothing from the payload except `from`/`to`/`promotion`
+ * is used.
+ * @param {GameCtx} ctx
+ * @param {import('./moveRecorder').MoveRequest} data
+ * @param {string} userId the connection's verified user
+ * @param {ClientPort} client
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+async function makeMove(ctx, data, userId, client) {
+    const outcome = await ctx.moves.submit(data, userId);
+    if (outcome.accepted) {
+        const verdict = adjudicate(outcome.played.position);
+        // The game ended with this move, at this move's time: the opponent's clock is not charged.
+        if (verdict) await ctx.finalizer.endGame(data.game_id, verdict, outcome.state.lastMoveAt);
+        return { ok: true };
     }
-}
 
-/**
- * `make_move` from the player whose turn it is (C2). `data` is mutated and
- * re-broadcast, as before.
- * @param {GameCtx} ctx
- * @param {Record<string, any>} data
- * @param {string} socketId
- */
-async function makeMove({ gameStore, sessions, moves }, data, socketId) {
-    const game = await gameStore.getGame(data.game_id);
-    if (!game || game.status !== 'active') return;
-
-    // C2 fix: verify the moving socket is the player whose turn it is
-    const movingUserId = sessions.userIdOf(socketId);
-    const expectedId = game.activeSide === 'w' ? game.whiteId : game.blackId;
-    if (!movingUserId || movingUserId !== expectedId) return;
-
-    if (game.fen && data.move && !(await moves.validate(game, data))) return;
-
-    await moves.apply(game, data);
-}
-
-/**
- * Time control and rated flag for rating: Redis state first, then the client payload.
- * @param {any} game
- * @param {Record<string, any>} data
- */
-function settingsOf(game, data) {
-    return {
-        timeControl: game.timeControl ?? data.time_control ?? '10',
-        isRated: game.isRated ?? data.is_rated ?? false,
-    };
-}
-
-/**
- * Idempotent DB update, then review and rating for the call that won it.
- * @param {GameCtx} ctx
- * @param {{ data: Record<string, any>, game: any, outcome: 'white' | 'black' | 'draw' }} p
- */
-async function finalize({ gamesRepo, reviewService, ratingService, emitter }, { data, game, outcome }) {
-    const { whiteId, blackId } = game;
-    // Idempotent DB update — only applies if game is still marked active
-    const { data: updated } = await gamesRepo.finishIfActive(data.game_id, {
-        status: 'completed',
-        result: outcome === 'draw' ? 'draw' : null,
-        winner_id: winnerIdFor(outcome, { whiteId, blackId }),
-        ended_at: new Date().toISOString(),
-        final_fen: game.fen ?? null,
-        white_clock_ms: Math.round(game.whiteClockMs ?? 0),
-        black_clock_ms: Math.round(game.blackClockMs ?? 0),
-    });
-
-    if (!updated) return;
-
-    const { timeControl, isRated } = settingsOf(game, data);
-    // Full Game Review in the engine (depth-18 Stockfish per move); fire-and-forget.
-    reviewService.triggerGameReview(data.game_id, game.moveLog, timeControl);
-
-    const changes = await ratingService.processGameEnd(data.game_id, whiteId, blackId, outcome, timeControl, isRated);
-    if (changes) {
-        emitter.toRoom(gameRoom(data.game_id), 'rating_updated', changes);
+    client.emit('move_rejected', { game_id: data.game_id, reason: outcome.reason });
+    if (outcome.reason === REJECTION.TIME_EXPIRED) {
+        // Too late: the game is over on time now, not at the next tick (G7).
+        const at = ctx.now();
+        await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at), at);
+    } else if (outcome.game) {
+        sendState(ctx, outcome.game, client);
     }
+    return { ok: false, error: outcome.reason };
 }
 
 /**
- * `game_end` reported by a client. Players come from Redis (C1); the result
- * text comes from the client.
+ * `resign`: the caller, an active participant, loses; the opponent wins by
+ * Resignation. Allowed on either side's turn.
  * @param {GameCtx} ctx
- * @param {Record<string, any>} data
+ * @param {{ game_id: string }} data
+ * @param {string} userId the connection's verified user
+ * @returns {Promise<{ ok: boolean, error?: string }>}
  */
-async function endGame(ctx, data) {
-    // C1 fix: always read player IDs and game state from Redis — never trust client payload
-    const game = await ctx.gameStore.getGame(data.game_id);
-    if (!game || game.status !== 'active') return; // reject if not active or already ended
+async function resign(ctx, { game_id: gameId }, userId) {
+    const game = await ctx.gameStore.getGame(gameId);
+    const reason = playerRejection(game, userId);
+    if (reason) return { ok: false, error: reason };
 
-    const whiteId = game.whiteId;
-    const blackId = game.blackId;
-    if (!whiteId || !blackId) return;
-
-    const outcome = parseOutcome(data.result);
-
-    await ctx.gameStore.setGame(data.game_id, { ...game, status: 'completed', result: outcome });
-    await ctx.gameStore.removeActiveGame(data.game_id);
-
-    // Broadcast with server-verified player IDs
-    ctx.emitter.toRoom(gameRoom(data.game_id), 'game_end', { ...data, white_id: whiteId, black_id: blackId });
-
-    // Clean up active game tracking
-    ctx.sessions.clearGame(data.game_id);
-
-    await finalize(ctx, { data, game, outcome });
+    const winner = opponentColor(colorOfPlayer(userId, game.whiteId));
+    const ended = await ctx.finalizer.endGame(gameId, { winner, reason: REASON.RESIGNATION });
+    // Lost a race with another ending (mate, flag fall): that result stands.
+    return ended ? { ok: true } : { ok: false, error: REJECTION.GAME_NOT_ACTIVE };
 }
 
 /**
- * After a socket of `userId` disconnected: freeze the clocks and start the
- * 20 s grace period (the global ticker adjudicates abandonment).
+ * After the last socket `userId` had at the board of `gameId` disconnected:
+ * freeze the clocks and start the 20 s grace period (the global ticker
+ * adjudicates abandonment). The caller decides that the player is really gone
+ * (sockets/handlers/session with the session registry); closing one of
+ * several tabs never gets here (MULTI-SOCKET).
+ *
+ * The state is re-read inside the per-game lock and only an active game the
+ * user plays in is touched, so a disconnect that overlaps a move keeps the
+ * move, and one that overlaps the end of the game cannot make it active again.
  * @param {GameCtx} ctx
  * @param {string | undefined} userId
+ * @param {string | undefined} gameId
  */
-async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }, userId) {
-    if (!userId || !sessions.hasActiveGame(userId)) return;
-    const gameId = /** @type {string} */ (sessions.activeGameOf(userId));
-    const game = await gameStore.getGame(gameId);
-    if (!game || game.status !== 'active') return;
-
+async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }, userId, gameId) {
+    if (!userId || !gameId) return;
     const at = now();
-    // Snapshot the clock at disconnect time
-    const { whiteMs: whiteClockMs, blackMs: blackClockMs } = clocksAt(game, at);
-    const disconnectedSide = colorOfPlayer(userId, game.whiteId);
 
-    await gameStore.setGame(gameId, {
-        ...game,
-        whiteClockMs,
-        blackClockMs,
-        disconnectInfo: { userId, side: disconnectedSide, at },
+    const frozen = await gameStore.mutateGame(gameId, (/** @type {any} */ game) => {
+        // Defence in depth: a link is only ever created for a participant (see joinGame).
+        if (!game || game.status !== 'active' || !isParticipant(game, userId)) return null;
+        // Charge the time used so far once and stop the clocks (G9).
+        const side = colorOfPlayer(userId, game.whiteId);
+        return { ...game, ...freezeClocks(game, at), disconnectInfo: { userId, side, at } };
     });
+    if (!frozen) {
+        // Nothing to pause: the game is gone or over. Drop the user's link to it so
+        // links to games that ended elsewhere do not pile up (G17).
+        sessions.forgetGame(userId, gameId);
+        return;
+    }
 
     // Persist clock snapshot to Supabase (fire-and-forget)
     gamesRepo
-        .updateIfActive(gameId, { white_time_ms: Math.round(whiteClockMs), black_time_ms: Math.round(blackClockMs) })
+        .updateIfActive(gameId, {
+            white_clock_ms: Math.round(frozen.whiteClockMs),
+            black_clock_ms: Math.round(frozen.blackClockMs),
+        })
         .then(() => {});
 
     emitter.toRoom(gameRoom(gameId), 'opponent_disconnected', {
@@ -268,11 +268,12 @@ async function handleDisconnect({ gameStore, gamesRepo, sessions, emitter, now }
  */
 function createGameService(deps) {
     const now = deps.now ?? (() => Date.now());
+    const finalizer = deps.finalizer ?? createGameFinalizer(deps);
     /** @type {GameCtx} */
-    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }) };
+    const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }), finalizer };
     return {
-        /** @type {(gameId: string, client: ClientPort) => Promise<void>} */
-        joinGame: (gameId, client) => joinGame(ctx, gameId, client),
+        /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<void>} */
+        joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),
         /**
          * `spectate_game`: join the room only if the game exists (H8).
          * @type {(gameId: string, client: ClientPort) => Promise<void>}
@@ -284,12 +285,12 @@ function createGameService(deps) {
         },
         /** @type {(userId: string, client: ClientPort) => Promise<void>} */
         reconnect: (userId, client) => reconnect(ctx, userId, client),
-        /** @type {(data: Record<string, any>, socketId: string) => Promise<void>} */
-        makeMove: (data, socketId) => makeMove(ctx, data, socketId),
-        /** @type {(data: Record<string, any>) => Promise<void>} */
-        endGame: (data) => endGame(ctx, data),
-        /** @type {(userId: string | undefined) => Promise<void>} */
-        handleDisconnect: (userId) => handleDisconnect(ctx, userId),
+        /** @type {(data: import('./moveRecorder').MoveRequest, userId: string, client: ClientPort) => Promise<{ ok: boolean, error?: string }>} */
+        makeMove: (data, userId, client) => makeMove(ctx, data, userId, client),
+        /** @type {(data: { game_id: string }, userId: string) => Promise<{ ok: boolean, error?: string }>} */
+        resign: (data, userId) => resign(ctx, data, userId),
+        /** @type {(userId: string | undefined, gameId: string | undefined) => Promise<void>} */
+        handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
     };
 }
 

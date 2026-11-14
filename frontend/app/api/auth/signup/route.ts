@@ -1,18 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createUserWithProfile } from '@/lib/server/auth';
+import { clientIp } from '@/lib/server/clientIp';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
+import { supabaseSecretKey } from '@/lib/server/env';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/server/rateLimit';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
+
+const USERNAME_RULE = 'Username must be 3 to 20 letters, numbers or underscores';
 
 // POST /api/auth/signup — body { email, password, username }
+// PUBLIC on purpose: this is how an account is created (docs/fixes/DECISIONS.md F-012).
 export async function POST(request: NextRequest) {
-    const { email, password, username } = await request.json();
+    // Per client IP, before any database call (RATE-LIMITS).
+    const limited = await enforceRateLimit(clientIp(request.headers), RATE_LIMITS.signup);
+    if (limited) return limited;
 
-    if (!email || !password || !username) {
-        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    const body = await parseJsonBody(request, schemas.signup, 'Missing required fields');
+    if (!body.ok) return body.response;
+    const { email, password, username } = body.data;
+
+    // The form applies the same rule; the server must not rely on it (the name is stored and shown).
+    if (!schemas.newUsername.safeParse(username).success) {
+        return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
     }
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        console.error('SUPABASE_SERVICE_ROLE_KEY is not set in frontend/.env.local');
+    if (!supabaseSecretKey()) {
+        console.error('SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) is not set');
         return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
@@ -27,10 +41,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the auth user via admin (bypasses email rate limits on the anon endpoint)
-    const signupError = await createUserWithProfile(admin, { email, password, username });
+    const signup = await createUserWithProfile(admin, { email, password, username });
 
-    if (signupError) {
-        return NextResponse.json({ error: signupError }, { status: 400 });
+    if (!signup.ok) {
+        return NextResponse.json({ error: signup.message }, { status: signup.status });
     }
 
     // Return ok — client will sign in using the browser client directly

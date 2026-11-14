@@ -1,75 +1,91 @@
 import 'server-only';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { cookies } from 'next/headers';
+import { cookies } from 'next/headers';
 import type { NextRequest, NextResponse } from 'next/server';
+import { supabasePublicKey } from '@/lib/supabase/publicEnv';
+import { supabaseSecretKey } from './env';
 
 /** The `cookies()` store of the current request (next/headers). */
-export type RequestCookieStore = ReturnType<typeof cookies>;
+export type RequestCookieStore = Awaited<ReturnType<typeof cookies>>;
 
 type ResponseCookieOptions = Parameters<NextResponse['cookies']['set']>[2];
+type CookieToSet = { name: string; value: string; options?: object };
 
-/** Auth options the service-role client and the session-reading client pass (fresh object per client). */
+/** Auth options of the service-role client (fresh object per client). */
 const noSessionPersistence = () => ({ autoRefreshToken: false, persistSession: false });
 
 /**
- * Service-role Supabase client (bypasses RLS). Created per call, reading the env at call
- * time, exactly like the per-handler `makeAdmin()` copies it replaces.
+ * Session cookies stay in the "raw" JSON form @supabase/ssr 0.1 wrote, so sessions created
+ * before this upgrade keep working. The browser client and the proxy use the same setting.
+ */
+export const SESSION_COOKIE_ENCODING = 'raw' as const;
+
+/**
+ * Secret-key (service-role) Supabase client: bypasses RLS. Created per call, reading the env at call time.
+ * Only call it after `requireUser()` has returned a verified user (or from a route that is
+ * public on purpose), and scope every query to that user (SEC-01, NX-08).
  */
 export function createAdminClient(): SupabaseClient {
-    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    const secretKey = supabaseSecretKey();
+    // Without the key, supabase-js would build a client that fails later and less clearly.
+    if (!secretKey) {
+        throw new Error('SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) is not set');
+    }
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, secretKey, {
         auth: noSessionPersistence(),
     });
 }
 
 /**
- * Anon-key @supabase/ssr client that only reads the request cookies (set/remove are no-ops).
- * `persistSession: false` is passed only by the handlers that already did (`/api/games/[id]`).
+ * Public-key (publishable / legacy anon) @supabase/ssr client bound to the request's session cookies. Used only to ask
+ * verify who the caller is (`auth.getClaims()`, see identity.ts); it is never used to bypass RLS.
+ *
+ * `setAll` writes a refreshed session back. That works in Route Handlers; in a Server
+ * Component the store is read-only and the write is skipped (the browser client refreshes).
  */
-export function createCookieReadingClient(cookieStore: RequestCookieStore, options: { noPersistence?: boolean } = {}) {
-    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+export function createSessionClient(cookieStore: RequestCookieStore) {
+    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabasePublicKey()!, {
+        cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
-            get: (name: string) => cookieStore.get(name)?.value,
-            set: () => {},
-            remove: () => {},
-        },
-        ...(options.noPersistence ? { auth: noSessionPersistence() } : {}),
-    });
-}
-
-/**
- * Anon-key @supabase/ssr client for `/api/auth/login`: reads the request cookies and writes
- * every session cookie Supabase sets onto `response` (removal = empty value with maxAge 0).
- */
-export function createLoginClient(request: NextRequest, response: NextResponse) {
-    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-        cookies: {
-            get: (name: string) => request.cookies.get(name)?.value,
-            set: (name: string, value: string, options: Record<string, unknown>) => {
-                response.cookies.set(name, value, options as ResponseCookieOptions);
-            },
-            remove: (name: string, options: Record<string, unknown>) => {
-                response.cookies.set(name, '', { ...(options as ResponseCookieOptions), maxAge: 0 });
+            getAll: () => cookieStore.getAll(),
+            setAll: (cookiesToSet: CookieToSet[]) => {
+                try {
+                    for (const { name, value, options } of cookiesToSet) {
+                        cookieStore.set(name, value, options as ResponseCookieOptions);
+                    }
+                } catch {
+                    // Read-only cookie store (Server Component): nothing to write.
+                }
             },
         },
     });
 }
 
 /**
- * Anon-key @supabase/ssr client for the OAuth callback: like {@link createLoginClient} but
- * removal writes an empty value with the given options only (no `maxAge: 0`).
+ * The current request's session client (route handlers only), for writes a user may make to
+ * their own rows: the query runs as that user, so RLS and column privileges apply instead of
+ * the service role's bypass (S8-PRIV, SEC-03). Call it after `requireUser()`/`requireFreshUser()`.
  */
-export function createOAuthCallbackClient(request: NextRequest, response: NextResponse) {
-    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+export async function createUserClient(): Promise<SupabaseClient> {
+    return createSessionClient(await cookies());
+}
+
+/**
+ * Anon-key @supabase/ssr client for `/api/auth/login` and the OAuth callback: reads the
+ * request cookies and writes every session cookie Supabase sets (or clears) onto `response`.
+ */
+export function createResponseCookieClient(request: NextRequest, response: NextResponse) {
+    return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabasePublicKey()!, {
+        cookieEncoding: SESSION_COOKIE_ENCODING,
         cookies: {
-            get(name: string) {
-                return request.cookies.get(name)?.value;
-            },
-            set(name: string, value: string, options: object) {
-                response.cookies.set(name, value, options as ResponseCookieOptions);
-            },
-            remove(name: string, options: object) {
-                response.cookies.set(name, '', options as ResponseCookieOptions);
+            getAll: () => request.cookies.getAll(),
+            setAll: (cookiesToSet: CookieToSet[], headers?: Record<string, string>) => {
+                for (const { name, value, options } of cookiesToSet) {
+                    response.cookies.set(name, value, options as ResponseCookieOptions);
+                }
+                // A response that sets auth cookies must never be cached (Supabase passes no-store).
+                for (const [key, value] of Object.entries(headers ?? {})) response.headers.set(key, value);
             },
         },
     });

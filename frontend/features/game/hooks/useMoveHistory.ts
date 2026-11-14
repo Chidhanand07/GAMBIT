@@ -28,7 +28,7 @@ export function useMoveHistory({ gameId, state, chessRef, dispatch }: Options): 
     viewIndexRef.current = viewIndex;
     fenSnapshotsLenRef.current = fenSnapshots.length;
 
-    // Restore on first mount (before socket events arrive).
+    // Restore once per game (before socket events arrive); chessRef and dispatch are stable.
     useEffect(() => {
         try {
             const raw = localStorage.getItem(lsKey);
@@ -49,8 +49,7 @@ export function useMoveHistory({ gameId, state, chessRef, dispatch }: Options): 
         } catch {
             /* corrupt data, ignore */
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preservation: legacy restore runs once on mount only (ADR 0212)
-    }, []);
+    }, [lsKey, chessRef, dispatch]);
 
     useEffect(() => {
         if (fenSnapshots.length > 0) saveHistory(lsKey, { fenSnapshots, moveList, lastMove });

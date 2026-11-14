@@ -47,13 +47,16 @@ describe('POST /api/auth/login', () => {
     test('success → 200 and the session cookies Supabase sets land on the response', async () => {
         db.auth.signInWithPassword.mockImplementation(async () => {
             const cookies = (supabaseSsrMock.createServerClient.mock.calls.at(-1) as any)[2].cookies
-            cookies.set('sb-testref-auth-token', 'session-value', { path: '/' })
+            // @supabase/ssr ≥ 0.4 hands every cookie to setAll (was: one `set` call per cookie).
+            cookies.setAll([{ name: 'sb-testref-auth-token', value: 'session-value', options: { path: '/' } }], { 'Cache-Control': 'private, no-store' })
             return { data: { session: { access_token: 't' } }, error: null } as any
         })
         const res = await login(req('/api/auth/login', { method: 'POST', body: { email: 'a@b.c', password: 'pw' } }))
         expect(res.status).toBe(200)
         expect(await res.json()).toEqual({ ok: true })
         expect(res.headers.get('set-cookie')).toContain('sb-testref-auth-token=session-value')
+        // A response that sets session cookies must not be cached (NX-11).
+        expect(res.headers.get('cache-control')).toBe('private, no-store')
         expect(db.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'pw' })
     })
 })
@@ -107,5 +110,18 @@ describe('POST /api/auth/signup', () => {
         const res = await json(await post())
         expect(res).toEqual({ status: 400, body: { error: 'Username already taken' } })
         expect(db.auth.admin.deleteUser).toHaveBeenCalledWith('uid-1')
+    })
+
+    test.each([
+        ['returns an error', () => db.auth.admin.deleteUser.mockResolvedValue({ data: null, error: { message: 'boom' } } as any)],
+        ['throws', () => db.auth.admin.deleteUser.mockRejectedValue(new Error('network'))],
+    ])('F18: when the rollback deleteUser %s, it is logged and the signup fails with a 500', async (_name, setup) => {
+        setup()
+        db.auth.admin.createUser.mockResolvedValue({ data: { user: { id: 'uid-1' } }, error: null } as any)
+        db.queue('profiles', { data: null, error: null }, { data: null, error: { message: 'insert failed' } })
+        const res = await json(await post())
+        expect(res.status).toBe(500)
+        expect(res.body.error).toMatch(/could not be completed/i)
+        expect(console.error).toHaveBeenCalledWith(expect.stringContaining('rollback'), 'uid-1', expect.anything())
     })
 })

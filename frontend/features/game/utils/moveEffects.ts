@@ -1,5 +1,6 @@
 // Pure chess.js queries + sound selection shared by the local move (commitMove) and the
-// server echo (move_made). Branch order matches the legacy page exactly.
+// server echo (move_made). Branch order matches the legacy page exactly. Whether a game is
+// over is NOT decided here: the server adjudicates and sends `game_end`.
 import type { Chess, Square } from 'chess.js';
 import {
     playCaptureSound,
@@ -9,7 +10,6 @@ import {
     playMoveSound,
     playPromoteSound,
 } from '@/lib/sounds';
-import type { GameOverInfo } from '../state/gameReducer';
 
 type PieceOnBoard = ReturnType<Chess['get']>;
 
@@ -23,15 +23,6 @@ export function playMoveSoundFor(chess: Chess, flags: string | undefined, captur
     else if (hasFlag(flags, 'p')) playPromoteSound();
     else if (captured) playCaptureSound();
     else playMoveSound();
-}
-
-/** Result/reason the page shows when chess.js says the position is over; null while play continues. */
-export function detectGameOver(chess: Chess): GameOverInfo | null {
-    if (!chess.isGameOver()) return null;
-    const mate = chess.isCheckmate();
-    const result = mate ? (chess.turn() === 'w' ? 'Black wins' : 'White wins') : 'Draw';
-    const reason = mate ? 'Checkmate' : chess.isStalemate() ? 'Stalemate' : 'Draw';
-    return { result, reason };
 }
 
 /** A pawn landing on the far rank for its colour. */

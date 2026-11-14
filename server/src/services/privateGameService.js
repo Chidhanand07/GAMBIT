@@ -2,9 +2,15 @@
 /**
  * Private (invite-link) games: create, look up by token, join. Moved from
  * `server/services/friends.js`, which is now the singleton facade.
+ *
+ * Invite tokens are kept in `game_invites` (service-role only) and are never
+ * logged: the old expiry warning printed the token itself.
  */
 const { nanoid } = require('nanoid');
+const { toPublicGame } = require('../domain/gameDto');
 const { createInitialGameState } = require('../domain/gameState');
+const { formatTimeControl, timeControlOf } = require('../domain/timeControl');
+const { log } = require('../observability/log');
 
 const INVITE_TOKEN_LENGTH = 10;
 const INVITE_TTL_HOURS = 48;
@@ -14,13 +20,21 @@ const EXPIRY_GRACE_MS = 5 * 60 * 1000;
 /**
  * @typedef {object} PrivateGamesRepoPort
  * @property {(row: object) => PromiseLike<{ data: any, error: any }>} insertReturning
- * @property {(token: string) => PromiseLike<{ data: any, error: any }>} findByInviteToken
+ * @property {(gameId: string) => PromiseLike<{ data: any, error: any }>} findByIdWithPlayers
  * @property {(id: string, fields: object) => PromiseLike<{ data: any, error: any }>} startIfWaiting
+ * @property {(gameId: string) => PromiseLike<unknown>} deleteById
+ */
+
+/**
+ * @typedef {object} GameInvitesRepoPort
+ * @property {(row: { game_id: string, token: string, expires_at: string }) => PromiseLike<{ error: any }>} insert
+ * @property {(token: string) => PromiseLike<{ data: { game_id: string, expires_at: string | null } | null, error: any }>} findByToken
  */
 
 /**
  * @typedef {object} PrivateGameDeps
  * @property {PrivateGamesRepoPort} gamesRepo
+ * @property {GameInvitesRepoPort} invitesRepo
  * @property {{ setGame: (id: string, game: object) => Promise<unknown>, addActiveGame: (id: string) => Promise<void> }} gameStore
  * @property {() => number} random
  * @property {() => string} generateToken
@@ -41,59 +55,96 @@ function seatCreator(random, userId, color) {
 
 /**
  * Create a waiting game with a 48 h invite token.
+ *
+ * The token is stored in `game_invites`, never on the `games` row (which is
+ * readable through the public API key). If the invite cannot be stored the
+ * game is removed again, so no token-less waiting game is left behind.
  * @param {PrivateGameDeps} deps
  * @param {{ userId: string, timeControl: unknown, color?: string, isRated?: unknown }} p
- * @returns {Promise<any>} the inserted row
- * @throws the Supabase error when the insert fails
+ * @returns {Promise<any>} the inserted row plus, in memory only, `invite_token` and `invite_expires_at`
+ * @throws the Supabase error when either insert fails
  */
-async function createPrivateGame({ gamesRepo, random, generateToken }, { userId, timeControl, color, isRated }) {
+async function createPrivateGame(deps, { userId, timeControl, color, isRated }) {
+    const { gamesRepo, invitesRepo, random, generateToken } = deps;
     const token = generateToken();
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + INVITE_TTL_HOURS);
+    const expires = expiresAt.toISOString();
 
     const { white_id, black_id } = seatCreator(random, userId, color);
 
     const { data, error } = await gamesRepo.insertReturning({
         white_id,
         black_id,
-        time_control: timeControl,
+        // Canonical "M+S"; a missing or unreadable value is the default, never a preset name.
+        time_control: formatTimeControl(timeControlOf(timeControl)),
         status: 'waiting',
-        invite_token: token,
-        invite_expires_at: expiresAt.toISOString(),
         is_rated: isRated,
     });
-
     if (error) throw error;
-    return data;
+
+    const { error: inviteError } = await invitesRepo.insert({ game_id: data.id, token, expires_at: expires });
+    if (inviteError) {
+        await gamesRepo.deleteById(data.id);
+        throw inviteError;
+    }
+    return { ...data, invite_token: token, invite_expires_at: expires };
 }
 
 /**
- * The game for an invite token, in any status; null when unknown, on a DB
- * error, or when expired for more than the 5-minute grace period.
+ * True when an invite's expiry (plus the grace period) has passed. An invite
+ * without an expiry does not expire (G15: null used to be read as 1970).
+ * @param {string | null | undefined} expiresAt
+ * @param {number} nowMs
+ * @returns {boolean}
+ */
+function isExpired(expiresAt, nowMs) {
+    if (!expiresAt) return false;
+    return new Date(expiresAt).getTime() + EXPIRY_GRACE_MS < nowMs;
+}
+
+/**
+ * The game an invite token points at, in any status; null when the token is
+ * unknown, on a DB error, or when the invite expired more than the 5-minute
+ * grace period ago. The row carries `invite_expires_at` for server-side
+ * callers; it is never sent to a browser (see `toPublicGame`).
  * @param {PrivateGameDeps} deps
  * @param {string} token
  * @returns {Promise<any | null>}
  */
-async function getGameByToken({ gamesRepo }, token) {
-    // Simplify query — nested profile selects can sometimes cause issues in PostgREST
-    // if the foreign keys are null. We'll fetch the base game and join manually if needed,
-    // but for the join page check, we only need the basic game info first.
-    const { data, error } = await gamesRepo.findByInviteToken(token);
+async function findInvitedGame({ gamesRepo, invitesRepo }, token) {
+    const { data: invite, error: inviteError } = await invitesRepo.findByToken(token);
+    if (inviteError) {
+        log.error('[FriendsService] getGameByToken error:', inviteError.message);
+        return null;
+    }
+    if (!invite) return null;
 
+    if (isExpired(invite.expires_at, Date.now())) {
+        log.warn(`[FriendsService] An invite for game ${invite.game_id} expired at ${invite.expires_at}`);
+        return null;
+    }
+
+    const { data, error } = await gamesRepo.findByIdWithPlayers(invite.game_id);
     if (error) {
-        console.error('[FriendsService] getGameByToken error:', error.message);
+        log.error('[FriendsService] getGameByToken error:', error.message);
         return null;
     }
     if (!data) return null;
+    return { ...data, invite_expires_at: invite.expires_at };
+}
 
-    const now = new Date();
-    const expiresAt = new Date(data.invite_expires_at);
-    if (expiresAt.getTime() + EXPIRY_GRACE_MS < now.getTime()) {
-        console.warn(`[FriendsService] Token ${token} expired at ${data.invite_expires_at}`);
-        return null;
-    }
-
-    return data;
+/**
+ * The open invite for a token: the game, only while it is still waiting for
+ * its second player. A game that has started or ended is not an invite any
+ * more (G15), so the invite page shows "not found or expired" for it.
+ * @param {PrivateGameDeps} deps
+ * @param {string} token
+ * @returns {Promise<any | null>}
+ */
+async function getGameByToken(deps, token) {
+    const game = await findInvitedGame(deps, token);
+    return game && game.status === 'waiting' ? game : null;
 }
 
 /**
@@ -116,9 +167,10 @@ function seatJoiner(game, userId) {
 
 /**
  * Seat `userId` in the empty colour, start the game and write its Redis state.
- * The creator re-joining gets the waiting row back unchanged.
+ * The creator re-joining gets the waiting row back unchanged (its status is
+ * still 'waiting': nothing has started, and nothing is announced).
  * @param {PrivateGameDeps} deps
- * @param {(token: string) => Promise<any>} findGame token lookup (the service's `getGameByToken`)
+ * @param {(token: string) => Promise<any>} findGame token lookup in any status (`findInvitedGame`)
  * @param {{ token: string, userId: string }} p
  * @returns {Promise<any>} the started (or still waiting) row
  * @throws {Error} on an invalid/expired token, a started game or a DB error
@@ -149,6 +201,8 @@ async function joinPrivateGame({ gamesRepo, gameStore }, findGame, { token, user
             blackId: data.black_id,
             timeControl: data.time_control,
             isRated: data.is_rated ?? false,
+            // The first-move window opens now that both players are seated.
+            startedAt: Date.now(),
         }),
     );
     await gameStore.addActiveGame(data.id);
@@ -157,7 +211,7 @@ async function joinPrivateGame({ gamesRepo, gameStore }, findGame, { token, user
 }
 
 /**
- * @param {Pick<PrivateGameDeps, 'gamesRepo' | 'gameStore'> & Partial<PrivateGameDeps>} deps
+ * @param {Pick<PrivateGameDeps, 'gamesRepo' | 'invitesRepo' | 'gameStore'> & Partial<PrivateGameDeps>} deps
  */
 function createPrivateGameService({
     random = () => Math.random(),
@@ -181,7 +235,13 @@ function createPrivateGameService({
          * @param {string} token
          * @param {string} userId
          */
-        joinPrivateGame: (token, userId) => joinPrivateGame(deps, (t) => service.getGameByToken(t), { token, userId }),
+        joinPrivateGame: (token, userId) => joinPrivateGame(deps, (t) => findInvitedGame(deps, t), { token, userId }),
+        /**
+         * The view of a game row that may be sent to a browser: no invite token,
+         * no expiry, no internal columns (NX-04). The other methods return the
+         * full row for server-side use only.
+         */
+        toPublicGame,
     };
     return service;
 }

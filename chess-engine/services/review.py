@@ -13,6 +13,7 @@ import chess.pgn
 
 from seams import EngineSeams
 from services.analysis import analyze_move_cp
+from services.perspective import for_color
 
 REVIEW_DEPTH = 18
 # Book: early, sound moves are opening theory rather than "found" moves.
@@ -21,7 +22,41 @@ BOOK_MAX_PLY = 8
 BOOK_MAX_LOSS = 40
 BOOK_CLASSES = ("Best", "Excellent", "Good")
 CRITICAL_CLASSES = ["Blunder", "Miss", "Mistake", "Brilliant", "Great move"]
-NO_MOVES_ACCURACY = 100.0
+# The only `games` columns a review writes (never ratings, result or status).
+REVIEW_COLUMNS = (
+    "white_accuracy",
+    "black_accuracy",
+    "white_move_classifications",
+    "black_move_classifications",
+    "critical_moments",
+)
+
+# Outcomes of `game_review_status`.
+COMPLETED_STATUS = "completed"
+REVIEW_OK = "ok"
+REVIEW_GAME_NOT_FOUND = "not_found"
+REVIEW_GAME_NOT_COMPLETED = "not_completed"
+REVIEW_UNAVAILABLE = "unavailable"
+
+# Outcomes of `run_full_game_analysis`. Only ANALYSIS_SAVED means a review was written.
+ANALYSIS_SAVED = "saved"
+ANALYSIS_NO_MOVES = "no_moves"
+ANALYSIS_ENGINE_UNAVAILABLE = "engine_unavailable"
+ANALYSIS_NOT_SAVED = "not_saved"
+
+
+def parse_game_with_moves(pgn: str) -> chess.pgn.Game | None:
+    """
+    The game in `pgn`, or None when there is not a single move to review.
+
+    python-chess is lenient: text that is not PGN at all still parses to an
+    empty game. Empty input, non-PGN input, headers without moves and a game
+    whose first move is illegal all answer None, so no review is made up for them.
+    """
+    game = chess.pgn.read_game(io.StringIO(pgn))
+    if game is None or game.next() is None:
+        return None
+    return game
 
 
 def _score_ply(sf: Any, board: chess.Board, move: chess.Move, ply: int) -> dict:
@@ -32,8 +67,9 @@ def _score_ply(sf: Any, board: chess.Board, move: chess.Move, ply: int) -> dict:
     )
     if ply < BOOK_MAX_PLY and classification in BOOK_CLASSES and cp_loss <= BOOK_MAX_LOSS:
         classification = "Book"
-    # White-perspective eval after this move, for the eval graph.
-    eval_white = ea if player_color == chess.WHITE else -ea
+    # The eval graph is WHITE's view (positive: White better), whoever moved;
+    # frontend EvalGraph.tsx draws +eval_white above the middle line.
+    eval_white = for_color(ea, player_color)
     return {
         "move": played_uci,
         "san": board.san(move),
@@ -60,8 +96,9 @@ def _critical_moment(entry: dict, player_color: chess.Color) -> dict:
     }
 
 
-def _average_accuracy(accuracies: list) -> float:
-    return round(sum(accuracies) / len(accuracies), 1) if accuracies else NO_MOVES_ACCURACY
+def _average_accuracy(accuracies: list) -> float | None:
+    """Mean per-move accuracy; None (not a perfect 100) for a side that made no move."""
+    return round(sum(accuracies) / len(accuracies), 1) if accuracies else None
 
 
 def _review_game(sf: Any, game: chess.pgn.Game) -> dict:
@@ -93,28 +130,69 @@ def _review_game(sf: Any, game: chess.pgn.Game) -> dict:
     }
 
 
-def _save_review(seams: EngineSeams, game_id: str, update: dict) -> None:
+def review_pgn(sf: Any, pgn: str) -> dict | None:
+    """The `games` update (REVIEW_COLUMNS) for `pgn`, or None when it has no move to review."""
+    game = parse_game_with_moves(pgn)
+    return None if game is None else _review_game(sf, game)
+
+
+def game_review_status(seams: EngineSeams, game_id: str) -> str:
+    """
+    Whether a review may be written for `game_id`: one of the REVIEW_* values.
+
+    A review is only ever stored for a game that exists and is completed. If
+    the database is not configured or the lookup fails, the answer is
+    REVIEW_UNAVAILABLE (fail closed), never "go ahead".
+    """
     db = seams.supabase
-    if db:
-        try:
-            db.table("games").update(update).eq("id", game_id).execute()
-            # Note: the eval graph is derived client-side from each move entry's
-            # `eval_white`, so no separate `eval_graph` column is required.
-        except Exception as e:
-            print("Failed to save analysis to supabase:", e)
+    if not db:
+        return REVIEW_UNAVAILABLE
+    try:
+        result = db.table("games").select("id, status").eq("id", game_id).limit(1).execute()
+    except Exception as e:
+        print("Failed to look up game before analysis:", e)
+        return REVIEW_UNAVAILABLE
+    rows = getattr(result, "data", None) or []
+    if not rows:
+        return REVIEW_GAME_NOT_FOUND
+    return REVIEW_OK if rows[0].get("status") == COMPLETED_STATUS else REVIEW_GAME_NOT_COMPLETED
 
 
-def run_full_game_analysis(game_id: str, pgn: str, seams: EngineSeams) -> None:
-    """Analyse every move of `pgn` and write the review to `games` (id = game_id)."""
+def save_review(seams: EngineSeams, game_id: str, update: dict) -> bool:
+    """Write the review; True only when the update was sent without an error."""
+    db = seams.supabase
+    if not db:
+        return False
+    try:
+        # The status filter repeats the pre-check: a review never lands on an unfinished game.
+        db.table("games").update(update).eq("id", game_id).eq("status", COMPLETED_STATUS).execute()
+        # Note: the eval graph is derived client-side from each move entry's
+        # `eval_white`, so no separate `eval_graph` column is required.
+    except Exception as e:
+        print("Failed to save analysis to supabase:", e)
+        return False
+    return True
+
+
+def run_full_game_analysis(game_id: str, pgn: str, seams: EngineSeams) -> str:
+    """
+    Analyse every move of `pgn` and write the review to `games` (id = game_id).
+
+    Returns one of the ANALYSIS_* values. A game without moves is never
+    written: there is nothing to score, and an empty review used to store
+    100 / 100 accuracy (G21).
+    """
     sf = seams.get_stockfish_instance(depth=REVIEW_DEPTH)
     if not sf:
         print(f"Skipping analysis for {game_id}, engine unavailable")
-        return
+        return ANALYSIS_ENGINE_UNAVAILABLE
     # Note: sf is already acquired from pool; release in finally below
     try:
-        game = chess.pgn.read_game(io.StringIO(pgn))
-        if not game:
-            return
-        _save_review(seams, game_id, _review_game(sf, game))
+        update = review_pgn(sf, pgn)
+        if update is None:
+            print(f"Skipping analysis for {game_id}, PGN has no moves")
+            return ANALYSIS_NO_MOVES
+        saved = save_review(seams, game_id, update)
+        return ANALYSIS_SAVED if saved else ANALYSIS_NOT_SAVED
     finally:
         seams.release_stockfish_instance(sf)

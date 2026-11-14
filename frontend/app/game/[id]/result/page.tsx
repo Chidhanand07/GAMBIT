@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, use } from 'react';
 import Link from 'next/link';
 import { Chess } from 'chess.js';
 import { useGameReview } from '@/features/game-result/hooks/useGameReview';
@@ -11,8 +11,9 @@ import { EvalGraph } from '@/features/game-result/components/EvalGraph';
 import { MoveCaption, ReviewControls, ReviewMoveList } from '@/features/game-result/components/ReviewMoves';
 import { ReviewStatusScreen } from '@/features/game-result/components/ReviewChrome';
 
-export default function GameResultPage({ params }: { params: { id: string } }) {
-    const { game, status, flipped, setFlipped } = useGameReview(params.id);
+export default function GameResultPage(props: { params: Promise<{ id: string }> }) {
+    const params = use(props.params);
+    const { game, status, flipped, setFlipped, retry } = useGameReview(params.id);
     const [ply, setPly] = useState(0);
 
     const moves = useMemo(() => mergeClassifications(game), [game]);
@@ -25,7 +26,7 @@ export default function GameResultPage({ params }: { params: { id: string } }) {
         [game],
     );
 
-    if (status !== 'ready' || !game) return <ReviewStatusScreen status={status} />;
+    if (status !== 'ready' || !game) return <ReviewStatusScreen status={status} onRetry={retry} />;
 
     const curFen = positions[Math.min(ply, positions.length - 1)] || new Chess().fen();
     const curMove = ply > 0 ? moves[ply - 1] : null;

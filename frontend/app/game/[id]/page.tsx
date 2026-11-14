@@ -1,5 +1,6 @@
 'use client';
 
+import { use } from 'react';
 import ActionBar from '@/features/game/components/ActionBar';
 import Board from '@/features/game/components/Board';
 import ChatPanel from '@/features/game/components/ChatPanel';
@@ -17,7 +18,8 @@ import { useGameController } from '@/features/game/hooks/useGameController';
 import { deriveGameView } from '@/features/game/utils/gameView';
 import { DEFAULT_TIME_CONTROL } from '@/features/game/payloads';
 
-export default function GamePage({ params }: { params: { id: string } }) {
+export default function GamePage(props: { params: Promise<{ id: string }> }) {
+    const params = use(props.params);
     const game = useGameController(params.id);
     const { state, board, disconnect, controls } = game;
     const view = deriveGameView(state, game.liveChess, board.isMyTurn());
@@ -39,7 +41,7 @@ export default function GamePage({ params }: { params: { id: string } }) {
                         showOpponentDisconnected={disconnect.opponentDisconnected && !gameOver}
                         disconnectCountdown={disconnect.disconnectCountdown}
                     />
-                    <PlayerStrip {...view.top} isBottom={false} isMe={false} timeControl={gameData?.time_control} />
+                    <PlayerStrip {...view.top} isBottom={false} timeControl={gameData?.time_control} />
                     <Board
                         displayChess={board.displayChess}
                         liveChess={game.liveChess}
@@ -55,7 +57,7 @@ export default function GamePage({ params }: { params: { id: string } }) {
                         onPromote={(move, piece) => board.commitMove(move.from, move.to, piece)}
                         gameOver={gameOver}
                     />
-                    <PlayerStrip {...view.bottom} isBottom={true} isMe={true} timeControl={gameData?.time_control} />
+                    <PlayerStrip {...view.bottom} isBottom={true} timeControl={gameData?.time_control} />
                     <ActionBar {...controls} isSpectator={myColor === 'spectator'} />
 
                     {gameOver && state.showGameOverModal && (

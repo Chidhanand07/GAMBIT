@@ -1,10 +1,12 @@
 'use client';
 
+import { use } from 'react';
 import { FriendsTab } from '@/features/profile/components/FriendsTab';
 import { GamesTab } from '@/features/profile/components/GamesTab';
 import { OverviewTab } from '@/features/profile/components/OverviewTab';
 import { ProfileActions } from '@/features/profile/components/ProfileActions';
 import { ProfileHeader } from '@/features/profile/components/ProfileHeader';
+import { ProfileUnavailable } from '@/features/profile/components/ProfileUnavailable';
 import { ProfileTabBar } from '@/features/profile/components/ProfileTabBar';
 import { StatsTab } from '@/features/profile/components/StatsTab';
 import { profileRecord } from '@/features/profile/format';
@@ -20,22 +22,18 @@ import { useProfileTab } from '@/features/profile/hooks/useProfileTab';
  * Public profile page. The hooks below are called in the same order as the
  * effects of the pre-split page, so their effects still run in that order.
  */
-export default function ProfilePage({ params }: { params: { username: string } }) {
+export default function ProfilePage(props: { params: Promise<{ username: string }> }) {
+    const params = use(props.params);
     const username = params.username;
     const { activeTab, setActiveTab } = useProfileTab();
-    const { profile, meProfile, isOwnProfile } = useProfileData(username);
+    const { status, profile, meProfile, isOwnProfile, reload } = useProfileData(username);
     const { friendStatus, addFriend } = useFriendStatus({ username, profile, meProfile, isOwnProfile });
-    const gameHistory = useGameHistory({ username, activeTab, profile });
-    const statsData = useProfileStats({ username, activeTab, profile });
+    const gameHistory = useGameHistory({ activeTab, profile });
+    const statsState = useProfileStats({ username, activeTab, profile });
     const friendsState = useFriends({ activeTab, profile, isOwnProfile });
     const isOnline = useProfilePresence(profile?.id);
 
-    if (!profile)
-        return (
-            <div className="flex justify-center p-20">
-                <div className="w-8 h-8 rounded-full border-2 border-border border-t-accent animate-spin" />
-            </div>
-        );
+    if (!profile) return <ProfileUnavailable status={status} username={username} onRetry={reload} />;
 
     const record = profileRecord(profile);
 
@@ -75,7 +73,9 @@ export default function ProfilePage({ params }: { params: { username: string } }
                         onLoadMore={gameHistory.loadMore}
                     />
                 )}
-                {activeTab === 'stats' && <StatsTab stats={statsData} />}
+                {activeTab === 'stats' && (
+                    <StatsTab stats={statsState.stats} failed={statsState.failed} onRetry={statsState.retry} />
+                )}
                 {activeTab === 'friends' && (
                     <FriendsTab profile={profile} isOwnProfile={isOwnProfile} friendsState={friendsState} />
                 )}

@@ -1,11 +1,10 @@
 import 'server-only';
-import { parseBaseMinutes, speedBucketForMinutes } from '@/lib/chess/timeControl';
+import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
+import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
 
 /** Rating reported for a bucket whose column is null. */
 const DEFAULT_RATING = 1200;
-/** Time control assumed for a game row without one. */
-const DEFAULT_TIME_CONTROL = '10';
 
 type CategoryStats = { played: number; wins: number; losses: number; draws: number };
 
@@ -21,15 +20,18 @@ interface StatsProfileRow {
     rating_classical: number | null;
 }
 
-interface StatsGameRow {
+interface StatsGameRow extends OutcomeRow {
     time_control: string | null;
-    winner_id: string | null;
-    result: string | null;
 }
 
 const emptyCategory = (): CategoryStats => ({ played: 0, wins: 0, losses: 0, draws: 0 });
 
-/** Played/won/lost/drawn per speed bucket; anything that is not a draw or a win counts as a loss. */
+const OUTCOME_COUNTER = { win: 'wins', loss: 'losses', draw: 'draws' } as const;
+
+/**
+ * Played/won/lost/drawn per speed bucket, read like the game server reads a row (F12): an
+ * aborted game is not counted, and a game nobody won is a draw, not a loss.
+ */
 function statsByCategory(games: StatsGameRow[], profileId: string): Record<SpeedBucket, CategoryStats> {
     const stats = {
         bullet: emptyCategory(),
@@ -38,15 +40,11 @@ function statsByCategory(games: StatsGameRow[], profileId: string): Record<Speed
         classical: emptyCategory(),
     };
     for (const game of games) {
-        const cat = speedBucketForMinutes(parseBaseMinutes(game.time_control ?? DEFAULT_TIME_CONTROL));
+        const outcome = playerOutcome(game, profileId);
+        if (outcome === 'aborted') continue;
+        const cat = classifyTimeControl(game.time_control);
         stats[cat].played++;
-        if (game.result === 'draw') {
-            stats[cat].draws++;
-        } else if (game.winner_id === profileId) {
-            stats[cat].wins++;
-        } else {
-            stats[cat].losses++;
-        }
+        stats[cat][OUTCOME_COUNTER[outcome]]++;
     }
     return stats;
 }

@@ -1,6 +1,10 @@
 import { Camera, Loader2 } from 'lucide-react';
 import type { ProfileSettingsForm } from '../hooks/useProfileSettings';
 import type { SettingsProfile } from '../types';
+import { AvatarImage } from '@/components/ui/AvatarImage';
+
+/** The editor preview is w-20. */
+const EDITOR_AVATAR_PX = 80;
 
 export function AvatarEditor({ profile, form }: { profile: SettingsProfile; form: ProfileSettingsForm }) {
     const { avatarUrl, avatarUploading, fileInputRef, handleAvatarUpload } = form;
@@ -9,7 +13,7 @@ export function AvatarEditor({ profile, form }: { profile: SettingsProfile; form
             <div className="relative shrink-0">
                 <div className="w-20 h-20 rounded-full bg-elevated border-2 border-border-strong flex items-center justify-center overflow-hidden">
                     {avatarUrl ? (
-                        <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                        <AvatarImage src={avatarUrl} size={EDITOR_AVATAR_PX} />
                     ) : (
                         <span className="text-accent text-2xl font-medium select-none">
                             {(profile.display_name || profile.username || '?')[0].toUpperCase()}

@@ -5,10 +5,12 @@
  */
 const { createSupabaseMock } = require('../helpers/mockSupabase');
 const { createGamesRepository } = require('../../src/repositories/gamesRepository');
+const { createGameInvitesRepository } = require('../../src/repositories/gameInvitesRepository');
 const { createMovesRepository } = require('../../src/repositories/movesRepository');
 const { createMessagesRepository } = require('../../src/repositories/messagesRepository');
 const { createProfilesRepository } = require('../../src/repositories/profilesRepository');
 const { createNotificationsRepository } = require('../../src/repositories/notificationsRepository');
+const { createGameResultsRepository } = require('../../src/repositories/gameResultsRepository');
 
 let supabase;
 beforeEach(() => {
@@ -32,22 +34,34 @@ describe('gamesRepository', () => {
         const { table, ops } = await run(repo.findForRestore('g1'));
         expect(table).toBe('games');
         expect(ops).toEqual([
-            ['select', 'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms'],
+            // result + winner_id: so a finished game restores with its real outcome (G1).
+            [
+                'select',
+                'id, status, white_id, black_id, is_rated, time_control, fen, white_clock_ms, black_clock_ms, result, winner_id',
+            ],
             ['eq', 'id', 'g1'],
             ['maybeSingle'],
         ]);
     });
 
-    test('findByInviteToken keeps the multi-line select verbatim', async () => {
-        const { ops } = await run(repo.findByInviteToken('tok'));
+    test('findByIdWithPlayers keeps the multi-line select verbatim and filters by id (never by token) [INV-TOKEN]', async () => {
+        const { table, ops } = await run(repo.findByIdWithPlayers('g1'));
+        expect(table).toBe('games');
         expect(ops).toEqual([
             [
                 'select',
                 '\n                *,\n                white:profiles!white_id(username, avatar_url),\n                black:profiles!black_id(username, avatar_url)\n            ',
             ],
-            ['eq', 'invite_token', 'tok'],
+            ['eq', 'id', 'g1'],
             ['maybeSingle'],
         ]);
+        expect(repo.findByInviteToken).toBeUndefined();
+    });
+
+    test('deleteById', async () => {
+        const { table, ops } = await run(repo.deleteById('g1'));
+        expect(table).toBe('games');
+        expect(ops).toEqual([['delete'], ['eq', 'id', 'g1']]);
     });
 
     test('insertReturning', async () => {
@@ -105,6 +119,26 @@ test('movesRepository.insert / messagesRepository.insert', async () => {
     expect([messages.table, messages.ops]).toEqual(['messages', [['insert', row]]]);
 });
 
+describe('gameInvitesRepository [INV-TOKEN]', () => {
+    let repo;
+    beforeEach(() => {
+        repo = createGameInvitesRepository(supabase);
+    });
+
+    test('insert stores game_id, token and expiry in game_invites', async () => {
+        const row = { game_id: 'g1', token: 'tok', expires_at: '2026-01-03T00:00:00.000Z' };
+        const { table, ops } = await run(repo.insert(row));
+        expect(table).toBe('game_invites');
+        expect(ops).toEqual([['insert', row]]);
+    });
+
+    test('findByToken selects only game_id and expires_at, by token', async () => {
+        const { table, ops } = await run(repo.findByToken('tok'));
+        expect(table).toBe('game_invites');
+        expect(ops).toEqual([['select', 'game_id, expires_at'], ['eq', 'token', 'tok'], ['maybeSingle']]);
+    });
+});
+
 describe('profilesRepository', () => {
     let repo;
     beforeEach(() => {
@@ -112,7 +146,7 @@ describe('profilesRepository', () => {
     });
 
     test.each([
-        ['findUsernameByUsername', ['bob'], [['select', 'username'], ['eq', 'username', 'bob'], ['single']]],
+        ['findUsernameByUsername', ['bob'], [['select', 'username'], ['eq', 'username', 'bob'], ['maybeSingle']]],
         [
             'findForMatchmaking',
             ['u1'],
@@ -133,18 +167,44 @@ describe('profilesRepository', () => {
                 ['in', 'id', ['w', 'b']],
             ],
         ],
-        [
-            'updateById',
-            ['u1', { bio: 'x' }],
-            [
-                ['update', { bio: 'x' }],
-                ['eq', 'id', 'u1'],
-            ],
-        ],
     ])('%s', async (name, args, expected) => {
         const { table, ops } = await run(repo[name](...args));
         expect(table).toBe('profiles');
         expect(ops).toEqual(expected);
+    });
+
+    test('has no direct profile write: ratings and stats go through apply_game_result [RATING-ATOMIC]', () => {
+        expect(repo.updateById).toBeUndefined();
+    });
+});
+
+describe('gameResultsRepository [RATING-ATOMIC]', () => {
+    test('applyGameResult calls apply_game_result with the p_-prefixed arguments and returns its result', async () => {
+        supabase.queue('rpc:apply_game_result', { data: 'applied', error: null });
+        const white = { old_rating: 1500, old_rd: 100, old_vol: 0.06, old_games_played: 10, new_rating: 1510, new_rd: 95, new_vol: 0.06 };
+        const black = { ...white, new_rating: 1490 };
+        const repo = createGameResultsRepository(supabase);
+
+        const { table, ops, result } = await run(
+            repo.applyGameResult({ gameId: 'g', whiteId: 'w', blackId: 'b', result: 'white', ratingField: 'rating_rapid', white, black }),
+        );
+
+        expect(table).toBe('rpc:apply_game_result');
+        expect(ops).toEqual([
+            [
+                'rpc',
+                {
+                    p_game_id: 'g',
+                    p_white_id: 'w',
+                    p_black_id: 'b',
+                    p_result: 'white',
+                    p_rating_field: 'rating_rapid',
+                    p_white: white,
+                    p_black: black,
+                },
+            ],
+        ]);
+        expect(result).toEqual({ data: 'applied', error: null });
     });
 });
 

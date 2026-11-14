@@ -16,7 +16,8 @@ from typing import Any, Protocol
 
 class EngineSeams(Protocol):
     get_engine: Callable[..., AbstractContextManager[Any]]
+    engine_status: Callable[[], str]
     get_stockfish_instance: Callable[..., Any]
     release_stockfish_instance: Callable[[Any], None]
-    run_full_game_analysis: Callable[[str, str], None]
+    run_full_game_analysis: Callable[[str, str], Any]
     supabase: Any

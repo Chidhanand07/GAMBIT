@@ -11,6 +11,7 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
  * @typedef {object} GameState
  * @property {string} id
  * @property {string} fen
+ * @property {string} startFen position the move log starts from (the rules replay from here)
  * @property {string | null} whiteId
  * @property {string | null} blackId
  * @property {number} whiteClockMs
@@ -25,6 +26,7 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
  * @property {boolean} isRated
  * @property {number | null} lastMoveAt
  * @property {object | null} disconnectInfo
+ * @property {number} [startedAt] when the game became active (the first-move window opens here)
  */
 
 /**
@@ -43,6 +45,7 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
  * @param {number} [init.blackClockMs]
  * @param {string} [init.activeSide]
  * @param {number | null} [init.lastMoveAt]
+ * @param {number} [init.startedAt]
  * @returns {GameState}
  */
 function createInitialGameState({
@@ -56,10 +59,12 @@ function createInitialGameState({
     blackClockMs = initialClockMs(timeControl),
     activeSide = 'w',
     lastMoveAt = null,
+    startedAt,
 }) {
     return {
         id,
         fen,
+        startFen: fen,
         whiteId,
         blackId,
         whiteClockMs,
@@ -74,6 +79,7 @@ function createInitialGameState({
         isRated,
         lastMoveAt,
         disconnectInfo: null,
+        ...(startedAt === undefined ? {} : { startedAt }),
     };
 }
 
@@ -119,6 +125,7 @@ function gameStateFromRow(gameId, row, now) {
         timeControl: row.time_control,
         isRated: row.is_rated ?? false,
         lastMoveAt: row.white_clock_ms !== null || row.black_clock_ms !== null ? now : null,
+        startedAt: now,
     });
 }
 

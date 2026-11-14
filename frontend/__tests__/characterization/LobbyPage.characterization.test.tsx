@@ -22,6 +22,8 @@ let onlineCount = 42
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
 jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount }) }))
+const toast = jest.fn()
+jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
 import LobbyPage from '@/app/lobby/page'
 
@@ -34,6 +36,7 @@ let privateCreate: () => Promise<any>
 beforeEach(() => {
     socket.reset()
     push.mockClear()
+    toast.mockClear()
     profile = { ...ME }
     onlineCount = 42
     activeGame = null
@@ -66,9 +69,9 @@ describe('mount & static content', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/games/active']])
     })
 
-    test('subscribes only to match_found, game_start and connect (no queue_joined / queue_status handling)', async () => {
+    test('subscribes to match_found, match_failed, game_start and connect (no queue_joined / queue_status handling)', async () => {
         await renderLobby()
-        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_found'])
+        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_failed', 'match_found'])
         expect(socket.emit).not.toHaveBeenCalled()
     })
 
@@ -113,19 +116,21 @@ describe('mount & static content', () => {
 })
 
 describe('Play Online', () => {
-    test('emits join_queue with the FULL profile object as user, minutes as a string, and no is_rated', async () => {
+    test('emits join_queue in the one queue shape: {id} only, canonical "M+S", increment and is_rated [F8]', async () => {
         await renderLobby()
         playOnline()
+        // Was: the FULL profile object as user and no is_rated (the reconnect re-queue used another shape).
         expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { ...ME }, time_control: '3', increment: 0 }],
+            // The third argument is the ack callback: a refused join is reported (ACKS).
+            ['join_queue', { user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }, expect.any(Function)],
         ])
     })
 
-    test('Daily queues with time_control "1440"', async () => {
+    test('Daily queues with time_control "1440+0"', async () => {
         await renderLobby()
         click(screen.getByText('Daily'))
         playOnline()
-        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '1440', increment: 0 }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '1440+0', increment: 0, is_rated: true }])
     })
 
     test('match_found falls back to game_id when id is missing', async () => {
@@ -141,6 +146,9 @@ describe('Play Online', () => {
         await renderLobby()
         playOnline()
         expect(screen.getByText('00:00')).toBeInTheDocument()
+        // The server accepts the join (since F-065 an unanswered join gives up after one retry).
+        const ack = socket.emit.mock.calls.find(([e]) => e === 'join_queue')![2]
+        act(() => { ack({ ok: true }) })
         act(() => { jest.advanceTimersByTime(65_000) })
         expect(screen.getByText('01:05')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Cancel search' }))
@@ -149,14 +157,54 @@ describe('Play Online', () => {
         expect(screen.getByText('00:00')).toBeInTheDocument()
     })
 
-    test('a socket reconnect while searching re-emits join_queue in a DIFFERENT shape ({id} only, is_rated: true)', async () => {
+    test('a server that never answers join_queue: retried once, then the search stops with a message [ACKS]', async () => {
+        jest.useFakeTimers()
+        await renderLobby()
+        playOnline()
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(socket.emitted('join_queue')).toHaveLength(2)
+        act(() => { jest.advanceTimersByTime(8_000) })
+        expect(screen.queryByRole('button', { name: 'Cancel search' })).not.toBeInTheDocument()
+        expect(toast).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.', 'error')
+    })
+
+    test('a socket reconnect while searching re-emits the SAME join_queue payload, with an ack [F8]', async () => {
+        await renderLobby()
+        playOnline()
+        const [first] = socket.emitted('join_queue')
+        socket.emit.mockClear()
+        socket.serverSends('connect')
+        // Was: a different shape and no ack, so a refused re-queue left the player "searching" forever.
+        expect(socket.emit.mock.calls).toEqual([['join_queue', first, expect.any(Function)]])
+    })
+
+    test('the reconnect re-queue keeps the queued time control even if the selection changed meanwhile [F8]', async () => {
         await renderLobby()
         playOnline()
         socket.emit.mockClear()
+        click(screen.getByText('Rapid')) // the cards stay mounted while searching
         socket.serverSends('connect')
-        expect(socket.emit.mock.calls).toEqual([
-            ['join_queue', { user: { id: 'me' }, time_control: '3', increment: 0, is_rated: true }],
-        ])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '3+0', increment: 0, is_rated: true }])
+    })
+
+    test('a refused reconnect re-queue stops the search and shows why [F8] [ACKS]', async () => {
+        await renderLobby()
+        playOnline()
+        socket.emit.mockImplementationOnce((_e: string, _p: unknown, ack?: (res: unknown) => void) =>
+            ack?.({ ok: false, error: 'invalid_time_control' }))
+        socket.serverSends('connect')
+        expect(screen.queryByText('Finding opponent…')).not.toBeInTheDocument()
+        expect(toast).toHaveBeenCalledWith('That time control is not available.', 'error')
+    })
+
+    test('match_found while not searching is ignored [F8]', async () => {
+        await renderLobby()
+        socket.serverSends('match_found', { id: 'stale', white_id: 'me', black_id: 'x' })
+        expect(push).not.toHaveBeenCalled()
+        playOnline()
+        click(screen.getByRole('button', { name: 'Cancel search' }))
+        socket.serverSends('match_found', { id: 'stale-2', white_id: 'me', black_id: 'x' })
+        expect(push).not.toHaveBeenCalled()
     })
 
     test('a socket reconnect while NOT searching emits nothing', async () => {
@@ -165,13 +213,20 @@ describe('Play Online', () => {
         expect(socket.emit).not.toHaveBeenCalled()
     })
 
-    test('unmounting while searching does NOT emit leave_queue, but removes the listeners', async () => {
+    test('unmounting while searching leaves the queue and removes the listeners [F8]', async () => {
         const { unmount } = await renderLobby()
         playOnline()
         socket.emit.mockClear()
         unmount()
-        expect(socket.emit).not.toHaveBeenCalled()
+        // Was: no leave_queue, so the server could still pair a player who had left the lobby.
+        expect(socket.emit.mock.calls).toEqual([['leave_queue', 'me']])
         expect(socket.listenedEvents()).toEqual([])
+    })
+
+    test('unmounting while NOT searching emits nothing [F8]', async () => {
+        const { unmount } = await renderLobby()
+        unmount()
+        expect(socket.emit).not.toHaveBeenCalled()
     })
 })
 
@@ -187,7 +242,7 @@ describe('custom time control modal', () => {
         click(backdrop)
         expect(screen.queryByText('Custom Time Control')).not.toBeInTheDocument()
         playOnline()
-        expect(socket.emitted('join_queue')[0].time_control).toBe('3')
+        expect(socket.emitted('join_queue')[0].time_control).toBe('3+0')
     })
 
     test('sliders set minutes/increment; confirming queues with "M+I" and increment I', async () => {
@@ -208,10 +263,10 @@ describe('custom time control modal', () => {
         expect(screen.getByText('12+5')).toBeInTheDocument()
         expect(screen.queryByText('Configure')).not.toBeInTheDocument()
         playOnline()
-        expect(socket.emitted('join_queue')).toEqual([{ user: { ...ME }, time_control: '12+5', increment: 5 }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true }])
     })
 
-    test('reconnect re-queue for a custom control sends only the minutes ("12"), not "12+5"', async () => {
+    test('reconnect re-queue for a custom control keeps the increment ("12+5") [TIME-CONTROL]', async () => {
         await renderLobby()
         click(screen.getByText('Custom'))
         const [minutes, increment] = screen.getAllByRole('slider')
@@ -221,7 +276,7 @@ describe('custom time control modal', () => {
         playOnline()
         socket.emit.mockClear()
         socket.serverSends('connect')
-        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12', increment: 5, is_rated: true }])
+        expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true }])
     })
 })
 
@@ -290,7 +345,7 @@ describe('private game modal', () => {
         expect(call[1]).toEqual({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeControl: 'blitz', color: 'white', isRated: true }),
+            body: JSON.stringify({ timeControl: '3+0', color: 'white', isRated: true }),
         })
     })
 
@@ -318,14 +373,14 @@ describe('private game modal', () => {
         expect(screen.getByTestId('qr')).toHaveAttribute('data-value', 'http://localhost/join/tok_FAKE_0002')
     })
 
-    test('a response without a token logs the error and returns to the config step', async () => {
+    test('a response without a token returns to the config step, without logging to the browser console [S14]', async () => {
         const err = jest.spyOn(console, 'error').mockImplementation(() => {})
         privateCreate = async () => jsonResponse({ error: 'boom' })
         await renderLobby()
         openFriendModal()
         click(screen.getByRole('button', { name: 'Generate Invite Link' }))
-        await waitFor(() => expect(err).toHaveBeenCalledWith('Private game error:', 'boom'))
-        expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument()
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument())
+        expect(err).not.toHaveBeenCalled()
         expect(socket.emitted('join_game')).toEqual([])
     })
 

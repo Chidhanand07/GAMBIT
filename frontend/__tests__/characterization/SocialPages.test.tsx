@@ -18,6 +18,8 @@ const socket = createFakeSocket()
 let profile: any = null
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
+const toast = jest.fn()
+jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
 let session: any = { access_token: 'at_FAKE' }
 jest.mock('@/lib/supabase/client', () => ({
@@ -27,6 +29,7 @@ jest.mock('@/lib/supabase/client', () => ({
 import ChallengePage from '@/app/challenge/[username]/page'
 import JoinPage from '@/app/join/[token]/page'
 import LeaderboardPage from '@/app/leaderboard/page'
+import { routeParams } from '../helpers/params'
 
 const flush = async () => {
     for (let i = 0; i < 6; i++) await act(async () => {})
@@ -35,6 +38,7 @@ const flush = async () => {
 let fetchMock: jest.Mock
 beforeEach(() => {
     socket.reset()
+    toast.mockClear()
     push.mockClear()
     back.mockClear()
     profile = null
@@ -51,7 +55,7 @@ describe('challenge/[username]', () => {
 
     async function renderChallenge(opponent: any = BOB) {
         fetchMock.mockImplementation(async () => (opponent ? jsonResponse(opponent) : jsonResponse(null, false)))
-        const utils = render(<ChallengePage params={{ username: 'bob b' }} />)
+        const utils = render(<ChallengePage params={routeParams({ username: 'bob b' })} />)
         await flush()
         return utils
     }
@@ -75,7 +79,14 @@ describe('challenge/[username]', () => {
         expect(socket.listenedEvents()).toEqual(['challenge_declined', 'challenge_ready'])
     })
 
-    test('send emits the exact challenge_request payload and locks the button', async () => {
+    /** Answer the last challenge_request the page sent, as the server's ack would. */
+    const ackChallenge = (ack: unknown) =>
+        act(() => {
+            const call = socket.emit.mock.calls.filter(([e]) => e === 'challenge_request').at(-1)!
+            call[2](ack)
+        })
+
+    test('send emits the exact challenge_request payload, shows the spinner until the ack, then waits for bob [ACKS] [F17]', async () => {
         profile = { id: 'me', username: 'me1', display_name: null }
         const { container } = await renderChallenge()
         fireEvent.click(screen.getByRole('button', { name: '5 min' }))
@@ -83,16 +94,54 @@ describe('challenge/[username]', () => {
         fireEvent.click(screen.getByRole('button', { name: '♚ Black' }))
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
         expect(socket.emitted('challenge_request')).toEqual([
-            { from_user_id: 'me', to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
+            // S2: no from_user_id — the server takes the sender from the socket handshake.
+            { to_user_id: 'bob-id', from_username: 'me1', time_control: '5', is_rated: false, color: 'black' },
         ])
+        // Was: "Challenge sent!" at once and the spinner never showed (sending was set and reset
+        // in the same tick). Now the spinner shows while the server has not acknowledged.
+        const sendButton = screen.getByRole('button', { name: /Send Challenge/ })
+        expect(sendButton).toBeDisabled()
+        expect(sendButton.querySelector('.animate-spin')).not.toBeNull()
+        expect(screen.queryByText('Challenge sent! Waiting for bob to accept…')).not.toBeInTheDocument()
+
+        ackChallenge({ ok: true })
         expect(screen.getByText('Challenge sent! Waiting for bob to accept…')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Challenge Sent…/ })).toBeDisabled()
+        expect(toast).not.toHaveBeenCalled()
+    })
+
+    test('a refused challenge_request is shown as an error toast and the button is enabled again [ACKS]', async () => {
+        profile = { id: 'me', username: 'me1', display_name: null }
+        await renderChallenge()
+        fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
+        ackChallenge({ ok: false, error: 'rate_limited' })
+        expect(toast).toHaveBeenCalledWith('Too many requests. Please wait a moment and try again.', 'error')
+        expect(screen.getByRole('button', { name: /Send Challenge/ })).not.toBeDisabled()
+        expect(screen.queryByText(/Challenge sent!/)).not.toBeInTheDocument()
+    })
+
+    test('no ack within the timeout: an error toast, the request is NOT re-sent, the button is enabled again [ACKS]', async () => {
+        profile = { id: 'me', username: 'me1', display_name: null }
+        await renderChallenge()
+        jest.useFakeTimers()
+        try {
+            fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
+            act(() => {
+                jest.advanceTimersByTime(8_000)
+            })
+            expect(toast).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.', 'error')
+            expect(socket.emitted('challenge_request')).toHaveLength(1)
+            expect(screen.getByRole('button', { name: /Send Challenge/ })).not.toBeDisabled()
+        } finally {
+            jest.useRealTimers()
+        }
     })
 
     test('declined re-enables sending; ready navigates to the game', async () => {
         profile = { id: 'me', username: 'me1', display_name: 'Me' }
         await renderChallenge()
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
+        ackChallenge({ ok: true })
         socket.serverSends('challenge_declined', { by: 'bob-id' })
         expect(screen.getByText('bob declined the challenge.')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Send Challenge/ })).not.toBeDisabled()
@@ -126,7 +175,7 @@ describe('join/[token]', () => {
         })
 
     async function renderJoin() {
-        const utils = render(<JoinPage params={{ token: 'tok_FAKE_0001' }} />)
+        const utils = render(<JoinPage params={routeParams({ token: 'tok_FAKE_0001' })} />)
         await flush()
         return utils
     }
@@ -183,10 +232,20 @@ describe('join/[token]', () => {
         expect(push.mock.calls).toEqual([['/login?redirect=/join/tok_FAKE_0001']])
     })
 
-    test('creator authenticates, joins the room and follows game_start', async () => {
+    test('F17: without a session the button is not left on "Joining..."', async () => {
+        session = null
+        routes(GAME, { id: 'guest' })
+        await renderJoin()
+        fireEvent.click(screen.getByRole('button', { name: /Accept & Play/ }))
+        await flush()
+        expect(screen.queryByText(/Joining/)).toBeNull()
+        expect(screen.getByRole('button', { name: /Accept & Play/ })).not.toBeDisabled()
+    })
+
+    test('creator joins the room (identity comes from the socket handshake) and follows game_start', async () => {
         routes({ ...GAME, white_id: null, black_id: 'creator', white: null, black: { username: 'carl' }, time_control: '1' }, { id: 'creator' })
         await renderJoin()
-        expect(socket.emit.mock.calls).toEqual([['authenticate', 'creator'], ['join_game', 'g-1']])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g-1']])
         expect(screen.getByText('Waiting for opponent to join...')).toBeInTheDocument()
         expect(screen.getByText('♚ Black')).toBeInTheDocument()
         expect(screen.getByText(/Bullet · 1 min/)).toBeInTheDocument()

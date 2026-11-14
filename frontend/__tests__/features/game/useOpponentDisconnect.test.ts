@@ -44,3 +44,15 @@ test('callbacks are stable across renders (safe to omit from the socket effect d
     expect(result.current.markDisconnected).toBe(first.markDisconnected)
     expect(result.current.markReconnected).toBe(first.markReconnected)
 })
+
+test('a new disconnect after the countdown ran out ticks again (no exhaustive-deps disable)', () => {
+    const { result } = renderHook(() => useOpponentDisconnect())
+    act(() => result.current.markDisconnected(1))
+    act(() => { jest.advanceTimersByTime(1000) })
+    expect(result.current.disconnectCountdown).toBe(0)
+    act(() => result.current.markDisconnected(3))
+    // Was: the effect was keyed on opponentDisconnected only (still true), so nothing ticked.
+    expect(jest.getTimerCount()).toBe(1)
+    act(() => { jest.advanceTimersByTime(1000) })
+    expect(result.current.disconnectCountdown).toBe(2)
+})

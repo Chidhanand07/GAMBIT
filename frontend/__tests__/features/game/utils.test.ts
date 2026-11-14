@@ -1,10 +1,12 @@
 import { Chess } from 'chess.js'
 import * as sounds from '@/lib/sounds'
-import { detectGameOver, isPromotionMove, playMoveSoundFor } from '@/features/game/utils/moveEffects'
+import * as moveEffects from '@/features/game/utils/moveEffects'
+import { isPromotionMove, playMoveSoundFor } from '@/features/game/utils/moveEffects'
 import { historyStorageKey, saveHistory, stepBackIndex, stepForwardIndex } from '@/features/game/utils/history'
 import { seatFor } from '@/features/game/utils/seat'
 import { deriveGameView } from '@/features/game/utils/gameView'
-import { gameEndPayload, rematchTerms } from '@/features/game/payloads'
+import * as payloads from '@/features/game/payloads'
+import { rematchTerms } from '@/features/game/payloads'
 import { createInitialGameState } from '@/features/game/state/gameReducer'
 
 jest.mock('@/lib/sounds', () => ({
@@ -15,12 +17,9 @@ jest.mock('@/lib/sounds', () => ({
 beforeEach(() => jest.clearAllMocks())
 
 describe('moveEffects', () => {
-    test('detectGameOver: checkmate names the winner; stalemate; ongoing returns null', () => {
-        expect(detectGameOver(new Chess('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3')))
-            .toEqual({ result: 'Black wins', reason: 'Checkmate' })
-        expect(detectGameOver(new Chess('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1'))).toEqual({ result: 'Draw', reason: 'Stalemate' })
-        expect(detectGameOver(new Chess('8/8/8/8/8/8/8/K6k w - - 0 1'))).toEqual({ result: 'Draw', reason: 'Draw' })
-        expect(detectGameOver(new Chess())).toBeNull()
+    test('the client has no game-over detector: results are decided by the server [S3]', () => {
+        // Was `detectGameOver`, whose verdict the page showed and reported to the server.
+        expect(moveEffects).not.toHaveProperty('detectGameOver')
     })
 
     test('playMoveSoundFor priority: mate > check > castle > promotion > capture > move', () => {
@@ -47,12 +46,18 @@ describe('moveEffects', () => {
 })
 
 describe('history', () => {
-    test('step indexes (snapshots are post-move FENs; first back from live lands on the last one)', () => {
-        expect(stepBackIndex(null, 2)).toBe(1)
+    test('step indexes: snapshots are post-move FENs, so the last one IS the live board [F6]', () => {
+        // Was: back from live landed on index 1 of 2 (the live position) and forward from live jumped to 0.
+        expect(stepBackIndex(null, 2)).toBe(0)
+        expect(stepBackIndex(null, 3)).toBe(1)
+        expect(stepBackIndex(null, 1)).toBe(0)
+        expect(stepBackIndex(1, 3)).toBe(0)
         expect(stepBackIndex(0, 2)).toBe(0)
-        expect(stepForwardIndex(0, 2)).toBe(1)
+        expect(stepForwardIndex(0, 3)).toBe(1)
+        expect(stepForwardIndex(1, 3)).toBeNull()
+        expect(stepForwardIndex(0, 2)).toBeNull()
         expect(stepForwardIndex(1, 2)).toBeNull()
-        expect(stepForwardIndex(null, 2)).toBe(0)
+        expect(stepForwardIndex(null, 2)).toBeNull()
     })
 
     test('saveHistory writes the legacy JSON under gambit-game-<id> and swallows storage errors', () => {
@@ -71,10 +76,11 @@ test('seatFor: white wins a tie, unknown ids spectate', () => {
 })
 
 describe('payloads', () => {
-    test('game_end defaults is_rated=false and time_control="10" when the row lacks them', () => {
-        expect(gameEndPayload('g', { result: 'Draw', reason: 'Stalemate' }, null)).toEqual({
-            game_id: 'g', result: 'Draw', reason: 'Stalemate', white_id: undefined, black_id: undefined, is_rated: false, time_control: '10',
-        })
+    test('there is no game_end payload builder: the client cannot report a result [S3]', () => {
+        expect(payloads).not.toHaveProperty('gameEndPayload')
+    })
+
+    test('rematch terms default to time_control="10", is_rated=false when the row lacks them', () => {
         expect(rematchTerms(undefined)).toEqual({ time_control: '10', is_rated: false })
     })
 })
@@ -98,6 +104,17 @@ describe('deriveGameView', () => {
         expect(v.top).toMatchObject({ time: 10, isActive: false })
         expect(v.bottom.isActive).toBe(false)
         expect(v.turnIndicator).toBeNull()
+    })
+
+    test('isMe marks only the strip of my own colour; a spectator has none [F4]', () => {
+        const strips = (over: object) => {
+            const v = deriveGameView({ ...state(), ...over }, { turn: () => 'w' }, false)
+            return [v.top.isMe, v.bottom.isMe]
+        }
+        expect(strips({ myColor: 'spectator' })).toEqual([false, false])
+        expect(strips({ myColor: 'white' })).toEqual([false, true])
+        expect(strips({ myColor: 'black', flipped: true })).toEqual([false, true])
+        expect(strips({ myColor: 'white', flipped: true })).toEqual([true, false])
     })
 
     test('label falls back to username then colour; my turn wins', () => {

@@ -12,8 +12,14 @@ const path = require('path');
 /** @param {string} packageDir absolute path of the package (server/ or frontend/) */
 function readBaseline(packageDir) {
     const file = path.join(packageDir, '.lint-baseline.json');
-    if (!fs.existsSync(file)) return {};
-    return JSON.parse(fs.readFileSync(file, 'utf8')).files ?? {};
+    let raw;
+    try {
+        raw = fs.readFileSync(file, 'utf8');
+    } catch (e) {
+        if (e.code === 'ENOENT') return {};
+        throw e;
+    }
+    return JSON.parse(raw).files ?? {};
 }
 
 function toWarn(setting) {
@@ -30,8 +36,9 @@ function toWarn(setting) {
  * @param {Array<object>} configs the flat-config objects whose rules apply
  */
 function baselineBlock(packageDir, configs) {
-    // Escape glob syntax: Next.js segments like app/game/[id] are literal paths.
-    const files = Object.keys(readBaseline(packageDir)).map((f) => f.replace(/[[\]{}()*?!+@]/g, '\\$&'));
+    // Escape glob syntax (and the escape character itself): Next.js segments like app/game/[id]
+    // are literal paths.
+    const files = Object.keys(readBaseline(packageDir)).map((f) => f.replace(/[\\[\]{}()*?!+@]/g, '\\$&'));
     if (!files.length || process.env.LINT_BASELINE === 'off') return [];
     const rules = {};
     for (const config of configs.flat()) {

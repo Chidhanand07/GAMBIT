@@ -34,6 +34,7 @@ jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile 
 
 import GamePage from '@/app/game/[id]/page'
 import * as sounds from '@/lib/sounds'
+import { routeParams } from '../helpers/params'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
@@ -70,7 +71,7 @@ afterEach(() => {
 })
 
 async function renderGame(id = 'g1') {
-    const utils = render(<GamePage params={{ id }} />)
+    const utils = render(<GamePage params={routeParams({ id })} />)
     // game data loaded once a player strip shows a name
     await screen.findAllByText(/Alice|Bob/)
     return utils
@@ -100,16 +101,35 @@ describe('mount', () => {
         expect(fetchMock.mock.calls[0]).toEqual(['/api/games/g1'])
     })
 
-    test('emits authenticate + join_game on mount and AGAIN when my colour resolves (effect deps include myColor)', async () => {
+    test('emits join_game (never authenticate) exactly once per game, even after my colour resolves [F2]', async () => {
         await renderGame()
-        // LEGACY: the socket effect depends on myColor, so it re-runs once the
-        // game row says we are white, re-emitting both events.
-        expect(socket.emit.mock.calls).toEqual([
-            ['authenticate', 'me'],
-            ['join_game', 'g1'],
-            ['authenticate', 'me'],
-            ['join_game', 'g1'],
-        ])
+        // Was (LEGACY): the socket effect depended on myColor, so resolving the seat re-emitted the join.
+        // S2: identity travels in the socket handshake, so no `authenticate` is emitted.
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
+    })
+
+    test('a refreshed profile object (same user) does not re-join or re-register handlers [F2]', async () => {
+        const { rerender } = await renderGame()
+        const registrations = socket.on.mock.calls.length
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
+    })
+
+    test('a socket that is still connecting joins once, on connect, not twice [F2]', async () => {
+        socket.connected = false
+        await renderGame()
+        expect(socket.emitted('join_game')).toEqual([])
+        socket.connected = true
+        socket.serverSends('connect')
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+    })
+
+    test('handlers read the current seat: game_end after the seat resolved plays the win sound for white [F2]', async () => {
+        await renderGame()
+        socket.serverSends('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate' })
+        expect(sounds.playGameEndSound).toHaveBeenCalledWith(true)
     })
 
     test('signed-out viewer: no socket emits, but the game still loads as spectator', async () => {
@@ -123,14 +143,14 @@ describe('mount', () => {
         await renderGame()
         expect(socket.listenedEvents()).toEqual([
             'chat_message', 'clock_sync', 'connect', 'disconnect', 'game_end', 'game_state_sync',
-            'move_made', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
+            'move_made', 'move_rejected', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
             'rematch_declined', 'rematch_ready', 'rematch_request',
         ])
     })
 
     test('unmount removes every handler it registered', async () => {
         const { unmount } = await renderGame()
-        const registered = socket.on.mock.calls.slice(-13)
+        const registered = socket.on.mock.calls.slice(-14)
         unmount()
         expect(socket.listenedEvents()).toEqual([])
         for (const [event, handler] of registered) {
@@ -140,7 +160,7 @@ describe('mount', () => {
 
     test('a failed game fetch sends the user back to the lobby', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({ error: 'nope' }, false))
-        render(<GamePage params={{ id: 'g1' }} />)
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
         await waitFor(() => expect(push).toHaveBeenCalledWith('/lobby'))
     })
 
@@ -158,6 +178,19 @@ describe('mount', () => {
         expect(screen.getByText('You')).toBeInTheDocument()
         expect(screen.getByText('Your turn')).toBeInTheDocument()
         expect(screen.getByText('No moves yet')).toBeInTheDocument()
+    })
+
+    test('spectators see no "You" badge on either strip [F4]', async () => {
+        profile = { ...ME, id: 'spectator-id' }
+        await renderGame()
+        expect(screen.queryByText('You')).not.toBeInTheDocument()
+    })
+
+    test('the "You" badge follows my strip when I flip the board [F4]', async () => {
+        await renderGame()
+        click(screen.getAllByTitle('Flip board')[0])
+        const badge = screen.getByText('You')
+        expect(badge.parentElement).toHaveTextContent('Alice')
     })
 
     test('black player: board flipped, white on top', async () => {
@@ -186,6 +219,44 @@ describe('mount', () => {
     test('start sound plays once for a fresh game', async () => {
         await renderGame()
         expect(sounds.playGameStartSound).toHaveBeenCalledTimes(1)
+    })
+
+    test('the game loads once per id: a refreshed profile object does not refetch it', async () => {
+        const { rerender } = await renderGame()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        await act(async () => {})
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    test('the loaded game reads the CURRENT sound setting: muted before the fetch resolves, no start sound', async () => {
+        let resolve!: (r: unknown) => void
+        fetchMock.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        await act(async () => { resolve(jsonResponse(gameRow)) })
+        await screen.findAllByText(/Alice|Bob/)
+        // Was: the fetch callback closed over the first render's soundOn (true) and played it.
+        expect(sounds.playGameStartSound).not.toHaveBeenCalled()
+    })
+
+    test('a profile that arrives after the game loaded still resolves my seat', async () => {
+        profile = null
+        const { rerender } = await renderGame()
+        expect(screen.getByText('Spectating')).toBeInTheDocument()
+        profile = { ...ME }
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        expect(screen.getByText('Your turn')).toBeInTheDocument()
+    })
+
+    test('restored history is read once per game id, not on every render', async () => {
+        const spy = jest.spyOn(Storage.prototype, 'getItem')
+        const { rerender } = await renderGame()
+        const reads = spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length
+        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        click(screen.getAllByTitle('Toggle sound')[0])
+        expect(spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length).toBe(reads)
+        expect(reads).toBe(1)
     })
 
     test('a resumed game (non-start FEN) loads the position and skips the start sound', async () => {
@@ -270,14 +341,18 @@ describe('server events', () => {
         expect(clockTexts()).toEqual(['05:00', '05:00'])
     })
 
-    test('move_made that delivers checkmate shows the game-over result locally (no game_end emit)', async () => {
+    test('move_made that delivers checkmate plays the mate sound; the result appears only with the server’s game_end [S3]', async () => {
         await renderGame()
         const mated = 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3'
         socket.serverSends('move_made', { game_id: 'g1', from: 'd8', to: 'h4', fen: mated, san: 'Qh4#' })
         expect(sounds.playCheckmateSound).toHaveBeenCalled()
+        // Nothing is inferred from the local board...
+        expect(screen.queryByText('by Checkmate')).not.toBeInTheDocument()
+        expect(socket.emitted('game_end')).toEqual([])
+        // ...the server's verdict is what the page shows.
+        socket.serverSends('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Checkmate', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Lost')).toBeInTheDocument()
         expect(screen.getByText('by Checkmate')).toBeInTheDocument()
-        expect(socket.emitted('game_end')).toEqual([])
     })
 
     test('clock_sync without serverTs overrides both clocks', async () => {
@@ -297,7 +372,7 @@ describe('server events', () => {
     test('clock_sync after load prevents the game fetch from resetting the clocks', async () => {
         let resolveFetch!: (v: any) => void
         fetchMock.mockImplementation(() => new Promise(r => { resolveFetch = r }))
-        render(<GamePage params={{ id: 'g1' }} />)
+        render(<GamePage params={routeParams({ id: 'g1' })} />)
         socket.serverSends('clock_sync', { whiteMs: 42_000, blackMs: 41_000 })
         await act(async () => { resolveFetch(jsonResponse(gameRow)) })
         await screen.findAllByText('Alice')
@@ -376,14 +451,14 @@ describe('server events', () => {
         expect(screen.getByText(/they have 20s to reconnect/)).toBeInTheDocument()
     })
 
-    test('socket disconnect shows "Reconnecting…"; connect hides it and re-emits authenticate + join_game', async () => {
+    test('socket disconnect shows "Reconnecting…"; connect hides it and re-emits join_game', async () => {
         await renderGame()
         socket.serverSends('disconnect')
         expect(screen.getByText('Reconnecting…')).toBeInTheDocument()
         socket.emit.mockClear()
         socket.serverSends('connect')
         expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument()
-        expect(socket.emit.mock.calls).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
     })
 })
 
@@ -426,17 +501,39 @@ describe('clock tick', () => {
 // ── Making moves ────────────────────────────────────────────────────────────
 
 describe('making moves', () => {
-    test('click own pawn then a legal square emits make_move with this exact payload', async () => {
+    test('click own pawn then a legal square emits make_move with squares only — no fen/san/captured [S1]', async () => {
         await renderGame()
         click(square('e2'))
         click(square('e4'))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'e2', to: 'e4', promotion: 'q',
-            fen: AFTER_E4, san: 'e4', captured: false,
-        }])
+        // The server computes the position, SAN and capture flag itself; the client only names the move.
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e2', to: 'e4', promotion: 'q' }])
         expect(pieceOn('e4')).toBe('wp')
         // optimistic update does NOT add to the move list; the server echo does
         expect(screen.getByText('No moves yet')).toBeInTheDocument()
+    })
+
+    test('move_rejected + the resync that follows snap the board back to the server position [S1]', async () => {
+        await renderGame()
+        click(square('e2'))
+        click(square('e4'))
+        expect(pieceOn('e4')).toBe('wp') // optimistic
+        socket.serverSends('move_rejected', { game_id: 'g1', reason: 'illegal_move' })
+        socket.serverSends('game_state_sync', { fen: START_FEN, moveLog: [], whiteMs: 300_000, blackMs: 300_000, clockActive: false })
+        expect(pieceOn('e4')).toBeNull()
+        expect(pieceOn('e2')).toBe('wp')
+        expect(screen.getByText('No moves yet')).toBeInTheDocument()
+        // ...and the player can move again from the real position.
+        click(square('d2'))
+        click(square('d4'))
+        expect(socket.emitted('make_move')).toHaveLength(2)
+    })
+
+    test('a move_rejected for another game is ignored', async () => {
+        await renderGame()
+        click(square('e2'))
+        click(square('e4'))
+        socket.serverSends('move_rejected', { game_id: 'other', reason: 'illegal_move' })
+        expect(pieceOn('e4')).toBe('wp')
     })
 
     test('clicking an illegal destination deselects without emitting', async () => {
@@ -468,13 +565,10 @@ describe('making moves', () => {
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         click(square('e7', true))
         click(square('e5', true))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'e7', to: 'e5', promotion: 'q',
-            fen: AFTER_E4_E5, san: 'e5', captured: false,
-        }])
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e7', to: 'e5', promotion: 'q' }])
     })
 
-    test('a capture reports captured: true', async () => {
+    test('a capture is sent like any other move (the server reports `captured`)', async () => {
         await renderGame()
         socket.serverSends('game_state_sync', {
             fen: 'rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2', moveLog: [],
@@ -482,7 +576,7 @@ describe('making moves', () => {
         })
         click(square('e4'))
         click(square('d5'))
-        expect(socket.emitted('make_move')[0]).toMatchObject({ from: 'e4', to: 'd5', san: 'exd5', captured: true })
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e4', to: 'd5', promotion: 'q' }])
     })
 
     test('pawn reaching the last rank opens the promotion picker and emits the chosen piece', async () => {
@@ -495,14 +589,11 @@ describe('making moves', () => {
         const options = screen.getAllByRole('button', { name: /Queen|Rook|Bishop|Knight/ }).map(b => b.textContent)
         expect(options).toEqual(['Queen', 'Rook', 'Bishop', 'Knight'])
         click(screen.getByRole('button', { name: /Knight/ }))
-        expect(socket.emitted('make_move')).toEqual([{
-            game_id: 'g1', from: 'a7', to: 'a8', promotion: 'n',
-            fen: 'N6k/8/8/8/8/8/8/4K3 b - - 0 1', san: 'a8=N', captured: false,
-        }])
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'a7', to: 'a8', promotion: 'n' }])
         expect(screen.queryByText('Choose promotion')).not.toBeInTheDocument()
     })
 
-    test('my checkmating move emits make_move then game_end with the full payload', async () => {
+    test('my checkmating move emits make_move only; I never report the result, the server announces it [S3]', async () => {
         await renderGame()
         socket.serverSends('game_state_sync', {
             fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4', moveLog: [],
@@ -510,12 +601,11 @@ describe('making moves', () => {
         })
         click(square('h5'))
         click(square('f7'))
-        expect(socket.emit.mock.calls.filter(([e]) => e === 'make_move' || e === 'game_end').map(([e]) => e)).toEqual(['make_move', 'game_end'])
-        expect(socket.emitted('make_move')[0]).toMatchObject({ san: 'Qxf7#', captured: true })
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'White wins', reason: 'Checkmate',
-            white_id: 'me', black_id: 'opp', is_rated: true, time_control: '5',
-        }])
+        // Was: ['make_move', 'game_end'] — the client told the server who won.
+        expect(socket.emit.mock.calls.filter(([e]) => e === 'make_move' || e === 'game_end').map(([e]) => e)).toEqual(['make_move'])
+        expect(socket.emitted('make_move')[0]).toMatchObject({ from: 'h5', to: 'f7' })
+        expect(screen.queryByText('by Checkmate')).not.toBeInTheDocument()
+        socket.serverSends('game_end', { game_id: 'g1', result: 'White wins', reason: 'Checkmate', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Win!')).toBeInTheDocument()
         expect(screen.getByText('by Checkmate')).toBeInTheDocument()
     })
@@ -530,21 +620,20 @@ describe('history navigation', () => {
         socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
     }
 
-    test('ArrowLeft steps into history (first press lands on the LAST snapshot = live position); ArrowRight past the end returns live', async () => {
+    test('the first ArrowLeft from live shows the position before the last move; ArrowRight returns live [F6]', async () => {
         await twoMoves()
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
-        // LEGACY: snapshots hold post-move FENs, so "move 2 of 2" is the live board
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        expect(pieceOn('e5')).toBe('bp')
-        fireEvent.keyDown(document, { key: 'ArrowLeft' })
+        // Was (LEGACY): snapshots hold post-move FENs, so the first press showed "move 2 of 2" = the live board.
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument()
         expect(pieceOn('e5')).toBeNull()
+        expect(pieceOn('e4')).toBe('wp')
         fireEvent.keyDown(document, { key: 'ArrowLeft' })
         expect(screen.getByText(/Viewing move 1 of 2/)).toBeInTheDocument() // clamps at 0
         fireEvent.keyDown(document, { key: 'ArrowRight' })
-        expect(screen.getByText(/Viewing move 2 of 2/)).toBeInTheDocument()
-        fireEvent.keyDown(document, { key: 'ArrowRight' })
         expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument()
+        expect(pieceOn('e5')).toBe('bp')
+        fireEvent.keyDown(document, { key: 'ArrowRight' })
+        expect(screen.queryByText(/Viewing move/)).not.toBeInTheDocument() // already live
     })
 
     test('arrow keys are ignored while typing in an input', async () => {
@@ -634,34 +723,37 @@ describe('resign', () => {
         click(screen.getAllByTitle('Resign')[0])
         expect(screen.getAllByText('Resign?').length).toBeGreaterThan(0)
         click(screen.getByTitle('Cancel'))
+        expect(socket.emitted('resign')).toEqual([])
         expect(socket.emitted('game_end')).toEqual([])
         expect(screen.queryByText('Resign?')).not.toBeInTheDocument()
     })
 
-    test('confirming as white emits game_end with this exact payload and shows "You Lost"', async () => {
+    test('confirming emits `resign` { game_id } (no result, no ids); "You Lost" shows when the server ends the game [S3]', async () => {
         await renderGame()
         click(screen.getAllByTitle('Resign')[0])
         click(screen.getByTitle('Confirm resign'))
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'Black wins', reason: 'Resignation',
-            white_id: 'me', black_id: 'opp', is_rated: true, time_control: '5',
-        }])
+        // Was: game_end with a client-chosen result, player ids, rated flag and time control.
+        expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
+        expect(socket.emitted('game_end')).toEqual([])
+        expect(screen.queryByText('Resign?')).not.toBeInTheDocument()
+        expect(screen.queryByText('by Resignation')).not.toBeInTheDocument()
+        expect(sounds.playGameEndSound).not.toHaveBeenCalled()
+
+        socket.serverSends('game_end', { game_id: 'g1', result: 'Black wins', reason: 'Resignation', white_id: 'me', black_id: 'opp' })
         expect(await screen.findByText('You Lost')).toBeInTheDocument()
         expect(screen.getByText('by Resignation')).toBeInTheDocument()
         expect(sounds.playGameEndSound).toHaveBeenCalledWith(false)
     })
 
-    test('resigning as black reports "White wins"; missing is_rated/time_control default to false/"10"', async () => {
+    test('resigning as black sends the same `resign` { game_id }: the server works out the winner [S3]', async () => {
         profile = { ...ME, id: 'opp' }
         delete gameRow.is_rated
         delete gameRow.time_control
         await renderGame()
         click(screen.getAllByTitle('Resign')[0])
         click(screen.getByTitle('Confirm resign'))
-        expect(socket.emitted('game_end')).toEqual([{
-            game_id: 'g1', result: 'White wins', reason: 'Resignation',
-            white_id: 'me', black_id: 'opp', is_rated: false, time_control: '10',
-        }])
+        expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
+        expect(socket.emitted('game_end')).toEqual([])
     })
 
     test('spectators get no resign button', async () => {
@@ -684,8 +776,9 @@ describe('game-over modal and rematch', () => {
     test('Rematch emits rematch_request with this exact payload, then shows Waiting…', async () => {
         await endedGame()
         click(screen.getByRole('button', { name: /Rematch/ }))
+        // S2: no from_user_id — the server takes the sender from the socket handshake.
         expect(socket.emitted('rematch_request')).toEqual([{
-            from_user_id: 'me', to_user_id: 'opp', from_username: 'Me Display', time_control: '5', is_rated: true,
+            to_user_id: 'opp', from_username: 'Me Display', time_control: '5', is_rated: true,
         }])
         const waiting = screen.getByRole('button', { name: /Waiting…/ })
         expect(waiting).toBeDisabled()
@@ -741,26 +834,25 @@ describe('game-over modal and rematch', () => {
         expect(screen.getByText('5 min · Rated')).toBeInTheDocument()
     })
 
-    test('accepting emits rematch_accept with this exact payload and hides the toast', async () => {
+    test('accepting emits rematch_accept naming only the requester and hides the toast [S4]', async () => {
         await renderGame()
         socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
         const toast = screen.getByText('Bob wants a rematch').parentElement!
         const [, accept] = within(toast).getAllByRole('button')
         click(accept)
-        expect(socket.emitted('rematch_accept')).toEqual([{
-            from_user_id: 'opp', to_user_id: 'me', time_control: '5', is_rated: true,
-        }])
+        // S4: no terms and no own id — the server uses the request it stored.
+        expect(socket.emitted('rematch_accept')).toEqual([{ from_user_id: 'opp' }])
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
 
-    test('declining emits rematch_decline addressed to MY OWN id (legacy bug) with my display name', async () => {
+    test('declining emits rematch_decline naming the REQUESTER, so the opponent is told [S4]', async () => {
         await renderGame()
         socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
         const toast = screen.getByText('Bob wants a rematch').parentElement!
         const [decline] = within(toast).getAllByRole('button')
         click(decline)
-        // LEGACY: white sends to white_id (itself) instead of the opponent
-        expect(socket.emitted('rematch_decline')).toEqual([{ to_user_id: 'me', by_username: 'Me Display' }])
+        // Was: addressed to my own id (legacy bug F1), so the opponent never heard about it.
+        expect(socket.emitted('rematch_decline')).toEqual([{ from_user_id: 'opp' }])
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
     })
 
@@ -772,6 +864,28 @@ describe('game-over modal and rematch', () => {
         expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
         act(() => { jest.advanceTimersByTime(1) })
         expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
+    })
+
+    test('a second rematch request restarts the 30 s window instead of inheriting the first timer [F3]', async () => {
+        jest.useFakeTimers()
+        await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(20_000) })
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        act(() => { jest.advanceTimersByTime(10_000) }) // the first request's 30 s are up
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(19_999) })
+        expect(screen.getByText('Bob wants a rematch')).toBeInTheDocument()
+        act(() => { jest.advanceTimersByTime(1) })
+        expect(screen.queryByText('Bob wants a rematch')).not.toBeInTheDocument()
+    })
+
+    test('unmounting clears the pending rematch timer [F3]', async () => {
+        jest.useFakeTimers()
+        const { unmount } = await renderGame()
+        socket.serverSends('rematch_request', { from_user_id: 'opp', from_username: 'Bob' })
+        unmount()
+        expect(jest.getTimerCount()).toBe(0)
     })
 })
 
@@ -786,12 +900,17 @@ describe('board controls', () => {
         expect(names).toEqual(['Alice', 'Bob'])
     })
 
-    test('toggling sound off silences move sounds (and re-runs the socket effect)', async () => {
+    test('toggling sound off silences move sounds without re-joining the game [F2]', async () => {
         await renderGame()
+        const registrations = socket.on.mock.calls.length
         click(screen.getAllByTitle('Toggle sound')[0])
-        // LEGACY: soundOn is a dependency of the socket effect, so it re-joins
-        expect(socket.emit.mock.calls.slice(-2)).toEqual([['authenticate', 'me'], ['join_game', 'g1']])
+        // Was (LEGACY): soundOn was a dependency of the socket effect, so toggling re-emitted join_game.
+        expect(socket.emitted('join_game')).toEqual(['g1'])
+        expect(socket.on.mock.calls.length).toBe(registrations)
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         expect(sounds.playMoveSound).not.toHaveBeenCalled()
+        click(screen.getAllByTitle('Toggle sound')[0])
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
+        expect(sounds.playMoveSound).toHaveBeenCalledTimes(1)
     })
 })

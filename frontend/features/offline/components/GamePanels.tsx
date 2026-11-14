@@ -125,3 +125,28 @@ export function MoveLog({ moveHistory }: { moveHistory: string[] }) {
         </div>
     );
 }
+
+interface EngineErrorProps {
+    error: string;
+    canRetry: boolean;
+    onRetry: () => void;
+}
+
+/** MAVERICK's request failed: the reason, and Retry while the retry policy allows it (F13). */
+export function EngineErrorBanner({ error, canRetry, onRetry }: EngineErrorProps) {
+    return (
+        <div
+            role="alert"
+            className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center justify-between gap-3"
+        >
+            <span>{error}</span>
+            {canRetry ? (
+                <button onClick={onRetry} className="shrink-0 underline hover:text-red-300">
+                    Retry
+                </button>
+            ) : (
+                <span className="shrink-0 text-text-secondary">Start a new game to try again.</span>
+            )}
+        </div>
+    );
+}

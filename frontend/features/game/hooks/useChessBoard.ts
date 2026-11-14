@@ -1,15 +1,14 @@
 'use client';
 
 // Board interaction: the displayed position (live or history), turn check, square clicks,
-// promotion, and committing a move (optimistic local update + make_move / game_end emits).
+// promotion, and committing a move. The local board is only an optimistic preview: the server
+// validates the move and its `move_made` (or `move_rejected` + resync) is what the page keeps.
 import { useMemo, type Dispatch, type MutableRefObject } from 'react';
 import { Chess, type Color, type Square } from 'chess.js';
 import type { Socket } from 'socket.io-client';
-import { playGameEndSound } from '@/lib/sounds';
-import type { GameWithPlayers } from '@/types/game';
-import { gameEndPayload } from '../payloads';
 import type { GameAction, GameState } from '../state/gameReducer';
-import { detectGameOver, isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
+import { isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
+import { emitWithAck, rejectionMessage } from '@/lib/socket/ack';
 
 interface Options {
     gameId: string;
@@ -17,7 +16,8 @@ interface Options {
     state: GameState;
     dispatch: Dispatch<GameAction>;
     chessRef: MutableRefObject<Chess>;
-    gameDataRef: MutableRefObject<GameWithPlayers | null>;
+    /** Shows the player why the server refused a move (the board itself is resynced by the server). */
+    notify?: (message: string) => void;
 }
 
 export interface ChessBoardControls {
@@ -42,29 +42,29 @@ function useDisplayChess(state: GameState): Chess {
     }, [displayFen]);
 }
 
-/** Plays the move locally, emits make_move, then (if it ended the game) game_end. */
+/**
+ * Plays the move locally and emits make_move with the squares only; the server computes the
+ * resulting position, SAN and capture flag. If the move ends the game, the server says so with
+ * `game_end`: the page never declares or reports a result.
+ */
 function commitMoveWith(opts: Options, from: Square, to: Square, promotion: string): void {
     const { gameId, socket, dispatch, state } = opts;
     const chess = opts.chessRef.current;
     const moveObj = chess.move({ from, to, promotion });
     if (!moveObj) return;
-    const newFen = chess.fen();
-    dispatch({ type: 'moveCommitted', fen: newFen, from, to });
-    socket?.emit('make_move', {
-        game_id: gameId,
-        from,
-        to,
-        promotion,
-        fen: newFen,
-        san: moveObj.san,
-        captured: !!moveObj.captured,
-    });
+    dispatch({ type: 'moveCommitted', fen: chess.fen(), from, to });
+    // Never re-sent on a timeout (not idempotent, F-065): the player is told instead.
+    if (socket) {
+        emitWithAck(
+            socket,
+            'make_move',
+            { game_id: gameId, from, to, promotion },
+            {
+                onRejected: (code) => opts.notify?.(rejectionMessage(code)),
+            },
+        );
+    }
     if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
-    const outcome = detectGameOver(chess);
-    if (!outcome) return;
-    dispatch({ type: 'gameEnded', info: outcome });
-    socket?.emit('game_end', gameEndPayload(gameId, outcome, opts.gameDataRef.current));
-    if (state.soundOn) playGameEndSound(outcome.result.toLowerCase().startsWith(state.myColor));
 }
 
 export function useChessBoard(opts: Options): ChessBoardControls {

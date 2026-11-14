@@ -1,19 +1,16 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getUserIdSkippingEmptyCookie } from '@/lib/server/identity';
-import { createDefaultProfile, getProfileById, updateProfile } from '@/lib/server/profiles';
-import { createAdminClient } from '@/lib/server/supabase';
+import { requireFreshUser, requireUser } from '@/lib/server/identity';
+import { createDefaultProfile, getProfileById, profileUpdateFromPatch, updateProfile } from '@/lib/server/profiles';
+import { createAdminClient, createUserClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
 
 export const dynamic = 'force-dynamic';
 
 // GET /api/profile/me — my profile; auto-creates a default one when missing
 export async function GET() {
-    // Parse the user ID from the auth cookie without any Supabase Auth network call.
-    const userId = getUserIdSkippingEmptyCookie(cookies());
-
-    if (!userId) {
-        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
+    const { userId } = auth;
 
     const admin = createAdminClient();
     const { data, error } = await getProfileById(admin, userId);
@@ -33,23 +30,18 @@ export async function GET() {
     return NextResponse.json(data);
 }
 
-// PATCH /api/profile/me — body { displayName, bio, country, avatarUrl? }
+// PATCH /api/profile/me — body { displayName?, bio?, country?, avatarUrl? }; omitted fields are kept
 export async function PATCH(request: Request) {
-    const userId = getUserIdSkippingEmptyCookie(cookies());
+    const auth = await requireFreshUser();
+    if (!auth.ok) return auth.response;
+    const { userId } = auth;
 
-    if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const body = await parseJsonBody(request, schemas.profilePatch, 'Invalid profile fields');
+    if (!body.ok) return body.response;
+    const update = profileUpdateFromPatch(body.data);
+    if (!update) return NextResponse.json({ error: 'No profile fields to update' }, { status: 400 });
 
-    const body = await request.json();
-    const { displayName, bio, country, avatarUrl } = body;
-
-    const updatePayload: Record<string, unknown> = {
-        display_name: displayName ?? null,
-        bio: bio ?? null,
-        country: country ?? null,
-    };
-    if (avatarUrl !== undefined) updatePayload.avatar_url = avatarUrl;
-
-    const { data, error } = await updateProfile(createAdminClient(), userId, updatePayload);
+    const { data, error } = await updateProfile(await createUserClient(), userId, update);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json(data);

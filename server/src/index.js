@@ -12,7 +12,7 @@
  */
 const http = require('http');
 // Express, cors and socket.io load before dotenv runs, as in the original server.js.
-const { createApp } = require('./http/app');
+const { createApp, attachErrorHandler } = require('./http/app');
 const { createSocketServer, registerSocketHandlers } = require('./sockets');
 require('dotenv').config();
 
@@ -21,7 +21,8 @@ const privateGames = require('../services/friends');
 const ratingService = require('../services/rating');
 const { supabase } = require('../supabase');
 const gameStore = require('../lib/gameStore');
-const { startGlobalClock } = require('../services/clock');
+const redis = require('../lib/redis');
+const { startGlobalClock, stopGlobalClock } = require('../services/clock');
 const env = require('./config/env');
 const { buildPgnFromMoveLog } = require('./domain/pgn');
 const { createEngineClient } = require('./clients/engineClient');
@@ -30,70 +31,175 @@ const { createMovesRepository } = require('./repositories/movesRepository');
 const { createMessagesRepository } = require('./repositories/messagesRepository');
 const { createProfilesRepository } = require('./repositories/profilesRepository');
 const { createNotificationsRepository } = require('./repositories/notificationsRepository');
+const { createPendingRequestsRepository } = require('./repositories/pendingRequestsRepository');
 const { createIoEmitter } = require('./services/emitter');
 const { createReviewService } = require('./services/reviewService');
+const { createClockService } = require('./services/clockService');
+const { createGameFinalizer } = require('./services/gameFinalizer');
 const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
 const { createProfileService } = require('./services/profileService');
+const { createTokenVerifier } = require('./services/tokenVerifier');
+const { createOriginPolicy } = require('./services/originPolicy');
+const { createRateLimiter } = require('./services/rateLimiter');
+const { RULES: RATE_LIMIT_RULES } = require('./domain/rateLimits');
+const { createRateLimitRepository } = require('./repositories/rateLimitRepository');
+const { createTickLockRepository } = require('./repositories/tickLockRepository');
+const { createGameResultOutboxRepository } = require('./repositories/gameResultOutboxRepository');
+const { createResultOutboxWorker } = require('./services/resultOutboxWorker');
+const { createSocketAdapter } = require('./clients/socketAdapter');
+const { createHttpRateLimit } = require('./http/rateLimit');
+const { createSocketRateLimit } = require('./sockets/rateLimit');
+const { createReadiness } = require('./services/readiness');
+const { redisProbe, supabaseProbe } = require('./clients/healthProbes');
+
+const READINESS_TIMEOUT_MS = 2000;
 const { createAnalysisService } = require('./services/analysisService');
 const { createRequireUserId } = require('./http/middleware/requireUser');
 const { registerRoutes } = require('./http/routes');
 const { createSessionRegistry } = require('./sockets/sessionRegistry');
+const { registerProcessHandlers } = require('./processHandlers');
+const { createShutdown } = require('./shutdown');
+const { log } = require('./observability/log');
+const { setErrorReporter } = require('./observability/errorReporter');
+const { createWebhookErrorReporter } = require('./clients/webhookErrorReporter');
 
-const engineClient = createEngineClient({ baseUrl: env.engineUrl });
+// SEC-12: fatal errors, 500s, internal_error acks and rating failures are reported; with
+// ERROR_WEBHOOK_URL to that webhook, otherwise nowhere but the logs (ADR F-069).
+const errorWebhookUrl = env.errorWebhookUrl();
+if (errorWebhookUrl) {
+    setErrorReporter(
+        createWebhookErrorReporter({
+            url: errorWebhookUrl,
+            origin: { service: 'gambit-server', release: env.release(), hostname: require('node:os').hostname() },
+        }),
+    );
+}
+
+const engineClient = createEngineClient({ baseUrl: env.engineUrl, sharedSecret: env.engineSharedSecret });
 const gamesRepo = createGamesRepository(supabase);
 
-const app = createApp({ frontendUrl: env.frontendUrl });
+// One allow-list of browser origins for HTTP and the socket handshake (S13); read per request.
+const originPolicy = () => createOriginPolicy({ origins: env.corsOrigins(), previewPattern: env.corsPreviewPattern() });
+const app = createApp({ originPolicy });
 const server = http.createServer(app);
-const io = createSocketServer(server);
+// Rooms and broadcasts across instances (NODE-15); off under test and with SOCKET_ADAPTER=none.
+const socketAdapter = env.socketAdapter() === 'redis' ? createSocketAdapter(env.redisUrl()) : null;
+const io = createSocketServer(server, originPolicy, { adapter: socketAdapter?.adapter });
 
 const matchmaking = new MatchmakingService(io);
-
-// Start single global clock ticker (replaces all per-game setInterval timers)
-startGlobalClock(io);
 
 const sessions = createSessionRegistry();
 const emitter = createIoEmitter(io);
 const socialService = createSocialService({
     privateGames,
     notificationsRepo: createNotificationsRepository(supabase),
+    pendingRequests: createPendingRequestsRepository(redis),
+    emitter,
+});
+// One finalizer for every way a game ends: moves and resignations (gameService)
+// and flag falls and abandonment (the clock) share it (G3).
+const reviewService = createReviewService({ engineClient });
+// Finished games whose row could not be written wait here for the worker (ERRORS, ADR F-066).
+const resultOutbox = createGameResultOutboxRepository(redis);
+const finalizer = createGameFinalizer({
+    gameStore,
+    gamesRepo,
+    ratingService,
+    reviewService,
+    sessions,
+    emitter,
+    resultOutbox,
+});
+const resultOutboxWorker = createResultOutboxWorker({
+    outbox: resultOutbox,
+    gamesRepo,
+    ratingService,
+    reviewService,
     emitter,
 });
 const gameService = createGameService({
     gameStore,
     gamesRepo,
     movesRepo: createMovesRepository(supabase),
-    engineClient,
     ratingService,
-    reviewService: createReviewService({ engineClient }),
+    reviewService,
     sessions,
     emitter,
+    finalizer,
 });
+
+// Start single global clock ticker (replaces all per-game setInterval timers)
+startGlobalClock(createClockService({ gameStore, finalizer, emitter, tickLocks: createTickLockRepository(redis) }));
+
 const chatService = createChatService({
     gameStore,
     messagesRepo: createMessagesRepository(supabase),
-    sessions,
     emitter,
 });
 
+// Rate limits live in Redis, so every instance shares them (NODE-12).
+const rateLimiter = createRateLimiter({ store: createRateLimitRepository(redis), rules: RATE_LIMIT_RULES });
+app.use(createHttpRateLimit({ limiter: rateLimiter }));
+// /readyz: Redis and Supabase answer within 2 s, and the process is not draining (NODE-21).
+const readiness = createReadiness({
+    probes: { redis: redisProbe(redis), supabase: supabaseProbe(supabase) },
+    timeoutMs: READINESS_TIMEOUT_MS,
+});
+
 registerRoutes(app, {
-    queueSize: () => matchmaking.queue.size,
+    queueSize: () => matchmaking.searchingCount(),
+    readiness,
     profileService: createProfileService({ profilesRepo: createProfilesRepository(supabase) }),
     analysisService: createAnalysisService({ engineClient }),
     privateGames,
     socialService,
     requireUserId: createRequireUserId({ getUser: (token) => supabase.auth.getUser(token) }),
 });
+// After every route: JSON 404 and the one error middleware (Express 5 forwards async errors).
+attachErrorHandler(app);
 
-registerSocketHandlers(io, { sessions, matchmaking: matchmaking.service, gameService, chatService, socialService });
+const getUser = /** @type {import('./services/tokenVerifier').GetUser} */ ((token) => supabase.auth.getUser(token));
+const tokenVerifier = createTokenVerifier({ getUser });
+
+registerSocketHandlers(io, {
+    sessions,
+    matchmaking: matchmaking.service,
+    gameService,
+    chatService,
+    socialService,
+    verifyToken: tokenVerifier.verify,
+    tokenDeadline: tokenVerifier.deadline,
+    rateLimit: createSocketRateLimit({ limiter: rateLimiter }),
+});
 
 /** Bind `PORT` (default 3001). Called only when the process is started directly. */
 function start() {
+    // Only a running server re-drives stuck results; requiring this module (tests) does not.
+    resultOutboxWorker.start();
+    const shutdown = createShutdown({
+        readiness,
+        stopTimers: () => {
+            matchmaking.destroy();
+            stopGlobalClock();
+            resultOutboxWorker.stop();
+        },
+        notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
+        closeSockets: () => io.close(),
+        closeHttp: () => new Promise((resolve) => server.close(() => resolve(undefined))),
+        closeRedis: async () => {
+            await socketAdapter?.close();
+            await redis.quit();
+        },
+        flushLogs: () => new Promise((resolve) => log.pino.flush(() => resolve(undefined))),
+        exit: (code) => process.exit(code),
+    });
+    registerProcessHandlers(shutdown);
     const PORT = env.port();
     server.listen(PORT, () => {
-        console.log(`Node server running on port ${PORT}`);
+        log.info(`Node server running on port ${PORT}`);
     });
 }
 
-module.exports = { app, server, io, matchmaking, buildPgnFromMoveLog, start };
+module.exports = { app, server, io, matchmaking, readiness, buildPgnFromMoveLog, start };

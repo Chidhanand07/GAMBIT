@@ -50,11 +50,24 @@ def test_validate_move_returns_the_new_position_and_flags(client):
     assert chess.Board(data["new_fen"]).is_checkmate()
 
 
-@pytest.mark.parametrize("fen,move", [("garbage", "e2e4"), (START, "nonsense"), (START, "")])
-def test_validate_move_never_500s_on_bad_input(client, fen, move):
-    res = client.post("/validate-move", json={"fen": fen, "move": move})
+@pytest.mark.parametrize("move", ["nonsense", ""])
+def test_validate_move_never_500s_on_a_bad_move(client, move):
+    res = client.post("/validate-move", json={"fen": START, "move": move})
     assert res.status_code == 200
     assert res.json()["valid"] is False
+
+
+def test_validate_move_does_not_expose_exception_text(client):
+    # CodeQL py/stack-trace-exposure: was {"valid": false, "error": "<exception message>"}.
+    res = client.post("/validate-move", json={"fen": START, "move": "nonsense"})
+    assert res.json() == {"valid": False, "error": "invalid_move"}
+
+
+def test_validate_move_bad_fen_is_400(client):
+    # G19: was 200 {"valid": false}; an unparseable FEN is now 400 on every FEN endpoint.
+    res = client.post("/validate-move", json={"fen": "garbage", "move": "e2e4"})
+    assert res.status_code == 400
+    assert "Invalid FEN" in res.json()["detail"]
 
 
 def test_validate_move_rejects_a_missing_field(client):
@@ -149,47 +162,74 @@ def test_valid_moves_after_e4(client):
 # ── /analyse-game (post-game review) ────────────────────────────────────────
 
 PGN = '[Event "GAMBIT"]\n[Site "GAMBIT"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *'
+GAME_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def test_analyse_game_without_engine_is_503(client):
-    res = client.post("/analyse-game", json={"game_id": "g1", "pgn": PGN, "time_control": "10"})
-    assert res.status_code == 503
+class FakeQuery:
+    """One `table("games")...execute()` chain; records what it was asked to do."""
 
+    def __init__(self, db):
+        self.db = db
+        self.call = {"filters": []}
+        db.calls.append(self.call)
 
-class FakeTable:
-    def __init__(self, sink):
-        self.sink = sink
+    def select(self, columns):
+        self.call["select"] = columns
+        return self
 
     def update(self, payload):
-        self.sink["update"] = payload
+        self.call["update"] = payload
         return self
 
     def eq(self, col, val):
-        self.sink["eq"] = (col, val)
+        self.call["filters"].append((col, val))
+        return self
+
+    def limit(self, n):
+        self.call["limit"] = n
         return self
 
     def execute(self):
-        self.sink["executed"] = True
+        self.call["executed"] = True
+        rows = self.db.rows if "select" in self.call else []
+        return type("Result", (), {"data": rows})()
 
 
 class FakeSupabase:
-    def __init__(self):
-        self.sink = {}
+    """`rows` is what a SELECT on games returns (default: one completed game)."""
+
+    def __init__(self, rows=None):
+        self.rows = [{"id": GAME_ID, "status": "completed"}] if rows is None else rows
+        self.calls = []
 
     def table(self, name):
-        self.sink["table"] = name
-        return FakeTable(self.sink)
+        assert name == "games"
+        return FakeQuery(self)
+
+    @property
+    def updates(self):
+        return [c for c in self.calls if "update" in c]
+
+
+def analyse(client, game_id=GAME_ID):
+    return client.post("/analyse-game", json={"game_id": game_id, "pgn": PGN, "time_control": "10"})
+
+
+def test_analyse_game_without_engine_is_503(client, monkeypatch):
+    monkeypatch.setattr(main, "supabase", FakeSupabase())
+    assert analyse(client).status_code == 503
 
 
 def test_full_game_review_writes_accuracy_and_classifications(monkeypatch, stockfish):
     db = FakeSupabase()
     monkeypatch.setattr(main, "supabase", db)
-    main.run_full_game_analysis("g1", PGN)
+    main.run_full_game_analysis(GAME_ID, PGN)
 
-    assert db.sink["table"] == "games"
-    assert db.sink["eq"] == ("id", "g1")
-    assert db.sink["executed"] is True
-    update = db.sink["update"]
+    (write,) = db.updates
+    # Only a completed game is ever written to (second line of defence).
+    assert write["filters"] == [("id", GAME_ID), ("status", "completed")]
+    assert write["executed"] is True
+    update = write["update"]
     assert 0 <= update["white_accuracy"] <= 100
     assert 0 <= update["black_accuracy"] <= 100
     assert len(update["white_move_classifications"]) == 3
@@ -203,17 +243,69 @@ def test_full_game_review_writes_accuracy_and_classifications(monkeypatch, stock
 
 def test_full_game_review_endpoint_queues_work(client, stockfish, monkeypatch):
     calls = []
+    db = FakeSupabase()
+    monkeypatch.setattr(main, "supabase", db)
     monkeypatch.setattr(main, "run_full_game_analysis", lambda gid, pgn: calls.append(gid))
-    res = client.post("/analyse-game", json={"game_id": "g9", "pgn": PGN, "time_control": "10"})
+    res = analyse(client)
     assert res.json() == {"status": "Analysis queued"}
-    assert calls == ["g9"]
+    assert calls == [GAME_ID]
+    # The game was looked up by id before anything was queued.
+    assert db.calls[0]["select"] == "id, status"
+    assert db.calls[0]["filters"] == [("id", GAME_ID)]
+
+
+def test_analyse_game_for_an_unknown_game_is_404_and_nothing_is_queued(client, stockfish, monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "supabase", FakeSupabase(rows=[]))
+    monkeypatch.setattr(main, "run_full_game_analysis", lambda gid, pgn: calls.append(gid))
+    res = analyse(client)
+    assert res.status_code == 404
+    assert calls == []
+
+
+@pytest.mark.parametrize("status", ["active", "waiting", "aborted", None])
+def test_analyse_game_for_a_game_that_is_not_completed_is_409(client, stockfish, monkeypatch, status):
+    calls = []
+    monkeypatch.setattr(main, "supabase", FakeSupabase(rows=[{"id": GAME_ID, "status": status}]))
+    monkeypatch.setattr(main, "run_full_game_analysis", lambda gid, pgn: calls.append(gid))
+    res = analyse(client)
+    assert res.status_code == 409
+    assert calls == []
+
+
+def test_analyse_game_fails_closed_when_the_database_is_not_configured(client, stockfish, monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "supabase", None)
+    monkeypatch.setattr(main, "run_full_game_analysis", lambda gid, pgn: calls.append(gid))
+    assert analyse(client).status_code == 503
+    assert calls == []
+
+
+def test_analyse_game_fails_closed_when_the_lookup_errors(client, stockfish, monkeypatch):
+    class Broken:
+        def table(self, _):
+            raise RuntimeError("db down")
+
+    calls = []
+    monkeypatch.setattr(main, "supabase", Broken())
+    monkeypatch.setattr(main, "run_full_game_analysis", lambda gid, pgn: calls.append(gid))
+    assert analyse(client).status_code == 503
+    assert calls == []
+
+
+@pytest.mark.parametrize("game_id", ["g1", "", "1 or 1=1", "11111111-1111-4111-8111-11111111111", None])
+def test_analyse_game_rejects_a_game_id_that_is_not_a_uuid(client, stockfish, monkeypatch, game_id):
+    db = FakeSupabase()
+    monkeypatch.setattr(main, "supabase", db)
+    assert analyse(client, game_id).status_code == 422
+    assert db.calls == []
 
 
 def test_full_game_review_ignores_an_empty_pgn(monkeypatch, stockfish):
     db = FakeSupabase()
     monkeypatch.setattr(main, "supabase", db)
-    main.run_full_game_analysis("g1", "")
-    assert "update" not in db.sink
+    main.run_full_game_analysis(GAME_ID, "")
+    assert db.updates == []
     assert stockfish.released == 1
 
 
@@ -223,5 +315,5 @@ def test_full_game_review_survives_a_database_error(monkeypatch, stockfish):
             raise RuntimeError("db down")
 
     monkeypatch.setattr(main, "supabase", Broken())
-    main.run_full_game_analysis("g1", PGN)  # must not raise
+    main.run_full_game_analysis(GAME_ID, PGN)  # must not raise
     assert stockfish.released == 1

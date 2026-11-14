@@ -3,36 +3,22 @@
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { fmtTime } from '@/lib/chess/clock';
+import { ratingFieldFor } from '@/lib/chess/timeControl';
 import type { ProfileSummary } from '@/types/profile';
+import { AvatarImage } from '@/components/ui/AvatarImage';
+
+/** The avatar box is w-9. */
+const STRIP_AVATAR_PX = 36;
 
 const DEFAULT_RATING = 1200;
-const DEFAULT_MINUTES = 10;
-const BULLET_UNDER_MINUTES = 3;
-const BLITZ_UNDER_MINUTES = 10;
-const CLASSICAL_FROM_MINUTES = 30;
 const CRITICAL_SECONDS = 30;
 
 type Player = ProfileSummary | null | undefined;
 
-/** Base minutes of "<min>" or "<min>+<inc>"; missing or unparseable → 10. */
-function stripMinutes(tc?: string): number {
-    if (!tc) return DEFAULT_MINUTES;
-    const mins = tc.includes('+') ? parseInt(tc.split('+')[0], 10) : parseInt(tc, 10);
-    return isNaN(mins) ? DEFAULT_MINUTES : mins;
-}
-
-/**
- * Rating shown on the strip. Uses this page's own buckets (<3 bullet, <10 blitz, ≥30 classical,
- * else rapid), which differ from lib/chess on purpose (ADR 0200).
- */
+/** Rating shown on the strip: the player's rating in this time control's category (shared model). */
 export function getFormatRating(p: Player, tc?: string): number {
     if (!p) return DEFAULT_RATING;
-    const mins = stripMinutes(tc);
-    const rating = (r: number | null | undefined) => Math.round(r ?? DEFAULT_RATING);
-    if (mins < BULLET_UNDER_MINUTES) return rating(p.rating_bullet);
-    if (mins < BLITZ_UNDER_MINUTES) return rating(p.rating_blitz);
-    if (mins >= CLASSICAL_FROM_MINUTES) return rating(p.rating_classical);
-    return rating(p.rating_rapid);
+    return Math.round(p[ratingFieldFor(tc)] ?? DEFAULT_RATING);
 }
 
 /** Critical (<30 s while running) > my running clock > running clock > idle. */
@@ -70,7 +56,7 @@ function PlayerAvatar({ player, username }: { player: Player; username?: string 
             style={{ background: 'var(--accent-dim)', border: '1px solid var(--border-accent)' }}
         >
             {player?.avatar_url ? (
-                <img src={player.avatar_url} alt="" className="w-full h-full object-cover" />
+                <AvatarImage src={player.avatar_url} size={STRIP_AVATAR_PX} />
             ) : (
                 <span className="text-accent font-semibold text-sm">{username[0].toUpperCase()}</span>
             )}

@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Code scanning (GIT-06). This is CodeQL *advanced* setup: it lives in the repo so the languages,
+# triggers and query suite are reviewed like any other change.
+# Repo setting required: Settings > Code security > Code scanning > CodeQL analysis must NOT be on
+# "Default" setup. GitHub rejects uploads from a workflow while default setup is enabled.
+
+on:
+  push:
+    branches: [main, preprod]
+  # No branch filter, like tests.yml: PRs into any base are scanned.
+  pull_request:
+  schedule:
+    # Mondays 05:17 UTC: picks up new queries even when nothing was pushed. Runs on the default branch only.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Upload the results to code scanning. Granted to this job only.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Both are interpreted languages: CodeQL reads the source, nothing is built or installed.
+          build-mode: none
+          # Security queries plus the lower-precision security set; no style/maintainability queries.
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

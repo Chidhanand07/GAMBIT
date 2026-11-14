@@ -3,14 +3,17 @@ import Link from 'next/link';
 import { LogOut, Settings, Trophy, User } from 'lucide-react';
 import { hoverStyles, textHover } from '../hover';
 import type { NavProfile } from '../types';
+import { AvatarImage } from '@/components/ui/AvatarImage';
 
 const DEFAULT_RAPID_RATING = 1200;
+/** The avatar button is w-8. */
+const MENU_AVATAR_PX = 32;
 
 const avatarHover = hoverStyles({ boxShadow: '0 0 0 2px var(--border-accent)' }, { boxShadow: '' });
 
 function AvatarContent({ profile }: { profile: NavProfile | null }) {
     return profile?.avatar_url ? (
-        <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+        <AvatarImage src={profile.avatar_url} size={MENU_AVATAR_PX} />
     ) : (
         <span className="text-accent text-sm font-semibold">{(profile?.username || '?')[0].toUpperCase()}</span>
     );
@@ -38,7 +41,7 @@ function DropdownHeader({ profile }: { profile: NavProfile | null }) {
 }
 
 interface UserMenuProps {
-    menuRef: RefObject<HTMLDivElement>;
+    menuRef: RefObject<HTMLDivElement | null>;
     profile: NavProfile | null;
     isOpen: boolean;
     onToggle: () => void;

@@ -7,6 +7,18 @@ const MIN_PASSWORD_LENGTH = 8;
 const MIN_USERNAME_LENGTH = 3;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]+$/;
 
+/** Where a new, signed-in user lands. */
+const LOBBY_PATH = '/lobby';
+
+/**
+ * Full page load to `url`. F-024: after sign-up the page is reloaded on purpose, so the
+ * server components and the proxy see the new session cookies (router.push would keep the
+ * signed-out render tree). The URL is absolute, built from this origin.
+ */
+export function fullPageLoad(url: string): void {
+    window.location.assign(url);
+}
+
 export interface SignupInput {
     email: string;
     password: string;
@@ -27,24 +39,17 @@ export function validateSignup(
     return null;
 }
 
-type SignInResult = Awaited<ReturnType<ReturnType<typeof createClient>['auth']['signInWithPassword']>>;
-
-/** Summary of the post-signup sign-in, for the debug log. */
-function describeSignIn(signInData: SignInResult['data'], signInError: SignInResult['error']) {
-    return {
-        user: signInData?.user?.email ?? null,
-        session: signInData?.session ? `expires=${signInData.session.expires_at}` : null,
-        error: signInError?.message ?? null,
-    };
-}
-
 /**
  * Creates the account via /api/auth/signup, then signs in with the browser client and
- * navigates to /lobby with a full page load. Returns the message to show when the flow
+ * navigates to /lobby with a full page load (`navigate`, an absolute URL). Returns the message to show when the flow
  * stops early, or null after navigating. Network/unexpected errors propagate to the caller.
+ * Nothing is logged: this runs in the browser, and the data at hand is credentials, the
+ * session and its cookies (S14, SEC-01).
  */
-export async function registerAndSignIn(input: SignupInput): Promise<string | null> {
-    console.log('[signup] calling /api/auth/signup...');
+export async function registerAndSignIn(
+    input: SignupInput,
+    navigate: (absoluteUrl: string) => void = fullPageLoad,
+): Promise<string | null> {
     const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,34 +57,20 @@ export async function registerAndSignIn(input: SignupInput): Promise<string | nu
     });
 
     const data: { error?: string } = await res.json().catch(() => ({}));
-    console.log('[signup] API response:', res.status, data);
 
     if (!res.ok) return data.error || 'Signup failed. Please try again.';
 
-    console.log('[signup] profile created, signing in via browser client...');
     const supabase = createClient();
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: input.email,
         password: input.password,
     });
 
-    console.log('[signup] signIn result:', describeSignIn(signInData, signInError));
+    if (signInError) return 'Account created! Please sign in.';
 
-    if (signInError) {
-        console.error('[signup] sign-in after signup failed:', signInError.message);
-        return 'Account created! Please sign in.';
-    }
+    // No session after a successful sign-in: e-mail confirmation is required.
+    if (!signInData.session) return 'Account created! Please confirm your email then sign in.';
 
-    if (!signInData.session) {
-        console.warn('[signup] no session after sign-in — email confirmation likely required');
-        return 'Account created! Please confirm your email then sign in.';
-    }
-
-    console.log(
-        '[signup] cookies after sign-in:',
-        document.cookie.split(';').map((s) => s.trim().split('=')[0]),
-    );
-    console.log('[signup] navigating to /lobby...');
-    window.location.assign('/lobby');
+    navigate(new URL(LOBBY_PATH, window.location.origin).href);
     return null;
 }

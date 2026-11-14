@@ -1,31 +1,55 @@
-"""MAVERICK style policy: loads style_model.pt and ranks moves "like the user"."""
+"""
+MAVERICK style policy: loads style_model.pt and ranks moves "like the user".
 
-import os
+The model is optional. When the weights are missing, fail their checksum or
+cannot be read, the style model is "unavailable": `_load_model()` answers None,
+/style-move answers 503 and the computer opponent plays without it.
+"""
+
 from typing import Any
 
 import chess
 import torch
 
-from config import MODEL_PATH
+from config import MODEL_PATH, MODEL_SHA256, MODEL_URL
 from model import StylePolicyNet, encode_board, get_device, index_to_from_to, legal_move_mask
+from services.model_store import MODEL_READY, ensure_model
+from services.model_store import download_to as download_model
+
+MODEL_LOAD_FAILED = "load_failed"
 
 _device = get_device()
 _model = None
+# Outcome of the one attempt to obtain and load the weights (None = not tried yet).
+_model_status: str | None = None
+
+
+def _read_weights() -> StylePolicyNet:
+    m = StylePolicyNet().to(_device)
+    # weights_only: the checkpoint must be plain tensors, never pickled code.
+    state_dict = torch.load(MODEL_PATH, map_location=_device, weights_only=True)
+    m.load_state_dict(state_dict)
+    m.eval()
+    return m
 
 
 def _load_model() -> StylePolicyNet | None:
-    global _model
-    if _model is not None:
+    """The loaded network, or None when the style model is unavailable. Tried once per process."""
+    global _model, _model_status
+    if _model_status is not None:
         return _model
-    if not os.path.exists(MODEL_PATH):
-        print(f"[style_engine] WARNING: {MODEL_PATH} not found — /style-move will be unavailable.")
-        return None
-    m = StylePolicyNet().to(_device)
-    state_dict = torch.load(MODEL_PATH, map_location=_device)
-    m.load_state_dict(state_dict)
-    m.eval()
-    _model = m
-    print(f"[style_engine] Loaded {MODEL_PATH} on device={_device}")
+    status = ensure_model(MODEL_PATH, MODEL_URL, MODEL_SHA256, download=download_model)
+    if status == MODEL_READY:
+        try:
+            _model = _read_weights()
+        except Exception as e:
+            print(f"[style_engine] WARNING: {MODEL_PATH} could not be loaded: {e}")
+            status = MODEL_LOAD_FAILED
+    _model_status = status
+    if _model is None:
+        print(f"[style_engine] WARNING: style model unavailable ({status}); MAVERICK plays without it.")
+    else:
+        print(f"[style_engine] Loaded {MODEL_PATH} on device={_device}")
     return _model
 
 
@@ -34,6 +58,11 @@ _load_model()
 
 def style_model_loaded() -> bool:
     return _model is not None
+
+
+def style_model_status() -> str | None:
+    """MODEL_READY when loaded; otherwise why the style model is unavailable."""
+    return _model_status
 
 
 def get_style_move(fen: str, top_k: int = 3) -> dict[str, Any] | None:

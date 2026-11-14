@@ -17,9 +17,13 @@ import { SearchPanel } from '@/features/lobby/components/SearchPanel';
 import { TimeControlPicker } from '@/features/lobby/components/TimeControlPicker';
 import { WelcomeBar } from '@/features/lobby/components/WelcomeBar';
 import { useActiveGame } from '@/features/lobby/hooks/useActiveGame';
+import { useMatchFailedToast, useQueueRefusedToast } from '@/features/lobby/hooks/useMatchFailedToast';
 import { useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
 import { usePrivateGame } from '@/features/lobby/hooks/usePrivateGame';
 import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSelection';
+import { loginHref } from '@/features/lobby/loginRedirect';
+
+const LOBBY_PATH = '/lobby';
 
 const KnightBackground = dynamic(() => import('@/components/ui/KnightBackground'), { ssr: false });
 
@@ -37,12 +41,15 @@ export default function LobbyPage() {
     const timeControl = useTimeControlSelection();
     const activeGame = useActiveGame();
     const closePrivateModalOnStart = useCallback(() => setIsPrivateModalOpen(false), []);
+    const reportMatchFailed = useMatchFailedToast();
+    const reportQueueRefused = useQueueRefusedToast();
     const matchmaking = useMatchmaking({
         socket,
         router,
         profile: myProfile,
-        getTcMinutes: timeControl.getTcMinutes,
         onGameStart: closePrivateModalOnStart,
+        onMatchFailed: reportMatchFailed,
+        onQueueRefused: reportQueueRefused,
     });
     const privateGame = usePrivateGame({
         socket,
@@ -50,11 +57,10 @@ export default function LobbyPage() {
         customInc: timeControl.customInc,
     });
 
-    // Play Online sends the FULL profile and "<min>+<inc>" for custom, with no is_rated
-    // (unlike the reconnect re-queue in useMatchmaking) — preserved as-is.
+    // Play Online queues the selected control ("<min>+<inc>"); useMatchmaking builds the payload.
     const handlePlayOnline = () => {
         if (!myProfile || !socket) {
-            router.push('/login');
+            router.push(loginHref(LOBBY_PATH));
             return;
         }
         if (activeGame) {
@@ -62,7 +68,7 @@ export default function LobbyPage() {
             return;
         }
         const { inc } = timeControl.getTcMinutes();
-        matchmaking.joinQueue({ user: myProfile, time_control: timeControl.playOnlineTimeControl, increment: inc });
+        matchmaking.joinQueue({ timeControl: timeControl.playOnlineTimeControl, increment: inc });
     };
 
     const closePrivateModal = () => {

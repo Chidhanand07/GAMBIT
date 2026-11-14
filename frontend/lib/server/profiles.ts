@@ -50,9 +50,41 @@ export function getProfileStatsRow(admin: SupabaseClient, username: string) {
     return admin.from('profiles').select(STATS_COLUMNS).eq('username', username).maybeSingle();
 }
 
-/** Updates the caller's own profile and returns the updated row. */
-export function updateProfile(admin: SupabaseClient, id: string, fields: Record<string, unknown>) {
-    return admin.from('profiles').update(fields).eq('id', id).select().single();
+/** Body of PATCH /api/profile/me after validation (schemas.profilePatch). */
+export interface ProfilePatch {
+    displayName?: string | null;
+    bio?: string | null;
+    country?: string | null;
+    avatarUrl?: string | null;
+}
+
+const PATCH_COLUMNS: Readonly<Record<keyof ProfilePatch, string>> = {
+    displayName: 'display_name',
+    bio: 'bio',
+    country: 'country',
+    avatarUrl: 'avatar_url',
+};
+
+/**
+ * The `profiles` columns a PATCH changes: only the fields the body carries (null clears one,
+ * an omitted field is left alone, F18). Null when the body changes nothing.
+ */
+export function profileUpdateFromPatch(patch: ProfilePatch): Record<string, string | null> | null {
+    const update: Record<string, string | null> = {};
+    for (const key of Object.keys(PATCH_COLUMNS) as (keyof ProfilePatch)[]) {
+        const value = patch[key];
+        if (value !== undefined) update[PATCH_COLUMNS[key]] = value;
+    }
+    return Object.keys(update).length > 0 ? update : null;
+}
+
+/**
+ * Updates the caller's own profile and returns the updated row. `userClient` is the caller's
+ * session client (createUserClient): the `profiles_update` policy and the column grants
+ * (display_name, bio, country, avatar_url) decide what may change, not the service role.
+ */
+export function updateProfile(userClient: SupabaseClient, id: string, fields: Record<string, unknown>) {
+    return userClient.from('profiles').update(fields).eq('id', id).select().single();
 }
 
 /** Inserts a new profile row (no returning select). */

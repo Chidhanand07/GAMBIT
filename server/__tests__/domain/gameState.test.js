@@ -11,6 +11,7 @@ const NOW = 1_700_000_000_000;
 const KEY_ORDER = [
     'id',
     'fen',
+    'startFen',
     'whiteId',
     'blackId',
     'whiteClockMs',
@@ -40,6 +41,7 @@ describe('createInitialGameState', () => {
             JSON.stringify({
                 id: 'g1',
                 fen: START_FEN,
+                startFen: START_FEN,
                 whiteId: 'w',
                 blackId: 'b',
                 whiteClockMs: 180000,
@@ -113,10 +115,13 @@ describe('gameStateFromRow', () => {
 
     test('restores clocks, side and rating flag from the row, running the clock', () => {
         const state = gameStateFromRow('g-id', row, NOW);
-        expect(Object.keys(state)).toEqual(KEY_ORDER);
+        // A restored game also records when its first-move window opens [FIRST-MOVE].
+        expect(Object.keys(state)).toEqual([...KEY_ORDER, 'startedAt']);
         expect(state).toEqual({
             id: 'g-id',
             fen: row.fen,
+            // The move log is empty after a restore, so the rules replay from the restored position.
+            startFen: row.fen,
             whiteId: 'w',
             blackId: 'b',
             whiteClockMs: 1000,
@@ -131,6 +136,7 @@ describe('gameStateFromRow', () => {
             isRated: true,
             lastMoveAt: NOW,
             disconnectInfo: null,
+            startedAt: expect.any(Number),
         });
     });
 
@@ -160,5 +166,34 @@ describe('gameStateFromRow', () => {
         delete noClocks.white_clock_ms;
         delete noClocks.black_clock_ms;
         expect(gameStateFromRow('g-id', noClocks, NOW).lastMoveAt).toBe(NOW);
+    });
+});
+
+describe('clock columns round-trip [G2]', () => {
+    const { gameStateFromRow } = require('../../src/domain/gameState');
+
+    test('a row written at disconnect or after a move restores exactly those clocks', () => {
+        // What the server writes: white_clock_ms / black_clock_ms (one canonical pair).
+        const row = { white_id: 'w', black_id: 'b', time_control: '10+0', fen: null, white_clock_ms: 55000, black_clock_ms: 432100 };
+        expect(gameStateFromRow('g', row, 1000)).toMatchObject({ whiteClockMs: 55000, blackClockMs: 432100 });
+    });
+
+    test('the legacy white_time_ms / black_time_ms columns are not read', () => {
+        const row = { white_id: 'w', black_id: 'b', time_control: '10+0', fen: null, white_clock_ms: null, black_clock_ms: null, white_time_ms: 1, black_time_ms: 2 };
+        expect(gameStateFromRow('g', row, 1000)).toMatchObject({ whiteClockMs: 600000, blackClockMs: 600000, lastMoveAt: null });
+    });
+});
+
+describe('startedAt [FIRST-MOVE]', () => {
+    const { createInitialGameState, gameStateFromRow } = require('../../src/domain/gameState');
+
+    test('a new game records when it started', () => {
+        const state = createInitialGameState({ id: 'g', whiteId: 'w', blackId: 'b', timeControl: '10+0', isRated: true, startedAt: 4242 });
+        expect(state.startedAt).toBe(4242);
+    });
+
+    test('a game restored from the database starts its first-move window at the restore', () => {
+        const row = { white_id: 'w', black_id: 'b', time_control: '10+0', fen: null, white_clock_ms: null, black_clock_ms: null };
+        expect(gameStateFromRow('g', row, 9000).startedAt).toBe(9000);
     });
 });

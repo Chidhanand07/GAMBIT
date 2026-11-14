@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Clock, Settings, Swords, UserPlus, Users } from 'lucide-react';
 import type { FriendStatus } from '../types';
+import { challengeHref } from '../links';
 
 interface FriendButtonProps {
     friendStatus: FriendStatus;
@@ -59,7 +60,7 @@ export function ProfileActions({ username, isOwnProfile, friendStatus, onAddFrie
                 <>
                     <FriendButton friendStatus={friendStatus} onAddFriend={onAddFriend} />
                     <Link
-                        href={`/challenge/${username}`}
+                        href={challengeHref(username)}
                         className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-surface rounded-lg text-sm transition-colors font-medium"
                     >
                         <Swords size={15} strokeWidth={1.5} /> Challenge

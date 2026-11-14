@@ -9,6 +9,8 @@ export interface StripView {
     time: number;
     isActive: boolean;
     ratingChange: number | null;
+    /** True only on the strip of the viewer's own colour; never for a spectator (F4). */
+    isMe: boolean;
 }
 
 export interface GameView {
@@ -23,10 +25,20 @@ export interface GameView {
 const nameOr = (p: ProfileSummary | null | undefined, fallback: string) => p?.display_name || p?.username || fallback;
 
 function stripViews(state: GameState, turnColor: string): { top: StripView; bottom: StripView } {
-    const { gameData, flipped, gameOver } = state;
+    const { gameData, flipped, gameOver, myColor } = state;
     const topIsActive = !gameOver && ((flipped && turnColor === 'w') || (!flipped && turnColor === 'b'));
-    const white = { player: gameData?.white, time: state.whiteTime, ratingChange: state.whiteRatingChange };
-    const black = { player: gameData?.black, time: state.blackTime, ratingChange: state.blackRatingChange };
+    const white = {
+        player: gameData?.white,
+        time: state.whiteTime,
+        ratingChange: state.whiteRatingChange,
+        isMe: myColor === 'white',
+    };
+    const black = {
+        player: gameData?.black,
+        time: state.blackTime,
+        ratingChange: state.blackRatingChange,
+        isMe: myColor === 'black',
+    };
     const [top, bottom] = flipped ? [white, black] : [black, white];
     return { top: { ...top, isActive: topIsActive }, bottom: { ...bottom, isActive: !gameOver && !topIsActive } };
 }

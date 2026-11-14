@@ -1,5 +1,6 @@
-// Handlers for the 13 server events the game page listens to, in the legacy registration order.
-// Built fresh on every run of the socket effect, so they close over that run's myColor/soundOn.
+// Handlers for the server events the game page listens to: the 13 legacy ones in their original
+// registration order, then `move_rejected` (the server refused our move; a resync follows).
+// Built once per join (useGameSocket); render-dependent fields are read from `ctx` when an event arrives.
 import type { Dispatch, MutableRefObject } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { Chess, Square } from 'chess.js';
@@ -12,14 +13,17 @@ import type {
     GameIdPayload,
     GameStateSyncPayload,
     MoveMadePayload,
+    MoveRejectedPayload,
     RatingUpdatedPayload,
     RematchRequestPayload,
 } from '@/types/socket';
 import type { GameAction } from '../state/gameReducer';
-import { detectGameOver, playMoveSoundFor } from '../utils/moveEffects';
+import { playMoveSoundFor } from '../utils/moveEffects';
 
-/** The echo never carries `flags` today (the client does not send it), but the page reads it. */
-type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs'> & {
+/** Clocks and flags are optional here so older payloads (and tests) without them still type-check. */
+type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs' | 'flags' | 'captured' | 'move'> & {
+    move?: string;
+    captured?: boolean;
     flags?: string;
     whiteMs?: number;
     blackMs?: number;
@@ -32,7 +36,6 @@ const DEFAULT_DISCONNECT_TIMEOUT_SECONDS = 20;
 
 export interface SocketHandlerContext {
     socket: Socket;
-    myProfileId: string;
     gameId: string;
     myColor: SeatColor;
     soundOn: boolean;
@@ -45,9 +48,11 @@ export interface SocketHandlerContext {
     markReconnected: () => void;
 }
 
-/** Re-emitted on every (re)connect; the server treats re-joins as idempotent. */
-export function joinGameRoom(socket: Socket, userId: string, gameId: string): void {
-    socket.emit('authenticate', userId);
+/**
+ * Re-emitted on every (re)connect; the server treats re-joins as idempotent. The server
+ * already knows who we are from the handshake token, so nothing identifies the user here.
+ */
+export function joinGameRoom(socket: Socket, gameId: string): void {
     socket.emit('join_game', gameId);
 }
 
@@ -74,15 +79,6 @@ function onGameStateSync(ctx: SocketHandlerContext) {
     };
 }
 
-function announceRemoteGameOver(ctx: SocketHandlerContext): void {
-    const c = ctx.chessRef.current;
-    const outcome = detectGameOver(c);
-    if (!outcome) return;
-    ctx.dispatch({ type: 'gameEnded', info: outcome });
-    if (ctx.soundOn)
-        playGameEndSound(ctx.myColor !== 'spectator' && (c.turn() === 'w' ? 'black' : 'white') === ctx.myColor);
-}
-
 function onMoveMade(ctx: SocketHandlerContext) {
     return (data: MoveMadeEvent) => {
         if (data.game_id !== ctx.gameId) return;
@@ -101,7 +97,7 @@ function onMoveMade(ctx: SocketHandlerContext) {
             blackMs: data.blackMs,
         });
         if (ctx.soundOn) playMoveSoundFor(ctx.chessRef.current, data.flags, data.captured);
-        announceRemoteGameOver(ctx);
+        // A move that ends the game is followed by the server's `game_end`; nothing is inferred here.
     };
 }
 
@@ -112,6 +108,7 @@ function onChatMessage(ctx: SocketHandlerContext) {
     };
 }
 
+/** The only place a result is shown from: the server decides every ending. */
 function onGameEnd(ctx: SocketHandlerContext) {
     return (data: GameEndBroadcast) => {
         if (data.game_id !== ctx.gameId) return;
@@ -120,11 +117,37 @@ function onGameEnd(ctx: SocketHandlerContext) {
     };
 }
 
-function onRematchRequest(ctx: SocketHandlerContext) {
+/** The pending auto-dismiss of the incoming rematch toast; one at a time (F3). */
+interface RematchExpiry {
+    restart: () => void;
+    cancel: () => void;
+}
+
+function rematchExpiry(ctx: SocketHandlerContext): RematchExpiry {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => clearTimeout(timer);
+    return {
+        cancel,
+        restart: () => {
+            cancel();
+            timer = setTimeout(() => ctx.dispatch({ type: 'rematchExpired' }), REMATCH_TOAST_MS);
+        },
+    };
+}
+
+function onRematchRequest(ctx: SocketHandlerContext, expiry: RematchExpiry) {
     return (data: RematchRequestPayload) => {
         ctx.dispatch({ type: 'rematchReceived', fromUsername: data.from_username as string });
-        // Auto-dismiss after 30 s if not acted on.
-        setTimeout(() => ctx.dispatch({ type: 'rematchExpired' }), REMATCH_TOAST_MS);
+        // Auto-dismiss 30 s after the LATEST request if not acted on.
+        expiry.restart();
+    };
+}
+
+/** The server refused our move. Drop the optimistic markers; its game_state_sync restores the board. */
+function onMoveRejected(ctx: SocketHandlerContext) {
+    return (data: MoveRejectedPayload) => {
+        if (data.game_id !== ctx.gameId) return;
+        ctx.dispatch({ type: 'moveRejected' });
     };
 }
 
@@ -140,9 +163,20 @@ function onClockSync(ctx: SocketHandlerContext) {
     };
 }
 
-/** [event, handler] pairs in the legacy `socket.on` order. */
-export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[string, SocketListener]> {
-    const { dispatch } = ctx;
+export interface GameSocketSubscription {
+    /** [event, handler] pairs in the legacy `socket.on` order. */
+    handlers: Array<[string, SocketListener]>;
+    /** Clears the timers the handlers started; call it when the handlers are removed. */
+    dispose: () => void;
+}
+
+export function createGameSocketHandlers(ctx: SocketHandlerContext): GameSocketSubscription {
+    const expiry = rematchExpiry(ctx);
+    return { handlers: handlerList(ctx, expiry), dispose: expiry.cancel };
+}
+
+function handlerList(ctx: SocketHandlerContext, expiry: RematchExpiry): Array<[string, SocketListener]> {
+    const dispatch = (action: GameAction) => ctx.dispatch(action);
     return [
         ['disconnect', () => dispatch({ type: 'connectionChanged', connected: false })],
         [
@@ -150,7 +184,7 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
             () => {
                 // Fires on initial connect AND on every reconnect.
                 dispatch({ type: 'connectionChanged', connected: true });
-                joinGameRoom(ctx.socket, ctx.myProfileId, ctx.gameId);
+                joinGameRoom(ctx.socket, ctx.gameId);
             },
         ],
         ['game_state_sync', onGameStateSync(ctx)],
@@ -164,7 +198,7 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
                 dispatch({ type: 'ratingChanged', side: 'black', change: data.black.change });
             },
         ],
-        ['rematch_request', onRematchRequest(ctx)],
+        ['rematch_request', onRematchRequest(ctx, expiry)],
         ['rematch_ready', (data: GameIdPayload) => ctx.router.push(`/game/${data.game_id}`)],
         ['rematch_declined', () => dispatch({ type: 'rematchStateSet', value: 'declined' })],
         [
@@ -174,5 +208,6 @@ export function createGameSocketHandlers(ctx: SocketHandlerContext): Array<[stri
         ],
         ['opponent_reconnected', () => ctx.markReconnected()],
         ['clock_sync', onClockSync(ctx)],
+        ['move_rejected', onMoveRejected(ctx)],
     ];
 }

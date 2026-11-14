@@ -2,7 +2,7 @@
  * Characterization tests for app/game/[id]/result/page.tsx (PR 10/13, fe-shell).
  *
  * Pins the GET /api/games/:id fetch, the 3 s polling while analysis runs
- * (max 20 tries, also on non-ok responses — LEGACY), loading/error/analysing
+ * (max 20 tries; an error stops it until "Try again" — F16), loading/error/analysing
  * states, the review board, player cards, eval graph, caption and move list.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
@@ -11,6 +11,7 @@ import { jsonResponse } from './fakeSocket'
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, className }: any) => <a href={href} className={className}>{children}</a> }))
 
 import GameResultPage from '@/app/game/[id]/result/page'
+import { routeParams } from '../helpers/params'
 
 const WHITE_CLS = [
     { ply: 1, move: 'e2e4', san: 'e4', classification: 'Book', accuracy: 100, best_move: 'e2e4', eval_white: 30 },
@@ -48,7 +49,7 @@ async function settle() {
     for (let i = 0; i < 5; i++) await act(async () => {})
 }
 async function renderPage(id = 'g1') {
-    const utils = render(<GameResultPage params={{ id }} />)
+    const utils = render(<GameResultPage params={routeParams({ id })} />)
     await settle()
     return utils
 }
@@ -63,30 +64,51 @@ const ctrls = (c: HTMLElement) => Array.from(c.querySelectorAll('button.w-9.h-9'
 
 describe('states and fetching', () => {
     test('shows loading first, then fetches /api/games/:id with no options', async () => {
-        render(<GameResultPage params={{ id: 'abc' }} />)
+        render(<GameResultPage params={routeParams({ id: 'abc' })} />)
         expect(screen.getByText('Loading game…')).toBeInTheDocument()
         await settle()
         expect(fetchMock.mock.calls).toEqual([['/api/games/abc']])
         expect(screen.getByRole('heading', { name: 'Game Review' })).toBeInTheDocument()
     })
 
-    test('non-ok response shows the error state and LEGACY: keeps polling every 3 s', async () => {
+    test('non-ok response shows the error state and stops polling [F16]', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({}, false))
         await renderPage()
         expect(screen.getByText("Couldn't load this game.")).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Back to lobby' })).toHaveAttribute('href', '/lobby')
-        await act(async () => { jest.advanceTimersByTime(3000) })
+        await act(async () => { jest.advanceTimersByTime(30_000) })
         await settle()
-        expect(fetchMock).toHaveBeenCalledTimes(2)
+        // Was (LEGACY): kept polling every 3 s after the error.
+        expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
-    test('a thrown fetch shows error and LEGACY: also keeps polling', async () => {
+    test('a thrown fetch shows the error state and stops polling too [F16]', async () => {
         fetchMock.mockImplementation(async () => { throw new Error('net') })
         await renderPage()
         expect(screen.getByText("Couldn't load this game.")).toBeInTheDocument()
+        await act(async () => { jest.advanceTimersByTime(30_000) })
+        await settle()
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    test('an error mid-analysis stops polling; "Try again" loads and resumes polling [F16]', async () => {
+        const pending = { ...GAME, white_move_classifications: null, black_move_classifications: null }
+        responses = [() => jsonResponse(pending), () => jsonResponse({}, false), () => jsonResponse(pending)]
+        await renderPage()
+        expect(screen.getByText('Analysing your game…')).toBeInTheDocument()
         await act(async () => { jest.advanceTimersByTime(3000) })
         await settle()
+        expect(screen.getByText("Couldn't load this game.")).toBeInTheDocument()
+        await act(async () => { jest.advanceTimersByTime(30_000) })
         expect(fetchMock).toHaveBeenCalledTimes(2)
+        click(screen.getByRole('button', { name: 'Try again' }))
+        await settle()
+        expect(fetchMock).toHaveBeenCalledTimes(3)
+        expect(screen.getByText('Analysing your game…')).toBeInTheDocument()
+        await act(async () => { jest.advanceTimersByTime(3000) })
+        await settle()
+        expect(fetchMock).toHaveBeenCalledTimes(4)
+        expect(screen.getByRole('heading', { name: 'Game Review' })).toBeInTheDocument()
     })
 
     test('analysing state polls every 3 s until classifications appear', async () => {

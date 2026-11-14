@@ -1,21 +1,24 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { LogIn, AlertCircle, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GoogleSignInButton, OrDivider } from '@/features/auth/components/GoogleSignInButton';
 import { startGoogleSignIn } from '@/features/auth/googleSignIn';
+import { loginErrorMessage } from '@/features/auth/loginErrors';
+import { safeRedirectPath } from '@/lib/safeRedirect';
 
-export default function LoginPage() {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-
+function LoginForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
+
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    // F17: an error sent back by the OAuth callback (?error=) is shown, not silently dropped.
+    const [error, setError] = useState<string | null>(() => loginErrorMessage(searchParams.get('error')));
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (typeof window !== 'undefined' && window.location.search) {
@@ -25,10 +28,15 @@ export default function LoginPage() {
         }
     }, [searchParams]);
 
-    useEffect(() => {
-        if (error) setError(null);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: clear the error only when an input changes, never when the error itself is set
-    }, [email, password]);
+    // Typing clears the error; done in the change handlers, so an error shown on load survives mount.
+    const onEmail = (value: string) => {
+        setEmail(value);
+        setError(null);
+    };
+    const onPassword = (value: string) => {
+        setPassword(value);
+        setError(null);
+    };
 
     const handleGoogleSignIn = () => startGoogleSignIn(setError);
 
@@ -57,8 +65,8 @@ export default function LoginPage() {
         }
 
         if (successRedirect) {
-            const redirectPath = searchParams.get('redirect') || '/lobby';
-            router.push(redirectPath);
+            // S6: only a path on this site is followed; anything else goes to /lobby.
+            router.push(safeRedirectPath(searchParams.get('redirect')));
             router.refresh();
         }
     };
@@ -88,11 +96,11 @@ export default function LoginPage() {
                 <form onSubmit={handleLogin} className="space-y-4">
                     <div>
                         <label className="block text-text-secondary text-sm mb-1">Email</label>
-                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} required disabled={loading} className="w-full bg-elevated border border-border-strong rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent disabled:opacity-50" />
+                        <input type="email" value={email} onChange={e => onEmail(e.target.value)} required disabled={loading} className="w-full bg-elevated border border-border-strong rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent disabled:opacity-50" />
                     </div>
                     <div>
                         <label className="block text-text-secondary text-sm mb-1">Password</label>
-                        <input type="password" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading} className="w-full bg-elevated border border-border-strong rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent disabled:opacity-50" />
+                        <input type="password" value={password} onChange={e => onPassword(e.target.value)} required disabled={loading} className="w-full bg-elevated border border-border-strong rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent disabled:opacity-50" />
                     </div>
 
                     <button type="submit" disabled={loading} className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent text-surface font-medium py-3 rounded-lg transition-colors flex justify-center items-center gap-2 mt-4 text-[15px]">
@@ -111,5 +119,15 @@ export default function LoginPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Next 14.1+ fails the production build when a statically rendered page reads
+// useSearchParams() outside a Suspense boundary; the form is the part that reads them.
+export default function LoginPage() {
+    return (
+        <Suspense fallback={null}>
+            <LoginForm />
+        </Suspense>
     );
 }

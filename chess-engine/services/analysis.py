@@ -12,7 +12,10 @@ from typing import Any
 
 import chess
 
-MATE_CP = 10000  # centipawn stand-in for a forced mate
+# MATE_CP is re-exported: callers and tests import it from here.
+from services.perspective import MATE_CP as MATE_CP
+from services.perspective import evaluation_for, for_color, line_white_score
+
 BRILLIANT_DELTA = -30  # played move beats the engine's top choice by > 30cp
 BEST_MAX_LOSS = 10  # cp_loss below this is "Best" / "Great move"
 # Remaining cp_loss bands (inclusive upper bound) checked in order.
@@ -20,7 +23,8 @@ LOSS_BANDS = ((25, "Excellent"), (50, "Good"), (100, "Inaccuracy"), (200, "Mista
 MISS_MARGIN = 150  # Miss: best line was >= +150 and the move threw away > 150cp
 ANALYZE_TOP_LINES = 3
 
-# (cp_loss, classification, eval_before, eval_after, eval_best, best_uci, played_uci, accuracy)
+# (cp_loss, classification, eval_before, eval_after, eval_best, best_uci, played_uci, accuracy);
+# every eval is from the MOVER's point of view (services/perspective.py).
 MoveAnalysis = tuple[Any, str, Any, Any, Any, str | None, str | None, float]
 
 
@@ -44,29 +48,41 @@ def move_accuracy(win_before: float, win_after: float) -> float:
     return max(0.0, min(100.0, acc))
 
 
-def _eval_before_for_mover(evaluation: dict, player_color: chess.Color) -> Any:
-    # E5: normalize eval_before to current player's perspective
-    raw_cp = evaluation["value"] if evaluation["type"] == "cp" else (MATE_CP if evaluation["value"] > 0 else -MATE_CP)
-    # Stockfish reports from side-to-move perspective; normalize to the playing player
-    return raw_cp if player_color == chess.WHITE else -raw_cp
+def top_line_cp(top_move: dict) -> int:
+    """
+    Score of one `get_top_moves()` line in centipawns, from WHITE's point of view
+    (the `stockfish` package reports both Centipawn and Mate that way).
+
+    A forced mate has no centipawn score: it is worth +MATE_CP when White mates
+    (Mate > 0) and -MATE_CP when Black mates (Mate < 0), never 0.
+    """
+    return line_white_score(top_move)
 
 
-def _best_cp_for_mover(top_moves: list, player_color: chess.Color) -> Any:
-    eval_best_cp = top_moves[0]["Centipawn"] if top_moves and top_moves[0]["Centipawn"] is not None else 0
-    if top_moves and top_moves[0]["Centipawn"] is not None:
-        eval_best_cp = eval_best_cp if player_color == chess.WHITE else -eval_best_cp
-    return eval_best_cp
+def _best_cp_for_mover(top_moves: list, player_color: chess.Color) -> int:
+    """Score of the engine's top line from the mover's point of view (0 without a line)."""
+    if not top_moves:
+        return 0
+    return for_color(line_white_score(top_moves[0]), player_color)
 
 
-def _eval_after_for_mover(evaluation: dict) -> Any:
-    # get_evaluation is from the side-to-move's perspective (the opponent, after our
-    # move), so we flip it to the mover's perspective.
-    if evaluation["type"] == "mate":
-        # A mate score for the opponent-to-move: value <= 0 means THEY are getting
-        # mated (value 0 == they are already checkmated) -> a win for us. value > 0
-        # means they mate us. (Fixes checkmate-delivering moves being scored as blunders.)
-        return MATE_CP if evaluation["value"] <= 0 else -MATE_CP
-    return -evaluation["value"]
+def parse_played_move(board: chess.Board, text: str) -> chess.Move | None:
+    """
+    The legal move `text` names in `board`, or None.
+
+    UCI is tried first ("e2e4", "a7a8q"); only when `text` is not a legal UCI
+    move is it read as SAN ("Nbd7", "exd5", "O-O-O"). The length of the string
+    says nothing about its notation. A null move is not a played move.
+    """
+    text = text.strip()
+    for parse in (board.parse_uci, board.parse_san):
+        try:
+            move = parse(text)
+        except ValueError:  # invalid, illegal or ambiguous in this notation
+            continue
+        if move:
+            return move
+    return None
 
 
 def _classify(eval_best_cp: Any, eval_after_cp: Any, is_engine_best: bool) -> str:
@@ -95,25 +111,24 @@ def analyze_move_cp(sf: Any, board_fen: str, move_played_san: str, player_color:
     board_fen: FEN *before* the move is played
     move_played_san: The move played by human in SAN or UCI
     player_color: chess.WHITE or chess.BLACK
+    Raises ValueError when the move is not legal in `board_fen` (callers validate first).
     """
-    sf.set_fen_position(board_fen)
+    b = chess.Board(board_fen)
+    user_move = parse_played_move(b, move_played_san)
+    if user_move is None:
+        raise ValueError(f"Illegal move {move_played_san!r} in {board_fen}")
 
+    sf.set_fen_position(board_fen)
     # E4: removed sf.get_best_move() — redundant, top_moves[0] has the same info
     top_moves = sf.get_top_moves(2)
     best_move_uci = top_moves[0]["Move"] if top_moves else None
-    eval_before_normalized = _eval_before_for_mover(sf.get_evaluation(), player_color)
+    eval_before_normalized = evaluation_for(sf.get_evaluation(), b, player_color)
     eval_best_cp = _best_cp_for_mover(top_moves, player_color)
 
     # Eval after user move
-    b = chess.Board(board_fen)
-    try:
-        user_move = b.parse_uci(move_played_san) if len(move_played_san) in (4, 5) else b.parse_san(move_played_san)
-    except Exception:
-        return 0, "Mistake", eval_before_normalized, 0, 0, None, None, 0.0
-
     b.push(user_move)
     sf.set_fen_position(b.fen())
-    eval_after_cp = _eval_after_for_mover(sf.get_evaluation())
+    eval_after_cp = evaluation_for(sf.get_evaluation(), b, player_color)
     cp_loss = max(0, eval_best_cp - eval_after_cp)
 
     # Per-move accuracy from the win% drop (chess.com model): win% of the position
@@ -142,7 +157,13 @@ def compute_game_accuracy(cp_losses: list) -> float:
 
 
 def analyse_position(sf: Any, fen: str) -> dict:
-    """Best move, evaluation and top lines for `fen` (body of POST /analyze)."""
+    """
+    Best move, evaluation and top lines for `fen` (body of POST /analyze).
+
+    `evaluation` and every line score are from WHITE's point of view, as the
+    `stockfish` package reports them (services/perspective.py); the analysis
+    page's eval bar reads them that way.
+    """
     sf.set_fen_position(fen)
     evaluation = sf.get_evaluation()
     top_moves = sf.get_top_moves(ANALYZE_TOP_LINES)

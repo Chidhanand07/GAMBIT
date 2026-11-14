@@ -1,25 +1,25 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/components/SocketProvider';
-import { createClient } from '@/lib/supabase/client';
-import { fetchInviteGame, fetchMyProfile, postJoinInvite } from '@/lib/api/invite';
+import { fetchInviteGame, fetchMyProfile } from '@/lib/api/invite';
+import { useJoinInvite } from '@/features/join/hooks/useJoinInvite';
 import { InviteDetails } from '@/features/join/components/InviteDetails';
 import { InviteActions, InviteExpired, InviteLoading } from '@/features/join/components/InviteScreens';
 import type { GameWithPlayers } from '@/types/game';
 import type { Profile } from '@/types/profile';
 
-export default function JoinPage({ params }: { params: { token: string } }) {
+export default function JoinPage(props: { params: Promise<{ token: string }> }) {
+    const params = use(props.params);
     const router = useRouter()
     const socket = useSocket()
     const [game, setGame] = useState<GameWithPlayers | null>(null)
     const [me, setMe] = useState<Profile | null>(null)
     const [loading, setLoading] = useState(true)
-    const [joining, setJoining] = useState(false)
-    const [error, setError] = useState<string | null>(null)
 
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://127.0.0.1:3001'
+    const { joining, error, join } = useJoinInvite({ socketUrl, token: params.token, signedIn: me !== null })
 
     useEffect(() => {
         void Promise.all([fetchInviteGame(socketUrl, params.token), fetchMyProfile()]).then(([g, m]) => {
@@ -35,7 +35,6 @@ export default function JoinPage({ params }: { params: { token: string } }) {
         const isCreator = me.id === game.white_id || me.id === game.black_id
         if (!isCreator) return
 
-        socket.emit('authenticate', me.id)
         socket.emit('join_game', game.id)
 
         const onGameStart = (data: { id: string }) => {
@@ -44,23 +43,6 @@ export default function JoinPage({ params }: { params: { token: string } }) {
         socket.on('game_start', onGameStart)
         return () => { socket.off('game_start', onGameStart) }
     }, [socket, game, me, router])
-
-    const handleJoin = async () => {
-        if (!me) { router.push(`/login?redirect=/join/${params.token}`); return }
-        setJoining(true)
-        try {
-            const supabase = createClient()
-            const { data: { session } } = await supabase.auth.getSession()
-            if (!session) { router.push(`/login?redirect=/join/${params.token}`); return }
-            const res = await postJoinInvite(socketUrl, params.token, session.access_token)
-            if (!res.ok) { const d = await res.json(); setError(d.error ?? 'Failed to join'); setJoining(false); return }
-            const data = await res.json()
-            router.push(`/game/${data.id}`)
-        } catch (e) {
-            setError((e as Error).message)
-            setJoining(false)
-        }
-    }
 
     if (loading) return <InviteLoading />
 
@@ -89,7 +71,7 @@ export default function JoinPage({ params }: { params: { token: string } }) {
                 <InviteDetails game={game} isCreator={isCreator} creatorIsWhite={creatorIsWhite} />
 
                 {/* Action */}
-                <InviteActions error={error} isCreator={isCreator} joining={joining} onJoin={handleJoin} />
+                <InviteActions error={error} isCreator={isCreator} joining={joining} onJoin={() => void join()} />
             </div>
         </div>
     )

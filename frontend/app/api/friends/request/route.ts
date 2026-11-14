@@ -1,17 +1,34 @@
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { findExistingFriendship, insertFriendRequest } from '@/lib/server/friendships';
-import { getUserId } from '@/lib/server/identity';
+import { requireUser } from '@/lib/server/identity';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
+import { enforceRateLimit, RATE_LIMITS } from '@/lib/server/rateLimit';
 import { createAdminClient } from '@/lib/server/supabase';
+import { parseJsonBody, schemas } from '@/lib/server/validation';
+
+// Per-user data: never prerendered or cached (NX-11).
+export const dynamic = 'force-dynamic';
+
+/** The answer when a friendship in either direction already decides the request, else null. */
+function existingFriendshipResponse(status: string | undefined): NextResponse | null {
+    if (status === 'accepted') return NextResponse.json({ error: 'Already friends' }, { status: 400 });
+    if (status === 'pending') return NextResponse.json({ success: true, already: true });
+    return null;
+}
 
 // POST /api/friends/request — body { addressee_username }
 export async function POST(req: NextRequest) {
-    const meId = getUserId(cookies());
-    if (!meId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
+    const meId = auth.userId;
 
-    const { addressee_username } = await req.json();
-    if (!addressee_username) return NextResponse.json({ error: 'addressee_username required' }, { status: 400 });
+    // Per verified user, before any database call (RATE-LIMITS).
+    const limited = await enforceRateLimit(meId, RATE_LIMITS.friendRequest);
+    if (limited) return limited;
+
+    const body = await parseJsonBody(req, schemas.friendRequest, 'addressee_username required');
+    if (!body.ok) return body.response;
+    const { addressee_username } = body.data;
 
     const admin = createAdminClient();
 
@@ -22,8 +39,8 @@ export async function POST(req: NextRequest) {
     // Check if friendship already exists in either direction
     const { data: existing } = await findExistingFriendship(admin, meId, them.id);
 
-    if (existing?.status === 'accepted') return NextResponse.json({ error: 'Already friends' }, { status: 400 });
-    if (existing?.status === 'pending') return NextResponse.json({ success: true, already: true });
+    const settled = existingFriendshipResponse(existing?.status);
+    if (settled) return settled;
 
     const { error } = await insertFriendRequest(admin, meId, them.id);
 

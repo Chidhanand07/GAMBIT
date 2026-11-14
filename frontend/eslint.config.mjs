@@ -1,5 +1,5 @@
 // ESLint flat config for the Next.js app (docs/ENGINEERING_RULES.md).
-// `next lint` (Next 14) still reads .eslintrc; CI runs `npx eslint .` with this file.
+// Next 16 removed `next lint`; CI and local runs use the ESLint CLI (`npx eslint .`) with this file.
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -22,6 +22,9 @@ const sizeRules = {
     'max-depth': ['error', 3],
     'max-nested-callbacks': ['error', 3],
 };
+
+/** Files that only ever run on the server (never bundled for a browser). */
+const serverOnlyFiles = ['lib/server/**/*.ts', 'app/api/**/*.ts', 'app/**/route.ts', 'proxy.ts'];
 
 const strict = [
     js.configs.recommended,
@@ -70,4 +73,30 @@ export default [
         },
     },
     ...baselineBlock(here, strict),
+    // ── console (S14, SEC-01) ────────────────────────────────────────────────────────────────
+    // These blocks come after the legacy baseline on purpose: the baseline may never downgrade them.
+    {
+        // Everything is client code unless listed below: nothing that can reach a browser may
+        // write to the console (the sign-up flow used to log the e-mail, session expiry and
+        // auth cookie names there).
+        name: 'gambit/no-console',
+        files: ['**/*.{ts,tsx}'],
+        rules: { 'no-console': 'error' },
+    },
+    {
+        // Server-only code: route handlers, the data access layer and the proxy. Their output
+        // goes to the server log, never to a browser, so reporting a failure with
+        // console.error / console.warn is legitimate. console.log/info/debug stay banned
+        // (no debug chatter; secrets never go in logs, SEC-01).
+        // Keep in step with `isServerOnly` in __tests__/security/noClientConsole.test.ts.
+        name: 'gambit/no-console-server',
+        files: serverOnlyFiles,
+        rules: { 'no-console': ['error', { allow: ['error', 'warn'] }] },
+    },
+    {
+        // Not shipped to anyone: tests, scripts and tool configuration.
+        name: 'gambit/console-allowed',
+        files: ['__tests__/**/*.{ts,tsx}', 'jest.setup.ts', 'scripts/**', '*.config.{ts,mts,mjs,js}'],
+        rules: { 'no-console': 'off' },
+    },
 ];

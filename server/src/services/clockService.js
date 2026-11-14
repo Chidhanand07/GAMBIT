@@ -1,130 +1,59 @@
 // @ts-check
 /**
- * The global clock tick: sync running clocks, flag players on time and end
- * games after the disconnect grace period. Moved from `server/services/clock.js`,
- * which keeps the interval handle and the public API as a facade.
+ * The global clock tick: sync running clocks, and end games the clock decides
+ * (flag fall, abandonment after the disconnect grace period, a first move that
+ * never came: domain/clockVerdict). Ending a game is
+ * not done here: the tick hands its verdict to the one finalizer, so a game
+ * that ends on time gets the same database row, rating, review and `game_end`
+ * payload as any other ending (G3, NODE-18).
  */
-const { tickerSnapshot, isGraceExpired } = require('../domain/clock');
-const { resultLabel, opponentColor, sideToColor, colorOfPlayer, playerIdOf } = require('../domain/result');
+const { clocksAt } = require('../domain/clock');
+const { clockVerdict } = require('../domain/clockVerdict');
+
+/** A tick lock lasts a little less than the 1 s tick, so the next tick can take it again. */
+const TICK_LOCK_MS = 900;
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
  * @typedef {import('../domain/gameState').GameState} GameState
- */
-
-/**
- * @typedef {object} ClockGameStorePort
- * @property {(id: string) => Promise<any>} getGame
- * @property {(id: string, game: object) => Promise<unknown>} setGame
- * @property {(id: string) => Promise<void>} removeActiveGame
- * @property {() => Promise<string[]>} getActiveGameIds
- */
-
-/**
- * @typedef {object} ClockGamesPort
- * @property {(id: string, fields: object) => PromiseLike<{ data: unknown }>} finishIfActive
+ * @typedef {import('../domain/adjudication').Verdict} Verdict
  */
 
 /**
  * @typedef {object} ClockDeps
- * @property {ClockGameStorePort} gameStore
- * @property {ClockGamesPort} gamesRepo
- * @property {() => { processGameEnd: Function }} getRatingService resolved when a game is rated
+ * @property {{ getGame: (id: string) => Promise<any>, getActiveGameIds: () => Promise<string[]> }} gameStore
+ * @property {{ endGameIf: (gameId: string, decide: (game: any) => Verdict | null, at?: number) => Promise<boolean> }} finalizer
  * @property {Emitter} emitter
  * @property {() => number} now
+ * @property {{ tryAcquire: (gameId: string, ms: number) => Promise<boolean> }} [tickLocks] with several
+ *   instances, only the instance that gets a game's tick lock ticks it (MULTI-INSTANCE)
  */
 
 /**
- * Mark the game finished in the DB (only if still active) and rate it.
- * `reason` is accepted but unused, as before.
- * @param {ClockDeps} deps
- * @param {{ gameId: string, game: GameState, winnerId: string | null, reason?: string }} p
- * @returns {Promise<void>}
- */
-async function finalizeExpiredGame({ gamesRepo, getRatingService, emitter }, { gameId, game, winnerId }) {
-    const outcome = colorOfPlayer(winnerId, game.whiteId);
-
-    const { data: updated } = await gamesRepo.finishIfActive(gameId, {
-        status: 'completed',
-        winner_id: winnerId,
-        ended_at: new Date().toISOString(),
-        final_fen: game.fen ?? null,
-    });
-
-    if (!updated) return; // already finalized
-
-    try {
-        const ratingService = getRatingService();
-        const changes = await ratingService.processGameEnd(
-            gameId,
-            game.whiteId,
-            game.blackId,
-            outcome,
-            game.timeControl,
-            game.isRated,
-        );
-        if (changes) emitter.toRoom(gameRoom(gameId), 'rating_updated', changes);
-    } catch (e) {
-        console.error('[clock] rating error:', /** @type {Error} */ (e).message);
-    }
-}
-
-/**
- * End a game won by `winnerColor`: Redis state, active set, broadcast, finalize.
- * @param {ClockDeps} deps
- * @param {{ gameId: string, game: GameState, winnerColor: 'white' | 'black', reason: string,
- *   payloadExtra: object }} p
- */
-async function endOnClock(deps, { gameId, game, winnerColor, reason, payloadExtra }) {
-    const winnerId = playerIdOf(winnerColor, game);
-    const result = resultLabel(winnerColor);
-
-    await deps.gameStore.setGame(gameId, { ...game, status: 'completed', result: winnerColor });
-    await deps.gameStore.removeActiveGame(gameId);
-
-    deps.emitter.toRoom(gameRoom(gameId), 'game_end', {
-        game_id: gameId,
-        result,
-        reason,
-        white_id: game.whiteId,
-        black_id: game.blackId,
-        ...payloadExtra,
-    });
-    await finalizeExpiredGame(deps, { gameId, game, winnerId, reason: reason.toLowerCase() });
-}
-
-/**
- * One game's tick. A disconnected player's clock is paused; after the grace
- * period the opponent wins by abandonment.
+ * One game's tick: broadcast the running clock, then let the finalizer end the
+ * game if the clock says so. The verdict is taken again on the state the
+ * finalizer reads inside the per-game lock, not on this tick's earlier read:
+ * a move, a reconnect or another ending that landed in between wins.
  * @param {ClockDeps} deps
  * @param {string} gameId
  */
 async function tickGame(deps, gameId) {
+    if (deps.tickLocks && !(await deps.tickLocks.tryAcquire(gameId, TICK_LOCK_MS))) return;
     const game = await deps.gameStore.getGame(gameId);
-    if (!game || game.status !== 'active' || !game.lastMoveAt) return;
+    if (!game || game.status !== 'active') return;
 
     const at = deps.now();
-    // Real remaining for the active player
-    const { remainingMs: remaining, whiteMs, blackMs } = tickerSnapshot(game, at);
-
-    deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
-
-    // ── Disconnect grace period check (20 s) ──
-    if (game.disconnectInfo) {
-        if (isGraceExpired(game.disconnectInfo, at)) {
-            const winnerColor = opponentColor(game.disconnectInfo.side);
-            await endOnClock(deps, { gameId, game, winnerColor, reason: 'Abandonment', payloadExtra: {} });
-        }
-        return; // clock paused while opponent is disconnected
+    // Nothing to show before the first move: no clock has started.
+    if (game.lastMoveAt) {
+        // Real remaining for the active player (frozen while a player is disconnected)
+        const { whiteMs, blackMs } = clocksAt(game, at);
+        deps.emitter.toRoom(gameRoom(gameId), 'clock_sync', { whiteMs, blackMs, serverTs: at });
     }
 
-    // ── Clock timeout ──
-    if (remaining <= 0) {
-        const winnerColor = opponentColor(sideToColor(game.activeSide));
-        const payloadExtra = { is_rated: game.isRated, time_control: game.timeControl };
-        await endOnClock(deps, { gameId, game, winnerColor, reason: 'Time', payloadExtra });
-    }
+    if (!clockVerdict(game, at)) return;
+    await deps.finalizer.endGameIf(gameId, (current) => clockVerdict(current, at), at);
 }
 
 /**
@@ -143,12 +72,12 @@ async function tick(deps) {
                 try {
                     await tickGame(deps, gameId);
                 } catch (e) {
-                    console.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
+                    log.error(`[clock] game ${gameId} error:`, /** @type {Error} */ (e).message);
                 }
             }),
         );
     } catch (e) {
-        console.error('[clock] ticker error:', /** @type {Error} */ (e).message);
+        log.error('[clock] ticker error:', /** @type {Error} */ (e).message);
     }
 }
 
@@ -161,8 +90,6 @@ function createClockService({ now = () => Date.now(), ...rest }) {
     return {
         /** One ticker run (see `tick`). */
         tick: () => tick(deps),
-        /** @param {{ gameId: string, game: GameState, winnerId: string | null, reason?: string }} p */
-        finalizeExpiredGame: (p) => finalizeExpiredGame(deps, p),
     };
 }
 

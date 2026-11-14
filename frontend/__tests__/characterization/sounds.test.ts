@@ -2,7 +2,8 @@
  * Characterization tests (fe-misc, PR 16 track) for lib/sounds.ts.
  */
 describe('lib/sounds', () => {
-    test('each helper rewinds and plays its preloaded clip; end sound always uses checkmate', () => {
+    // F17 (was: 'end sound always uses checkmate'; playGameEndSound(true) played checkmate.mp3).
+    test('each helper rewinds and plays its preloaded clip; the end sound depends on `won`', () => {
         const created: { src: string; preload: string; currentTime: number; play: jest.Mock }[] = []
         const OriginalAudio = (global as any).Audio
         ;(global as any).Audio = jest.fn((src: string) => {
@@ -27,7 +28,7 @@ describe('lib/sounds', () => {
             [sounds.playCheckmateSound, '/audio/checkmate.mp3'],
             [sounds.playPromoteSound, '/audio/promote.mp3'],
             [sounds.playGameStartSound, '/audio/matchstart.mp3'],
-            [() => sounds.playGameEndSound(true), '/audio/checkmate.mp3'],
+            [() => sounds.playGameEndSound(true), '/audio/promote.mp3'],
             [() => sounds.playGameEndSound(false), '/audio/checkmate.mp3'],
         ]
         for (const [fn, src] of cases) {

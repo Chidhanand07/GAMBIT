@@ -1,98 +1,161 @@
 // @ts-check
 /**
- * The two halves of `make_move` after authorization: engine validation and
- * applying the move (Redis state, broadcast, fire-and-forget DB persist).
- * Split from gameService to keep each function small (SIZE-02).
+ * `make_move` once the caller is known: authorize, check legality against the
+ * server's own position, store the new state, broadcast and persist.
+ *
+ * The server is the authority (NODE-11, NODE-16, SEC-09). The position comes
+ * from Redis, legality from chess.js (domain/chessRules), and the UCI, SAN and
+ * FEN that are stored, broadcast and persisted are the ones computed here.
+ * The read–decide–write runs under the per-game lock, so the same move sent
+ * twice is applied once.
  */
-const { clocksAfterMove } = require('../domain/clock');
+const { activeRemainingMs, clocksAfterMove } = require('../domain/clock');
+const { playMove } = require('../domain/chessRules');
+const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
+const { log } = require('../observability/log');
 
 /**
- * @param {Pick<import('./gameService').GameServiceDeps,
- *   'gameStore' | 'gamesRepo' | 'movesRepo' | 'engineClient' | 'emitter' | 'now'>} deps
+ * @typedef {import('../domain/chessRules').PlayedMove} PlayedMove
+ * @typedef {{ game_id: string, from: string, to: string, promotion?: string }} MoveRequest
+ * @typedef {{ accepted: true, state: any, played: PlayedMove } |
+ *   { accepted: false, reason: string, game: any }} MoveOutcome
  */
-function createMoveRecorder({ gameStore, gamesRepo, movesRepo, engineClient, emitter, now = () => Date.now() }) {
+
+/**
+ * State after `played`: the mover's clock is charged (plus increment), the
+ * move is appended to the log as UCI + SAN + FEN, and the side to move flips.
+ * @param {any} game
+ * @param {PlayedMove} played
+ * @param {number} at
+ */
+function stateAfterMove(game, played, at) {
+    const movedSide = sideToMove(game);
+    const clocks = clocksAfterMove({ ...game, activeSide: movedSide }, at);
+    return {
+        ...game,
+        fen: played.fen,
+        whiteClockMs: clocks.whiteMs,
+        blackClockMs: clocks.blackMs,
+        activeSide: clocks.nextSide,
+        lastMoveAt: at,
+        moveLog: [...(game.moveLog || []), { move: played.uci, fen: played.fen, san: played.san }],
+    };
+}
+
+/**
+ * True when the mover's time ran out before this move arrived. The ticker
+ * only looks once a second, so without this check a move sent in that gap
+ * was accepted with a clock of 0 plus the increment (G7).
+ * @param {any} game
+ * @param {number} at
+ * @returns {boolean}
+ */
+function isFlagDown(game, at) {
+    return Boolean(game.lastMoveAt) && activeRemainingMs({ ...game, activeSide: sideToMove(game) }, at) <= 0;
+}
+
+/**
+ * The `move_made` broadcast: server values only, under the field names the
+ * frontend already reads.
+ * @param {MoveRequest} request
+ * @param {PlayedMove} played
+ * @param {{ whiteClockMs: number, blackClockMs: number }} state
+ */
+function moveMadePayload(request, played, state) {
+    const promoted = played.uci.length > request.from.length + request.to.length;
+    return {
+        game_id: request.game_id,
+        from: request.from,
+        to: request.to,
+        ...(promoted ? { promotion: played.uci.slice(-1) } : {}),
+        move: played.uci,
+        san: played.san,
+        fen: played.fen,
+        captured: played.captured,
+        flags: played.flags,
+        whiteMs: state.whiteClockMs,
+        blackMs: state.blackClockMs,
+    };
+}
+
+/**
+ * @param {Pick<import('./gameService').GameServiceDeps, 'gameStore' | 'gamesRepo' | 'movesRepo' | 'emitter' | 'now'>} deps
+ */
+function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = () => Date.now() }) {
     /**
-     * Ask the engine whether `data.move` is legal from the stored FEN. On a
-     * legal move `data.fen` becomes the engine's FEN. When the engine is
-     * unreachable or answers non-ok the client FEN is kept (known bug).
-     * @param {{ fen: string }} game
-     * @param {Record<string, any>} data
-     * @returns {Promise<boolean>} false only for a move the engine rejected
+     * Fire-and-forget: update the games row (position and both clocks, in the
+     * canonical clock columns, so the row alone can restore the game: G2) and
+     * append the move row.
+     * @param {string} gameId
+     * @param {any} state state after the move
+     * @param {PlayedMove} played
      */
-    async function validate(game, data) {
-        try {
-            const validationRes = await engineClient.validateMove({ fen: game.fen, move: data.move });
-            if (validationRes.ok) {
-                const validation = await validationRes.json();
-                if (!validation.valid) {
-                    console.warn('[make_move] illegal move rejected:', data.move, 'from', game.fen);
-                    return false;
-                }
-                data.fen = validation.new_fen;
-            }
-        } catch (e) {
-            console.warn('[make_move] engine validation unavailable:', /** @type {Error} */ (e).message);
-        }
-        return true;
-    }
-
-    /**
-     * Charge the mover's clock (plus increment), store the new state, broadcast
-     * `move_made` with the clocks, then persist FEN and move without awaiting
-     * (H10: clocks are flushed on game_end only).
-     * @param {any} game
-     * @param {Record<string, any>} data
-     */
-    async function apply(game, data) {
-        const at = now();
-        const movedSide = game.activeSide;
-        // Charge elapsed time, then add increment to the player who just moved
-        const { whiteMs: whiteClockMs, blackMs: blackClockMs, nextSide: newSide } = clocksAfterMove(game, at);
-        const newMoveLog = [...(game.moveLog || []), { move: data.move, fen: data.fen, san: data.san }];
-
-        await gameStore.updateGame(data.game_id, {
-            fen: data.fen,
-            whiteClockMs,
-            blackClockMs,
-            activeSide: newSide,
-            lastMoveAt: at,
-            moveLog: newMoveLog,
-        });
-
-        data.whiteMs = whiteClockMs;
-        data.blackMs = blackClockMs;
-        emitter.toRoom(gameRoom(data.game_id), 'move_made', data);
-
-        const clockAfterMove = movedSide === 'w' ? Math.round(whiteClockMs) : Math.round(blackClockMs);
-        persist(data, { moveNumber: newMoveLog.length, movedColor: sideToColor(movedSide), clockAfterMove });
-    }
-
-    /**
-     * Fire-and-forget: update the games row FEN and append the move row.
-     * @param {Record<string, any>} data
-     * @param {{ moveNumber: number, movedColor: string, clockAfterMove: number }} move
-     */
-    function persist(data, { moveNumber, movedColor, clockAfterMove }) {
+    function persist(gameId, state, played) {
+        const movedColor = sideToColor(state.activeSide === 'w' ? 'b' : 'w');
+        const clockMs = movedColor === 'white' ? state.whiteClockMs : state.blackClockMs;
         Promise.all([
-            gamesRepo.updateById(data.game_id, { fen: data.fen }),
-            movesRepo.insert({
-                game_id: data.game_id,
-                move_number: moveNumber,
-                color: movedColor,
-                uci: data.move,
-                san: data.san,
-                fen_after: data.fen,
-                clock_ms_remaining: clockAfterMove,
+            gamesRepo.updateById(gameId, {
+                fen: played.fen,
+                white_clock_ms: Math.round(state.whiteClockMs),
+                black_clock_ms: Math.round(state.blackClockMs),
             }),
-        ]).then(([gRes, mRes]) => {
-            if (gRes.error) console.error('[make_move] game persist:', gRes.error.message);
-            if (mRes.error) console.error('[make_move] move persist:', mRes.error.message);
-        });
+            movesRepo.insert({
+                game_id: gameId,
+                move_number: state.moveLog.length,
+                color: movedColor,
+                uci: played.uci,
+                san: played.san,
+                fen_after: played.fen,
+                clock_ms_remaining: Math.round(clockMs),
+            }),
+        ])
+            .then(([gRes, mRes]) => {
+                if (gRes?.error) log.error('[make_move] game persist:', gRes.error.message);
+                if (mRes?.error) log.error('[make_move] move persist:', mRes.error.message);
+            })
+            .catch((e) => log.error('[make_move] persist failed:', /** @type {Error} */ (e).message));
     }
 
-    return { validate, apply };
+    /**
+     * Apply `request` for `userId` if it is their legal move; otherwise say why not.
+     * @param {MoveRequest} request
+     * @param {string} userId the connection's verified user
+     * @returns {Promise<MoveOutcome>}
+     */
+    async function submit(request, userId) {
+        /** @type {MoveOutcome | null} */
+        let outcome = null;
+        await gameStore.mutateGame(request.game_id, (/** @type {any} */ game) => {
+            const at = now();
+            const reason = moveRejection(game, userId) ?? (isFlagDown(game, at) ? REJECTION.TIME_EXPIRED : null);
+            if (reason) {
+                outcome = { accepted: false, reason, game };
+                return null;
+            }
+            const played = playMove(game, request);
+            if (!played.legal) {
+                outcome = { accepted: false, reason: REJECTION.ILLEGAL_MOVE, game };
+                return null;
+            }
+            const state = stateAfterMove(game, played, at);
+            outcome = { accepted: true, state, played };
+            return state;
+        });
+        const result = /** @type {MoveOutcome} */ (/** @type {unknown} */ (outcome));
+        if (result.accepted) {
+            emitter.toRoom(
+                gameRoom(request.game_id),
+                'move_made',
+                moveMadePayload(request, result.played, result.state),
+            );
+            persist(request.game_id, result.state, result.played);
+        }
+        return result;
+    }
+
+    return { submit };
 }
 
 module.exports = { createMoveRecorder };

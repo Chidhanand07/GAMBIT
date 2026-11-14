@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { GoogleSignInButton, OrDivider } from '@/features/auth/components/GoogleSignInButton';
@@ -29,11 +29,6 @@ function SignupForm() {
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        if (error) setError(null);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- behaviour preserved: clear the error only when an input changes, never when the error itself is set
-    }, [email, password, confirm, username]);
-
     // Debounced username availability check
     const usernameStatus = useUsernameAvailability(username);
 
@@ -53,8 +48,7 @@ function SignupForm() {
         try {
             const message = await registerAndSignIn({ email, password, username });
             if (message) setError(message);
-        } catch (err) {
-            console.error('[signup] unexpected error:', err);
+        } catch {
             setError("Connection failed. Please check your internet connection.");
         } finally {
             setLoading(false);
@@ -84,7 +78,11 @@ function SignupForm() {
                 <form onSubmit={handleSignup} className="space-y-4">
                     <SignupFields
                         values={{ email, username, password, confirm }}
-                        onChange={(field, value) => setters[field](value)}
+                        onChange={(field, value) => {
+                            // Typing clears the error (only an input change does; setting the error does not).
+                            setters[field](value);
+                            setError(null);
+                        }}
                         disabled={loading}
                         usernameStatus={usernameStatus}
                         confirmMismatch={error === PASSWORD_MISMATCH}

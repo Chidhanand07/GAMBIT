@@ -1,13 +1,16 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getUserId } from '@/lib/server/identity';
+import { requireUser } from '@/lib/server/identity';
 import { listRecentNotifications } from '@/lib/server/notifications';
 import { createAdminClient } from '@/lib/server/supabase';
 
+// Per-user data: never prerendered or cached (NX-11).
+export const dynamic = 'force-dynamic';
+
 // GET /api/notifications — my 30 latest notifications
 export async function GET() {
-    const userId = getUserId(cookies());
-    if (!userId) return NextResponse.json([], { status: 401 });
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
+    const { userId } = auth;
 
     const { data, error } = await listRecentNotifications(createAdminClient(), userId);
 
