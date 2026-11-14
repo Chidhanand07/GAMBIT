@@ -42,9 +42,11 @@ def anonymous():
 
 
 def test_the_protected_list_covers_every_route_except_health():
-    served = {
-        (next(iter(r.methods - {"HEAD", "OPTIONS"})).lower(), r.path) for r in main.app.routes if hasattr(r, "methods")
-    }
+    # Read the served routes from the OpenAPI document. Newer FastAPI (0.16x) keeps one opaque
+    # entry per include_router() call in app.routes instead of the routes themselves (F-091).
+    # No route sets include_in_schema=False, so the document lists every route.
+    served = {(method, path) for path, operations in main.app.openapi()["paths"].items() for method in operations}
+    assert ("get", "/health") in served
     assert served - {("get", "/health")} == {(m, p) for m, p, _ in PROTECTED}
 
 

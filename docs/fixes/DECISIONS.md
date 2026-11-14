@@ -106,6 +106,11 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-086](#f-086) | Profile edits as the user; `service_role` loses UPDATE on profiles | L3 | S8-PRIV |
 | [F-087](#f-087) | `/login` shows OAuth errors by known code | L3 | F17 |
 | [F-088](#f-088) | `/api/maverick-move` relays 503 Engine busy | L3 | MAVERICK-503 |
+| [F-090](#f-090) | Audit green by upgrading direct dependencies; no overrides or exceptions | L4 | SUPPLY-CHAIN |
+| [F-091](#f-091) | FastAPI 0.162.7 with Starlette and AnyIO floors | L4 | SUPPLY-CHAIN |
+| [F-092](#f-092) | socket.io 4.8.4 and lockfile refreshes | L4 | SUPPLY-CHAIN |
+| [F-093](#f-093) | Unused axios removed; nanoid stays on 3.x | L4 | SUPPLY-CHAIN |
+| [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 
 ---
 
@@ -2315,3 +2320,49 @@ display name, bio and country, F18).
 
 **`/api/maverick-move` passes the engine's 503 "Engine busy" through** as 503 with `Retry-After`
 (only when it is plain delay-seconds, 1–4 digits). A 400 stays 400; any other status stays 502.
+
+## F-090
+
+**The dependency audit is made green by upgrading direct dependencies, not by overrides or exceptions
+(SUPPLY-CHAIN, follows F-057).** The gate was red: server 27 high, frontend 4 high, engine 17. Options:
+npm `overrides` on the transitive packages, allow-list exceptions, or upgrading/removing the direct
+dependency that pulls each one. Chosen: the last, for every finding. The allow-list stays empty and
+there are no `overrides`; an override pins a transitive version its parent never tested against, and an
+exception only postpones the fix. DEPLOY.md §8b records the rule: overrides only when no direct upgrade
+exists, each with an ADR and a removal condition. After: 0 / 0 / 0.
+
+## F-091
+
+**Engine: FastAPI 0.104.1 → 0.162.7, with floors for Starlette and AnyIO.** pip-audit reported
+PYSEC-2024-38 (fastapi) and nine Starlette/AnyIO advisories (fixed in starlette 1.3.1, anyio 4.14.2).
+`fastapi==0.162.7` plus `starlette>=1.3.1,<2` and `anyio>=4.14.2,<5`, because FastAPI's own floors are
+vulnerable versions. FastAPI 0.16x no longer lists included routes in `app.routes`, so the
+route-coverage auth test reads the OpenAPI document. **Revisit:** Starlette's TestClient warns that it
+will move from httpx to httpx2.
+
+## F-092
+
+**socket.io / socket.io-client 4.8.4 and lockfile refreshes.** Bumping the direct ranges to `^4.8.4`
+and refreshing engine.io(-client), socket.io-adapter, socket.io-parser and ws within their ranges clears
+GHSA-r635-g3xr-vw7x, -gr94-w7qr-f4j3, -2gc4-cqfq-p2gv, -2m8v-j782-fhvr and -96hv-2xvq-fx4p without
+overrides; source-map-js 1.2.2 (lockfile only, within postcss's range) clears GHSA-68fv-2mgg-jv7q. Same
+protocol, minor/patch releases; the multi-instance and adapter tests run on them. Not yet exercised
+across real Railway/Vercel hosts.
+
+## F-093
+
+**Server: the unused axios is removed; nanoid stays on 3.x.** axios 1.15.0 carried 14 high advisories
+and pulled vulnerable follow-redirects and form-data; nothing required it (the engine client uses
+`fetch`). Removing it takes an unused network client out of the production tree. nanoid `^3.3.20` (the
+maintained legacy line; GHSA-xwg4-73v4-xw9w, -28wg-ghj8-5hjv, -2v37-7h3g-55p8): 4.x is ESM-only and the
+server is CommonJS.
+
+## F-094
+
+**zod 3 → 4 on the server and the web app (GHSA-mrhx-c7xc-m3w5; no 3.x release has the fix).**
+Validation behaviour is kept identical. Server: no change needed (0 differences over 600,630 generated
+payloads through every socket and HTTP schema on both versions). Web app: `z.guid()` instead of
+`z.string().uuid()` (zod 4 enforces RFC 9562 version digits, which would reject ids the app accepts
+today) and `queryInt()` uses `.optional()` (an absent key must still take the default); 0 differences
+over 480,944 inputs after the change, with regression tests. **Revisit:** `z.guid()` → `z.uuid()` once
+every stored id is known to be RFC-valid.

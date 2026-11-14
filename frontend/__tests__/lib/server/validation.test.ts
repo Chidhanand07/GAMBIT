@@ -31,6 +31,16 @@ describe('uuid', () => {
     test.each(INJECTIONS)('rejects %p', (value) => {
         expect(schemas.uuid.safeParse(value).success).toBe(false)
     })
+
+    // zod 4's uuid() also checks the RFC 9562 version/variant digits; zod 3's did not. The
+    // schema keeps the zod 3 rule (any 8-4-4-4-12 hex id) so no stored id stops matching (F-094).
+    test.each(['12345678-1234-1234-1234-123456789012', 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE'])(
+        'accepts the non-RFC hex id %p, as under zod 3',
+        (value) => {
+            expect(schemas.uuid.safeParse(value).success).toBe(true)
+            expect(participantFilter(value)).toBe(`white_id.eq.${value},black_id.eq.${value}`)
+        },
+    )
 })
 
 describe('filter builders only accept UUIDs', () => {
@@ -72,6 +82,12 @@ describe('pagination', () => {
 
     test('defaults: limit 15, offset 0', () => {
         expect(page(null, null)).toMatchObject({ success: true, data: { limit: 15, offset: 0 } })
+    })
+
+    // zod 4 rejects an absent object key unless its schema is optional (F-094).
+    test('absent keys take the defaults too', () => {
+        expect(schemas.gamesPage.safeParse({})).toMatchObject({ success: true, data: { limit: 15, offset: 0 } })
+        expect(schemas.gamesPage.safeParse({ offset: '5' })).toMatchObject({ success: true, data: { limit: 15, offset: 5 } })
     })
 
     test('limit is capped at 50', () => {

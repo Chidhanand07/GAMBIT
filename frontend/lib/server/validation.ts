@@ -27,10 +27,14 @@ const MAX_TIME_CONTROL_LENGTH = 16;
 /** Whole-number text only ("10", not "1e3", "1.5" or " 5"). */
 const integerText = z.string().regex(/^\d{1,7}$/);
 
-/** A query-string integer with a default for a missing parameter. */
+/**
+ * A query-string integer with a default for a missing parameter. `.optional()` keeps an absent key
+ * on the default: zod 4 rejects a missing object key unless its schema is optional (F-094).
+ */
 const queryInt = (fallback: number) =>
     z
-        .union([integerText, z.null(), z.undefined()])
+        .union([integerText, z.null()])
+        .optional()
         .transform((value) => (value === null || value === undefined ? fallback : Number.parseInt(value, 10)));
 
 /**
@@ -49,7 +53,12 @@ const timeControl = z
 const optionalText = (max: number) => z.string().max(max).nullish();
 
 export const schemas = {
-    uuid: z.string().uuid(),
+    /**
+     * Any 8-4-4-4-12 hex id. z.guid(), not z.uuid(): zod 4's uuid() also checks the RFC 9562
+     * version and variant digits, which zod 3's did not; the charset is what keeps PostgREST
+     * filters safe (F-094).
+     */
+    uuid: z.guid(),
     /**
      * A username in a URL. Lookups are parameterised (`.eq('username', …)`), so this only has
      * to keep out separators and oversized values; it is wider than `newUsername` because
