@@ -1,117 +1,70 @@
 # Gambit
 
-A production-ready, full-stack chess platform with an accuracy-based rating system, real-time smart matchmaking, and a friends system.
+An online chess platform: rated matchmaking and private invite games with server-run clocks,
+Glicko-2 ratings per time-control category, post-game reviews from Stockfish, a computer opponent
+(MAVERICK), friends, challenges and a leaderboard.
 
-## Architecture & Tech Stack
-- **Frontend**: Next.js 16, React 19, Tailwind CSS, TypeScript (deployed to Vercel)
-- **Backend API Server**: Node.js, Express, Socket.io (deployed to Railway)
-- **Chess Engine Microservice**: Python FastAPI, `python-chess`, Stockfish (deployed to Render)
-- **Database / Auth**: Supabase (PostgreSQL, Realtime subscriptions, Auth)
+## Stack
 
-Code layout, layer dependency rules and how to add a feature: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Engineering rules (mandatory): [`docs/ENGINEERING_RULES.md`](docs/ENGINEERING_RULES.md).
+| Part | Stack | Deployed to |
+|---|---|---|
+| `frontend/` | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS | Vercel |
+| `server/` | Node 26, Express 5, Socket.IO, Redis (ioredis), CommonJS | Railway (Docker) |
+| `chess-engine/` | Python 3.11, FastAPI, python-chess, Stockfish, PyTorch (style model) | Render (Docker) |
+| `supabase/` | Postgres migrations and pgTAP tests, Supabase Auth | Supabase |
 
-## Local Development Requirements
-- Node.js 26 (see `.nvmrc`; `nvm use`)
-- Python >= 3.10
-- Supabase CLI (optional, but recommended if running DB locally instead of cloud)
+The game server is authoritative: it verifies the player's Supabase token in the socket handshake,
+validates every move, runs the clocks and decides every result. More in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## One-Command Setup
+## Quick start (local)
 
-1. Rename `.env.example` to respective `.env` files internally:
-   - `cp .env.example frontend/.env.local`
-   - `cp .env.example server/.env`
-   - `cp .env.example chess-engine/.env`
-2. Populate the Supabase credentials in those newly created `.env` files.
-3. Install all dependencies:
-   ```bash
-   npm run install:all
-   ```
-4. Start the entire stack concurrently:
-   ```bash
-   npm run dev
-   ```
+Needs Node 26 (`nvm use`), Python 3.11, Redis, Stockfish and a Supabase project. Full steps:
+[`setup.md`](setup.md).
 
-## Running Tests
+```bash
+npm run install:all                                   # root, server/ and frontend/ node_modules
+cd chess-engine && python3.11 -m venv venv && ./venv/bin/pip install -r requirements-dev.txt && cd ..
 
-All three suites run offline: Supabase, Redis, Stockfish and the network are
-replaced by in-memory fakes, so no `.env` file or running service is needed.
-GitHub Actions runs them on every push and pull request
-(`.github/workflows/tests.yml`).
+cp server/.env.example server/.env                    # then fill in the values
+cp frontend/.env.example frontend/.env.local
+cp chess-engine/.env.example chess-engine/.env
+```
+
+Run each service in its own terminal:
+
+```bash
+cd server && npm run dev                              # game server on :3001 (loads server/.env)
+cd frontend && npm run dev                            # web app on http://localhost:3000
+cd chess-engine && set -a && source .env && set +a && venv/bin/uvicorn main:app --port 8001 --reload
+```
+
+The engine does not read `.env` itself, hence the `source`. `npm run dev` at the root starts all
+three with `concurrently`, but its engine process gets no variables from `chess-engine/.env`.
+
+## Tests
 
 ```bash
 npm test                     # all three suites
-npm run test:server          # Node server (Jest + Supertest + Socket.IO)
-npm run test:frontend        # Next.js API routes, proxy, components (Jest)
-npm run test:engine          # Python engine (pytest)
+npm run test:server          # cd server && npx jest
+npm run test:frontend        # cd frontend && npx jest
+npm run test:engine          # cd chess-engine && ./venv/bin/python -m pytest -q
 ```
 
-The engine suite needs its virtualenv with the dev requirements:
+Supabase, the engine and the network are faked; no `.env` is needed. Server tests that run the real
+Redis Lua scripts use `REDIS_TEST_URL` or a local `redis-server` and are skipped without one. Engine
+tests against a real Stockfish binary are skipped when none is installed. Database tests (pgTAP) need
+the Supabase CLI and Docker: `supabase start && supabase db reset && supabase test db`.
+Lint, type and format gates per package: [`setup.md`](setup.md#7-tests-and-gates).
 
-```bash
-cd chess-engine
-python3.11 -m venv venv
-./venv/bin/pip install -r requirements-dev.txt
-```
+CI (`.github/workflows/`) runs the same suites on every pull request; see
+[DEPLOY.md §8](DEPLOY.md#8-ci-and-security-checks-github).
 
-Where things live:
+## Documentation
 
-| Part | Tests | Shared fakes |
-|------|-------|--------------|
-| `server/` | `__tests__/*.test.js` | `__tests__/helpers/` (Supabase, Redis, fixtures) |
-| `frontend/` | `__tests__/**/*.test.ts(x)` | `__tests__/helpers/` (Supabase, route harness) |
-| `chess-engine/` | `tests/test_*.py` | `tests/conftest.py` (FakeStockfish) |
-
-`test.todo` entries mark known gaps that still need a code fix.
-
-## Deployment Guide - Fully Automated
-
-### Step 1: Supabase Setup
-1. Create a new Supabase project.
-2. Run the SQL files from `supabase/migrations/` in the SQL Editor (run them in order).
-3. Enable **Realtime** on these tables: `games`, `moves`, `messages`, `notifications`, `profiles`.
-4. Grab your `URL`, `anon key` and `service_role key`.
-
-### Step 2: Deploy Chess Engine to Render
-1. Connect your repo in Render and choose **New Web Service**.
-2. Render will automatically detect the `render.yaml` configuration in the `chess-engine` folder and set up the Python container.
-3. Add the `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (Supabase secret key, `sb_secret_…`; the legacy `SUPABASE_SERVICE_KEY` is still read) and `ENGINE_SHARED_SECRET` environment variables in Render. `ENGINE_SHARED_SECRET` is a long random string (`openssl rand -hex 32`); every engine endpoint except `/health` refuses callers that do not send it in `X-Engine-Key`.
-4. Note your Render URL (e.g. `https://gambit-engine.onrender.com`).
-
-### Step 3: Deploy Backend Server to Railway
-1. Connect your repo in Railway.
-2. Ensure you specify the root directory as `server` (or Railway will use the `server/railway.toml`).
-3. Set the following variables in Railway:
-   - `PORT=3000` (or leave default, Railway assigns dynamically)
-   - `SUPABASE_URL`
-   - `SUPABASE_SECRET_KEY` (Supabase secret key; legacy `SUPABASE_SERVICE_KEY` still read)
-   - `GAMBIT_ENGINE_URL` (points to the Render URL from Step 2)
-   - `ENGINE_SHARED_SECRET` (the same value as on Render)
-   - `FRONTEND_URL` (Wait until Vercel is deployed, then add it here for CORS)
-4. Note your Railway URL (e.g. `https://gambit-production.up.railway.app`).
-
-### Step 4: Deploy Frontend to Vercel
-1. Point Vercel to your repository. The `vercel.json` and internal Next.js detection will handle the build.
-2. Important: Set the `Root Directory` in Vercel settings to `frontend/`.
-3. Add these variables in Vercel:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (Supabase publishable key; the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still read)
-   - `SUPABASE_SECRET_KEY` (Supabase secret key, server-side only, no `NEXT_PUBLIC_` prefix; the legacy `SUPABASE_SERVICE_ROLE_KEY` is still read)
-   - `NEXT_PUBLIC_SOCKET_URL` (points to the Railway URL from Step 3)
-   - `GAMBIT_ENGINE_URL` and `ENGINE_SHARED_SECRET` (server-side only, no `NEXT_PUBLIC_` prefix; same secret as on Render)
-4. Deploy.
-
-### Step 5: Final Wiring
-1. In Railway, ensure `FRONTEND_URL` matches your Vercel URL.
-2. In Supabase, go to **Authentication -> URL Configuration** and add your Vercel URL as a valid redirect URL.
-
-### Step 6: Test Deployment Verification
-1. Verify Vercel loads without client-side errors.
-2. Verify Engine is up: Try to `GET /health` on the Render URL.
-3. Verify Server is up: Check Socket connections in browser Network tab.
-4. Try to start a game. It should spin until matched.
-5. Create an invite link via \"Private Game\".
-6. Send the link to a second incognito browser and join.
-7. Finish the game and confirm the `Accuracy Ranking` arc gauge loads via the asynchronous analysis webhook.
-8. Check if Supabase `games` row successfully stored `white_accuracy` and `black_accuracy`.
-9. Send a friend request from User A to User B.
-10. Accept friend request and see live status.
+- [`setup.md`](setup.md): local development
+- [`DEPLOY.md`](DEPLOY.md): deployment, environment variables per platform, deploy order, operations
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): components, layers and main flows
+- [`docs/ENGINEERING_RULES.md`](docs/ENGINEERING_RULES.md): the rulebook (mandatory)
+- [`readme_first.md`](readme_first.md): orientation for new contributors
+- [`docs/fixes/DECISIONS.md`](docs/fixes/DECISIONS.md): decision log (ADRs F-001 onward)
