@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  # Pinned: an unpinned audit tool is itself a supply-chain input. Dependabot does not see this pin,
+  # Pinned: an unpinned audit tool is itself a supply-chain input. Nothing updates this pin automatically,
   # so bump it by hand.
   PIP_AUDIT_VERSION: '2.10.1'
 
