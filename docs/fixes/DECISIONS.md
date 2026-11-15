@@ -111,6 +111,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-092](#f-092) | socket.io 4.8.4 and lockfile refreshes | L4 | SUPPLY-CHAIN |
 | [F-093](#f-093) | Unused axios removed; nanoid stays on 3.x | L4 | SUPPLY-CHAIN |
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
+| [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
 
 ---
 
@@ -2366,3 +2367,21 @@ payloads through every socket and HTTP schema on both versions). Web app: `z.gui
 today) and `queryInt()` uses `.optional()` (an absent key must still take the default); 0 differences
 over 480,944 inputs after the change, with regression tests. **Revisit:** `z.guid()` → `z.uuid()` once
 every stored id is known to be RFC-valid.
+
+## F-095
+
+**No automatic dependency-update PRs: `.github/dependabot.yml` is removed (owner decision; supersedes
+the Dependabot part of F-057).**
+
+- **Context.** Once F-057's config reached the default branch, Dependabot opened 19 PRs at once against
+  `preprod`, several of them major versions that can change behaviour silently even with green tests
+  (`stockfish` 3 → 5 affects the evaluation perspective, F-060; `glicko2` 0.8 → 1.2 affects rating
+  maths) and three that failed CI (eslint 10, websockets 17). The owner chose to stop automatic
+  dependency PRs.
+- **Decision.** Delete `.github/dependabot.yml`; close the open Dependabot PRs; keep the repository's
+  Dependabot security updates off. Dependencies are upgraded by hand in a tested branch.
+- **What still protects the supply chain.** The `Dependency audit` check (F-057, F-090) still fails CI
+  on any high/critical npm advisory and any engine advisory; CodeQL still runs; Dependabot *alerts*
+  (notifications only) may be enabled in the repository settings.
+- **Deviation.** GIT-06 says Dependabot MUST be enabled. This ADR records the owner's decision to
+  deviate. To restore it, re-add the file from F-057 (`git show 6746d8b:.github/dependabot.yml`).

@@ -481,15 +481,14 @@ Ruff and pytest (Stockfish is faked). `Database (Supabase)` starts a local Supab
 every migration to an empty database (`supabase db reset`) and runs the pgTAP tests (`supabase test db`).
 
 ### 8a. Repository settings (one-time, owner)
-1. **Settings → Advanced Security**: enable **Dependency graph**, **Dependabot alerts**, **Dependabot security updates**, **Secret scanning** and **Push protection** (SEC-10, GIT-06).
+1. **Settings → Advanced Security**: enable **Dependency graph**, **Secret scanning** and **Push protection** (SEC-10). Leave **Dependabot security updates** off: automatic dependency PRs are disabled by decision F-095. **Dependabot alerts** may be on (they notify, they do not open PRs).
 2. **Code scanning → CodeQL analysis**: leave it on **Advanced** (the repo ships `.github/workflows/codeql.yml`). If "Default" setup is switched on, GitHub rejects the workflow's uploads.
 3. **Rulesets** for `main` and `preprod`: require `Server (Node)`, `Frontend (Next.js)`, `Chess engine (Python)`, `Database (Supabase)`, `Dependency audit`, `CodeQL (javascript-typescript)` and `CodeQL (python)`. Do not require `Schema drift (Supabase)` (it runs on a schedule).
-4. Create the labels `dependencies`, `server`, `frontend`, `chess-engine` and `ci` (Dependabot applies them to its PRs).
 
-Dependabot (`.github/dependabot.yml`) checks `server` and `frontend` (npm), `chess-engine` (pip) and the
-workflows (GitHub Actions) weekly and opens its PRs against `preprod`: minor and patch updates grouped,
-each major on its own. Dependabot *security* updates ignore that setting and target the default branch:
-retarget them to `preprod` before merging.
+**No automatic dependency PRs (F-095).** There is no `.github/dependabot.yml`: dependencies are upgraded
+by hand, in a branch with tests, when the `Dependency audit` check (below) fails or a feature needs a
+newer version. To see what is outdated: `npm outdated` in `server/` and `frontend/`, and
+`pip list --outdated` in the engine's venv.
 
 ### 8b. Dependency audit and approved exceptions (SEC-11)
 The `Dependency audit` check fails when:
