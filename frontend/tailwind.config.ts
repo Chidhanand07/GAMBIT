@@ -166,6 +166,7 @@ const config: Config = {
             },
             borderWidth: {
                 DEFAULT: '0.5px', // legacy
+                1: '1px',
                 1.5: '1.5px',
                 2: '2px',
                 3: '3px',

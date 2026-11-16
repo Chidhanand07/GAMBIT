@@ -18,7 +18,7 @@ something odd, the test asserts the odd behaviour and marks it with a
 | `sounds.test.ts` | `lib/sounds.ts` |
 | `KnightCanvas.test.tsx` | `components/ui/KnightBackground.tsx`, `components/ui/KnightIntro.tsx` (recorded canvas calls, digest snapshots) |
 | `AnalysisPage.test.tsx` | `app/analysis/page.tsx` |
-| `Navbar.test.tsx` | `components/Navbar.tsx` |
+| `AppHeader.test.tsx` | `features/navigation/components/AppHeaderContainer.tsx` (was `Navbar.test.tsx`, rewritten for the redesign) |
 | `OfflinePage.test.tsx` | `app/offline/page.tsx` |
 | `GameResultPage.test.tsx` | `app/game/[id]/result/page.tsx` |
 | `fakeSocket.ts` | shared fake socket and `jsonResponse` helper |

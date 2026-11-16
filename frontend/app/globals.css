@@ -302,7 +302,23 @@
   .gd { height: 1px; margin: 6px 4px; background: var(--color-line); }
 
   /* ── Nav pill (HANDOFF §4.2) ────────────────────────────────────────────────────────── */
+  /* Link widths and the pill's resting place (--px / --pw), per nav state. */
+  .gnav { --px: 0px; --pw: 104px; }
+  .gnav.gpos2, .gnav.gidle { --px: 104px; --pw: 156px; }
+  .gnav.gpos3 { --px: 260px; --pw: 128px; }
+  .gl1 { width: 104px; }
+  .gl2 { width: 156px; }
+  .gl3 { width: 128px; }
   .gpill {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    height: 44px;
+    width: var(--pw);
+    border-radius: var(--radius-pill);
+    background: var(--color-ink);
+    box-shadow: var(--shadow-nav-pill);
+    transform: translateX(var(--px));
     transition: transform var(--duration-520) var(--ease-spring-nav), width var(--duration-520) var(--ease-spring-nav);
     animation: gslide var(--duration-560) var(--ease-spring-nav) 80ms backwards;
   }

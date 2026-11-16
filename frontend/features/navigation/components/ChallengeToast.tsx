@@ -1,7 +1,7 @@
-import { X } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
 import { displayTimeControl } from '@/lib/chess/timeControl';
 import type { ChallengeRequestPayload } from '@/types/socket';
-import { accentHover } from '../hover';
 
 interface ChallengeToastProps {
     challenge: Pick<ChallengeRequestPayload, 'from_username' | 'time_control' | 'is_rated'>;
@@ -9,51 +9,42 @@ interface ChallengeToastProps {
     onDecline: () => void;
 }
 
-/** Challenge notification — top-right toast. */
+/**
+ * Incoming challenge, top right under the header. The mockups have no toast, so it borrows the
+ * header popover's surface (surface-header, line border, 20px radius, popover shadow).
+ */
 export function ChallengeToast({ challenge, onAccept, onDecline }: ChallengeToastProps) {
     return (
-        <div className="fixed top-[60px] right-4 z-[300] w-72 animate-in slide-in-from-top-2 fade-in duration-200">
-            <div
-                className="rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.6)] p-4"
-                style={{ background: 'var(--bg-elevated)', border: '0.5px solid var(--border-accent)' }}
-            >
-                <div className="flex items-start justify-between mb-3">
-                    <div>
-                        <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                            <span style={{ color: 'var(--accent)' }}>{challenge.from_username}</span> challenges you
-                        </div>
-                        <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                            {displayTimeControl(challenge.time_control)} · {challenge.is_rated ? 'Rated' : 'Casual'}
-                        </div>
-                    </div>
-                    <button
-                        onClick={onDecline}
-                        className="text-text-tertiary hover:text-text-secondary transition-colors -mt-0.5 -mr-0.5 p-1"
-                    >
-                        <X size={14} />
-                    </button>
+        <div
+            role="status"
+            aria-live="polite"
+            className="fixed right-4 top-[96px] z-[300] box-border flex w-[320px] max-w-[calc(100vw-32px)] flex-col gap-3 rounded-20 border-1 border-line bg-surface-header p-4 text-ink shadow-popover"
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-col">
+                    <span className="font-semibold">
+                        <span className="text-accent">{challenge.from_username}</span> challenges you
+                    </span>
+                    <span className="text-[13px] text-ink-muted">
+                        {displayTimeControl(challenge.time_control)} · {challenge.is_rated ? 'Rated' : 'Casual'}
+                    </span>
                 </div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={onAccept}
-                        className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
-                        style={{ background: 'var(--accent)', color: '#0F0D0B' }}
-                        {...accentHover}
-                    >
-                        Accept
-                    </button>
-                    <button
-                        onClick={onDecline}
-                        className="flex-1 py-2 rounded-lg text-sm transition-colors"
-                        style={{
-                            background: 'var(--bg-surface)',
-                            border: '0.5px solid var(--border)',
-                            color: 'var(--text-secondary)',
-                        }}
-                    >
-                        Decline
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    aria-label="Dismiss challenge"
+                    onClick={onDecline}
+                    className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-ink-muted"
+                >
+                    <Icon name="close" />
+                </button>
+            </div>
+            <div className="flex gap-2">
+                <Button size="md" className="flex-1" onClick={onAccept}>
+                    Accept
+                </Button>
+                <Button variant="outline" size="md" className="flex-1" onClick={onDecline}>
+                    Decline
+                </Button>
             </div>
         </div>
     );

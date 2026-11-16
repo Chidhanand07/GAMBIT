@@ -1,12 +1,13 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono, Noto_Sans_Symbols_2, Space_Grotesk } from 'next/font/google'
-import Navbar from '@/components/Navbar'
 import SocketProvider from '@/components/SocketProvider'
 import ProfileProvider from '@/components/ProfileProvider'
 import PresenceProvider from '@/components/PresenceProvider'
 import { ToastProvider } from '@/components/Toast'
 import IntroGate from '@/components/IntroGate'
+import PageBackground from '@/components/layout/PageBackground'
+import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
 
 // Redesign typography (design/HANDOFF.md §2): each family is exposed as a CSS variable that
 // app/globals.css and tailwind.config.ts read (font-sans, font-display, font-mono, font-symbols).
@@ -59,10 +60,14 @@ export default function RootLayout({
                         <PresenceProvider>
                             <SocketProvider>
                                 <IntroGate>
-                                    <Navbar />
-                                    <main className="flex-1 w-full bg-page">
-                                        {children}
-                                    </main>
+                                    {/* Every mockup (signed in or not) sits on the same root, so it is
+                                        mounted once here and the hover trail survives navigation. */}
+                                    <PageBackground>
+                                        <AppHeaderContainer />
+                                        <main className="flex-1 w-full">
+                                            {children}
+                                        </main>
+                                    </PageBackground>
                                 </IntroGate>
                             </SocketProvider>
                         </PresenceProvider>
