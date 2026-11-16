@@ -2,6 +2,419 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * GAMBIT redesign tokens (design/HANDOFF.md §2). This block is the single source:
+ * tailwind.config.ts reads these variables, and components use the Tailwind names.
+ * Values are copied exactly from design/*.dc.html; do not round them.
+ */
+@layer base {
+  :root {
+    /* Colour — page and surfaces */
+    --color-bg-deep:          #0C1813;
+    --color-bg-base:          #0F1E18;
+    --color-bg-gradient-top:  #14291F;
+    --color-surface:          #183026;
+    --color-surface-header:   #12241D;
+    --color-surface-raised:   #1F4433;
+    --color-surface-inset:    #0B1512;
+    --color-scrim:            rgba(6,12,9,0.74);
+    --color-splash-center:    #1B3A2B;
+    --color-splash-skip:      rgba(15,30,24,0.8);
+
+    /* Colour — lines */
+    --color-line:             #30493D;
+    --color-line-subtle:      #22332B;
+    --color-line-strong:      #3A6A52;
+    --color-line-muted:       #7FA08D;
+    --color-line-row:         #263D32;
+    --color-line-field:       #5A7365;
+
+    /* Colour — accent and ink */
+    --color-accent:           #EFBF5B;
+    --color-ink:              #F6F0E0;
+    --color-ink-muted:        #B7C2B3;
+    --color-ink-faint:        #7C8E83;
+    --color-ink-disabled:     #5A7365;
+    --color-ink-placeholder:  #7F9387;
+    --color-ink-bright:       #FFFFFF;
+    --color-on-accent:        #10140F;
+    --color-on-accent-muted:  rgba(16,20,15,0.8);
+
+    /* Colour — status */
+    --color-success:          #5BD69A;
+    --color-success-ink:      #A8EBC2;
+    --color-success-bg:       #1C4A35;
+    --color-danger:           #FF9A8A;
+    --color-danger-line:      #6B3A34;
+    --color-danger-bg:        #4A2320;
+    --color-danger-zone-line: #6B2E2A;
+    --color-danger-zone-bg:   #2A1715;
+
+    /* Colour — board (Maple is the default theme) */
+    --color-board-light:        #F0D9B5;
+    --color-board-dark:         #B58863;
+    --color-board-frame:        #3A2A1C;
+    --color-board-green-light:  #EEEED2;
+    --color-board-green-dark:   #769656;
+    --color-board-slate-light:  #DEE3E6;
+    --color-board-slate-dark:   #8CA2AD;
+    --color-board-walnut-light: #D9B99B;
+    --color-board-walnut-dark:  #7A5230;
+    --color-board-hero-last-light: #E8D08A;
+    --color-board-hero-last-dark:  #C9A24B;
+
+    /* Colour — board marks (Game.dc.html, Settings.dc.html) */
+    --color-mark-last:        rgba(255,225,80,0.45);
+    --color-mark-check:       rgba(255,90,70,0.6);
+    --color-mark-selected:    rgba(239,191,91,0.7);
+    --color-mark-capture:     rgba(220,80,60,0.5);
+    --color-mark-dot:         rgba(16,20,15,0.35);
+    --color-mark-preview-dot: rgba(20,60,35,0.5);
+    --color-mark-preview-hint: rgba(110,200,120,0.5);
+
+    /* Colour — pieces (pieceImg() in Main.dc.html) */
+    --color-piece-white-fill:   #F6F0E0;
+    --color-piece-white-line:   #2A211C;
+    --color-piece-white-detail: #2A211C;
+    --color-piece-black-fill:   #2A211C;
+    --color-piece-black-line:   #0E0A08;
+    --color-piece-black-detail: #CFC4A8;
+    --color-piece-glyph-white:  #FFF9EC;
+    --color-piece-glyph-black:  #1B1512;
+    --color-piece-glyph-neo:    #5A3A1E;
+
+    /* Typography (next/font sets the --font-* family variables on <html>) */
+    --font-family-sans:    var(--font-inter), Inter, system-ui, sans-serif;
+    --font-family-display: var(--font-space-grotesk), var(--font-inter), Inter, sans-serif;
+    --font-family-mono:    var(--font-jetbrains-mono), ui-monospace, monospace;
+    --font-family-symbols: var(--font-noto-symbols-2), serif;
+    --font-size-body:      15px;
+    --line-height-body:    1.5;
+
+    /* Radius */
+    --radius-3:    3px;
+    --radius-4:    4px;
+    --radius-10:   10px;
+    --radius-12:   12px;
+    --radius-14:   14px;
+    --radius-16:   16px;
+    --radius-20:   20px;
+    --radius-24:   24px;
+    --radius-28:   28px;
+    --radius-pill: 999px;
+
+    /* Shadow */
+    --shadow-header:         0 12px 32px rgba(0,0,0,0.28);
+    --shadow-popover:        0 18px 44px rgba(0,0,0,0.5);
+    --shadow-tile-hover:     0 18px 36px rgba(0,0,0,.4), 0 0 0 1px rgba(239,191,91,.5);
+    --shadow-nav-pill:       0 6px 22px rgba(239,191,91,0.38);
+    --shadow-dialog:         0 24px 64px rgba(0,0,0,0.6);
+    --shadow-auth-card:      0 24px 60px rgba(0,0,0,0.45);
+    --shadow-board-hero:     0 24px 60px rgba(0,0,0,0.5);
+    --shadow-board-analysis: 0 16px 40px rgba(0,0,0,0.4);
+    --shadow-board-preview:  0 0 0 4px var(--color-board-frame);
+    --shadow-focus-ring:     0 0 0 3px rgba(239,191,91,0.28);
+    --shadow-turn-dot:       0 0 0 4px rgba(239,191,91,0.12);
+    --shadow-avatar-ring:    0 0 0 4px var(--color-bg-base), 0 0 0 6px var(--color-accent);
+    --shadow-trail-active:   0 0 32px rgba(239,191,91,0.3);
+    --shadow-trail-hot:      inset 0 0 0 1px rgba(239,191,91,0.5), 0 0 32px rgba(239,191,91,0.35);
+    --shadow-trail-trace:    inset 0 0 0 1px rgba(239,191,91,0.4), 0 0 28px rgba(239,191,91,0.28);
+    --shadow-splash-particle: 0 0 8px rgba(239,191,91,.8);
+    --drop-shadow-piece:     0 1px 1px rgba(0,0,0,0.35);
+
+    /* Motion */
+    --ease-spring:          cubic-bezier(.34,1.56,.64,1);
+    --ease-spring-nav:      cubic-bezier(0.34,1.45,0.64,1);
+    --ease-piece:           cubic-bezier(.3,.7,.3,1);
+    --ease-splash:          cubic-bezier(.2,.8,.2,1);
+    --ease-splash-particle: cubic-bezier(.5,0,.2,1);
+    --duration-70:   70ms;
+    --duration-200:  200ms;
+    --duration-220:  220ms;
+    --duration-260:  260ms;
+    --duration-300:  300ms;
+    --duration-360:  360ms;
+    --duration-400:  400ms;
+    --duration-420:  420ms;
+    --duration-500:  500ms;
+    --duration-520:  520ms;
+    --duration-560:  560ms;
+    --duration-700:  700ms;
+    --duration-900:  900ms;
+    --duration-1100: 1100ms;
+    --duration-2100: 2100ms;
+    --duration-2400: 2400ms;
+
+    /* Page background (HANDOFF §2 "Page background"; exact string from Main.dc.html) */
+    --page-background-image: conic-gradient(rgba(255,244,214,0.032) 25%, rgba(255,244,214,0) 0 50%, rgba(255,244,214,0.032) 0 75%, rgba(255,244,214,0) 0), radial-gradient(900px 620px at 10% 0%, rgba(239,191,91,0.13), rgba(239,191,91,0) 70%), radial-gradient(1100px 760px at 100% 35%, rgba(52,138,98,0.30), rgba(52,138,98,0) 70%), linear-gradient(180deg, #14291F 0%, #0C1813 100%);
+    --page-background-size: 160px 160px, auto, auto, auto;
+    --page-background-repeat: repeat, no-repeat, no-repeat, no-repeat;
+    --splash-background-image: radial-gradient(900px 620px at 50% 45%,#1B3A2B 0%,#0C1813 70%);
+    --profile-hero-background-image: linear-gradient(135deg, #1F4433, #183026 60%);
+
+    /* Hover trail (HANDOFF §4.1) */
+    --trail-cell: 80px;
+  }
+}
+
+/*
+ * Redesign component rules, ported from the <style> blocks of design/*.dc.html with the
+ * mockups' class names. Hover/focus/keyframe rules live here because they need pseudo-classes.
+ */
+@layer components {
+  /* ── Page root (PageBackground) ─────────────────────────────────────────────────────── */
+  .g-page {
+    position: relative;
+    isolation: isolate;
+    overflow: clip;
+    min-height: 100vh;
+    background-color: var(--color-bg-base);
+    background-image: var(--page-background-image);
+    background-size: var(--page-background-size);
+    background-repeat: var(--page-background-repeat);
+    color: var(--color-ink);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Hover trail (HANDOFF §4.1) ─────────────────────────────────────────────────────── */
+  .g-trail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: -1;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, var(--trail-cell));
+    grid-auto-rows: var(--trail-cell);
+  }
+  .tc {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-10);
+    font-family: var(--font-family-symbols);
+    font-size: 40px;
+    line-height: 1;
+    transition: background-color var(--duration-2400) ease, box-shadow var(--duration-2400) ease, transform var(--duration-2400) ease;
+  }
+  .tc::after { opacity: 0; color: var(--color-accent); transition: opacity var(--duration-2400) ease, transform var(--duration-2400) ease; }
+  .tc:nth-child(7n+4)::after { content: "\265E\FE0E"; }
+  .tc:nth-child(11n+8)::after { content: "\265D\FE0E"; }
+  .tc:nth-child(17n+12)::after { content: "\265C\FE0E"; }
+  .tc:nth-child(29n+19)::after { content: "\265B\FE0E"; }
+  .tc:nth-child(41n+25)::after { content: "\265A\FE0E"; }
+  .tc:hover { background-color: rgba(239,191,91,0.2); box-shadow: var(--shadow-trail-hot); transform: scale(1.06); transition-duration: 0s; }
+  .tc:hover::after { opacity: 0.9; transform: scale(1.1) rotate(-6deg); transition-duration: 0s; }
+  .tc:hover + .tc, .tc:has(+ .tc:hover) { background-color: rgba(239,191,91,0.09); transition-duration: 0.2s; }
+  .tc.hot { background-color: rgba(239,191,91,0.2); box-shadow: var(--shadow-trail-hot); transform: scale(1.06); transition-duration: 0s; }
+  .tc.hot::after { opacity: 0.9; transform: scale(1.1) rotate(-6deg); transition-duration: 0s; }
+  .tc.warm { background-color: rgba(239,191,91,0.09); transition-duration: 0.2s; }
+  /* Active cell under the pointer (the `hl` span in Main.dc.html). */
+  .ghl {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--trail-cell);
+    height: var(--trail-cell);
+    box-sizing: border-box;
+    border-radius: var(--radius-10);
+    pointer-events: none;
+    z-index: -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-family-symbols);
+    font-size: 40px;
+    line-height: 1;
+    color: rgba(239,191,91,0.7);
+    background: rgba(239,191,91,0.10);
+    border: 1px solid rgba(239,191,91,0.45);
+    box-shadow: var(--shadow-trail-active);
+    opacity: 0;
+    transition: opacity var(--duration-500) ease;
+  }
+  .ghl.on { opacity: 1; }
+  .gtrace {
+    position: absolute;
+    width: var(--trail-cell);
+    height: var(--trail-cell);
+    box-sizing: border-box;
+    border-radius: var(--radius-10);
+    pointer-events: none;
+    z-index: -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-family-symbols);
+    font-size: 40px;
+    line-height: 1;
+    color: var(--color-accent);
+    background: rgba(239,191,91,0.16);
+    box-shadow: var(--shadow-trail-trace);
+    animation: gtrace var(--duration-2400) ease forwards;
+  }
+  @keyframes gtrace { 0% { opacity: 1; transform: scale(1.06); } 100% { opacity: 0; transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) {
+    .gtrace, .ghl { display: none; }
+    .tc, .tc::after { transition: none !important; }
+  }
+
+  /* ── Header popovers and menu items ─────────────────────────────────────────────────── */
+  .gp {
+    position: absolute;
+    top: 52px;
+    right: 0;
+    width: 248px;
+    box-sizing: border-box;
+    padding: 8px;
+    border-radius: var(--radius-20);
+    background: var(--color-surface-header);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-popover);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .gi {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    border-radius: var(--radius-12);
+    border: none;
+    background: transparent;
+    color: var(--color-ink);
+    font-size: 15px;
+    font-weight: 500;
+    text-align: left;
+    text-decoration: none;
+  }
+  .gi:hover, .gi:focus-visible { background: var(--color-surface-raised) !important; }
+  .gd { height: 1px; margin: 6px 4px; background: var(--color-line); }
+
+  /* ── Nav pill (HANDOFF §4.2) ────────────────────────────────────────────────────────── */
+  .gpill {
+    transition: transform var(--duration-520) var(--ease-spring-nav), width var(--duration-520) var(--ease-spring-nav);
+    animation: gslide var(--duration-560) var(--ease-spring-nav) 80ms backwards;
+  }
+  @keyframes gslide { from { transform: translateX(0px); width: 104px; } to { transform: translateX(var(--px)); width: var(--pw); } }
+  .gl svg { transition: transform var(--duration-360) var(--ease-spring); }
+  .gl:hover svg, .gl:focus-visible svg { transform: translateY(-1px) scale(1.18) rotate(-8deg); }
+  .gnav:hover .gcur, .gnav:has(.gl:focus-visible) .gcur { color: var(--color-ink) !important; }
+  .gnav .gl:hover, .gnav .gl:focus-visible { color: var(--color-on-accent) !important; }
+  .gnav:has(.gl1:hover) .gpill, .gnav:has(.gl1:focus-visible) .gpill { transform: translateX(0px) !important; width: 104px !important; }
+  .gnav:has(.gl2:hover) .gpill, .gnav:has(.gl2:focus-visible) .gpill { transform: translateX(104px) !important; width: 156px !important; }
+  .gnav:has(.gl3:hover) .gpill, .gnav:has(.gl3:focus-visible) .gpill { transform: translateX(260px) !important; width: 128px !important; }
+  /* No current page in the pill (Profile, Settings): hidden until a link is hovered or focused. */
+  .gidle .gpill {
+    opacity: 0;
+    animation: none;
+    transition: transform var(--duration-520) var(--ease-spring-nav), width var(--duration-520) var(--ease-spring-nav), opacity var(--duration-220) ease;
+  }
+  .gidle:has(.gl:hover) .gpill, .gidle:has(.gl:focus-visible) .gpill { opacity: 1; }
+  /* Landing and auth screens: hidden until the nav is hovered. */
+  .gnav.gnone .gpill {
+    opacity: 0;
+    animation: none;
+    transition: opacity var(--duration-200) ease, transform var(--duration-520) var(--ease-spring-nav), width var(--duration-520) var(--ease-spring-nav);
+  }
+  .gnav.gnone:hover .gpill { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .gpill, .gl svg { transition: none !important; animation: none !important; }
+  }
+
+  /* ── Tiles, buttons, cards, fields ──────────────────────────────────────────────────── */
+  .tile { transition: transform var(--duration-260) var(--ease-spring), box-shadow var(--duration-260) ease, border-color var(--duration-200) ease; }
+  .tile:hover { transform: translateY(-6px); box-shadow: var(--shadow-tile-hover); border-color: var(--color-accent) !important; }
+  .tile:active { transform: translateY(-2px) scale(.99); }
+  .tile svg { transition: transform var(--duration-360) var(--ease-spring); }
+  .tile:hover svg { transform: scale(1.18) rotate(-8deg); }
+  .tile .tn { display: inline-block; transition: transform var(--duration-300) var(--ease-spring); }
+  .tile:hover .tn { transform: scale(1.08); transform-origin: left bottom; }
+  .gb { transition: filter var(--duration-200) ease, transform var(--duration-200) ease; }
+  .gb:hover { filter: brightness(1.08); transform: translateY(-2px); }
+  /* Landing/auth primary button (.gb in Home, Signin, Signup): brightness only, no lift. */
+  .gb-flat:hover { filter: brightness(1.08); }
+  .fc { transition: transform var(--duration-260) ease, border-color var(--duration-260) ease; }
+  .fc:hover { transform: translateY(-4px); border-color: var(--color-accent) !important; }
+  .fi {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 52px;
+    padding: 0 16px;
+    border-radius: var(--radius-14);
+    border: 1px solid var(--color-line-field);
+    background: var(--color-bg-base);
+    color: var(--color-ink);
+    font: inherit;
+    font-size: 16px;
+  }
+  .fi::placeholder { color: var(--color-ink-placeholder); }
+  .fi:focus { outline: none; border-color: var(--color-accent); box-shadow: var(--shadow-focus-ring); }
+  .gg { transition: transform var(--duration-200) ease, border-color var(--duration-200) ease, background-color var(--duration-200) ease; }
+  .gg:hover { background: var(--color-surface-raised) !important; border-color: var(--color-accent) !important; transform: translateY(-1px); }
+  @media (prefers-reduced-motion: reduce) {
+    .tile, .tile svg, .tile .tn, .gb { transition: none !important; }
+    .tile:hover, .gb:hover { transform: none !important; }
+  }
+
+  /* ── Intro splash (HANDOFF §4.3, Home.dc.html) ──────────────────────────────────────── */
+  .gsplash {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--splash-background-image);
+    animation: gsout var(--duration-700) ease 4.9s forwards;
+  }
+  @keyframes gsout { to { opacity: 0; visibility: hidden; } }
+  .gsp {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--s);
+    height: var(--s);
+    margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+    border-radius: 50%;
+    background: var(--color-accent);
+    opacity: 0;
+    box-shadow: var(--shadow-splash-particle);
+    animation: gspc var(--duration-2100) var(--ease-splash-particle) var(--d) forwards;
+  }
+  @keyframes gspc { 0% { transform: translate(var(--x), var(--y)); opacity: 0; } 15% { opacity: .95; } 85% { opacity: .9; } 100% { transform: translate(0, 0); opacity: 0; } }
+  .gsk { opacity: 0; transform: scale(.86); animation: gsk var(--duration-900) var(--ease-splash) 1.9s forwards; }
+  @keyframes gsk { to { opacity: 1; transform: scale(1); } }
+  .gsw { opacity: 0; letter-spacing: .7em; animation: gsw var(--duration-1100) var(--ease-splash) 2.6s forwards; }
+  @keyframes gsw { to { opacity: 1; letter-spacing: .3em; } }
+  .gst { opacity: 0; animation: gst var(--duration-700) ease 3.5s forwards; }
+  @keyframes gst { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .gsplash { display: none; }
+  }
+
+  /* ── Board (components/chess/Board.tsx) ─────────────────────────────────────────────── */
+  .g-piece-slot { transition: left var(--duration-420) var(--ease-piece), top var(--duration-420) var(--ease-piece); }
+  .g-piece-slot.g-instant { transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .g-piece-slot { transition: none !important; }
+  }
+}
+
+/* Legacy tokens: kept until each page moves to the redesign (HANDOFF §8 step 4). */
 @layer base {
   :root {
     /* Surfaces */
@@ -66,16 +479,23 @@
   }
 
   body {
-    background-color: var(--bg-page);
-    color: var(--text-primary);
-    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    line-height: 1.6;
+    background-color: var(--color-bg-base);
+    color: var(--color-ink);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-body);
+    line-height: var(--line-height-body);
+    -webkit-font-smoothing: antialiased;
     display: flex;
     flex-direction: column;
     min-height: 100vh;
     overflow-x: hidden;
     width: 100%;
   }
+
+  /* Shared element rules from every mockup's <style> block. */
+  button { font: inherit; cursor: pointer; }
+  a { color: var(--color-ink); }
+  a:hover { color: var(--color-ink-bright); }
 
   h1, h2, h3, h4, h5, h6 {
     font-weight: 500;
