@@ -113,6 +113,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 | [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
 | [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
+| [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2804,4 +2805,33 @@ guard reads the env files and fails closed (SEC-08, NODE-16).**
 - **Tests.** `scripts/test-db/env.test.js` (`node --test`, in the Server job's script self-tests):
   refuses missing files, a missing DB URL, the production URL in any spelling, a production key, a DB URL
   naming the production ref, mismatched projects and an unknown production URL; never prints a secret.
+
+## F-098
+
+**The TEST project is seeded through the Supabase admin API with fixed ids and ON CONFLICT DO NOTHING;
+the harness's live game is a real private-invite game played on a local game server.**
+
+- **Seed (`scripts/test-db/seed.js`, data in `seed-data.js`).** Six accounts (`parity_white`,
+  `parity_black`, `parity_viewer`, `parity_rival_1..3`) on the RFC 2606 domain `gambit-parity.test`, with
+  passwords from `crypto.randomBytes(24)` stored only in the git-ignored `frontend/e2e/.auth/accounts.json`
+  (mode 600). Users are created with `auth.admin.createUser` (email confirmed) or, when they exist, get
+  their password reset to the stored one, so CI (fresh file each run) and local runs both work. Profiles
+  (ratings 1199-1611, counters computed from the seeded games), ten completed rated games with real
+  chess.js move rows, PGN and final FEN, friendships (accepted and pending) and notifications (read and
+  unread) use fixed `7a1e…` UUIDs or natural keys and `upsert(..., { ignoreDuplicates: true })`.
+  Re-running changes nothing, and nothing needs UPDATE (service_role has none on `profiles`,
+  migration 20261114200000). `rated_at` is set so the rating worker never re-rates seeded games.
+- **Why the private-invite flow for the live game.** Matchmaking pairs whoever is queued, so a parallel
+  player could be paired instead; an invite is addressed by token. White creates a rated 3+0 game as
+  white with the lobby's own call (`POST /api/games/private/create`), black opens `/join/<token>` and
+  presses "Accept & Play" (the game server's join), then both play 1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5 by
+  clicking squares: the mockup's position, so only clocks, names and ratings need masks. After the
+  capture black resigns, so each width starts from no active game.
+- **Stack (`scripts/test-db/stack.js`).** A throwaway `redis-server` (port 6390, no persistence) and
+  `server/server.js` on port 3202 with `server/.env.test` on top of the environment, CORS for the
+  harness's web port, run from an empty temp directory so dotenv never loads the production
+  `server/.env`. Playwright starts it as a webServer only when the guard (F-097) accepts the env files.
+- **Tests.** `seed-data.test.js` (counters agree with games, winner matches result, mating lines are
+  wins for the mating side, UUIDs unique and valid, reserved domain), `stack.test.js` (test values and
+  local ports override the inherited environment).
 
