@@ -12,6 +12,8 @@ import AppHeaderContainer from '@/features/navigation/components/AppHeaderContai
 import ChallengeListener from '@/features/navigation/components/ChallengeListener'
 import { siteOrigin } from '@/lib/siteUrl'
 
+import SecondFactorGate from '@/features/auth/components/SecondFactorGate'
+
 // Redesign typography (design/HANDOFF.md §2): each family is exposed as a CSS variable that
 // app/globals.css and tailwind.config.ts read (font-sans, font-display, font-mono, font-symbols).
 const inter = Inter({
@@ -76,6 +78,7 @@ export default function RootLayout({
                                     <PageBackground>
                                         <AppHeaderContainer />
                                         <ChallengeListener />
+                                        <SecondFactorGate />
                                         <main className="flex-1 w-full">
                                             {children}
                                         </main>

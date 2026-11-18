@@ -8,6 +8,7 @@ import { useLogin } from '../hooks/useLogin';
 import { AuthAlert, AuthCard, AuthFooter, AuthRule } from './AuthCard';
 import { AuthField, ShowPasswordToggle } from './AuthField';
 import { GoogleSignInButton, OrDivider } from './GoogleSignInButton';
+import { SecondFactorForm } from './SecondFactorForm';
 
 const FORGOT_LINK = 'flex min-h-[44px] items-center text-[14px] font-semibold text-accent underline hover:text-accent';
 
@@ -15,6 +16,7 @@ const FORGOT_LINK = 'flex min-h-[44px] items-center text-[14px] font-semibold te
 export function LoginForm() {
     const login = useLogin();
     const [shown, setShown] = useState(false);
+    if (login.secondFactor.active) return <SecondFactorForm step={login.secondFactor} />;
     return (
         <AuthCard title="Welcome back" subtitle="Sign in to pick up your games">
             {login.error && <AuthAlert>{login.error}</AuthAlert>}

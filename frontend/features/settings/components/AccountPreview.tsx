@@ -7,16 +7,28 @@ interface Props {
     email: string | null;
     /** "Email me on new sign-ins" in the draft. */
     signInEmails: boolean;
+    /** Two-factor is on (a verified TOTP factor). */
+    twoFactor: boolean;
 }
 
 /** The sign-in screen as this account sees it. */
-export function AccountPreview({ email, signInEmails }: Props) {
+export function AccountPreview({ email, signInEmails, twoFactor }: Props) {
     return (
         <PreviewCard>
             <div className="flex flex-col gap-2">
                 <span className="text-[13px] text-ink-muted">Sign-in screen</span>
                 <span className={`${WELL} text-[14px] [overflow-wrap:anywhere]`}>{email ?? 'Email not available'}</span>
                 <span className={`${WELL} tracking-[0.2em]`}>••••••••</span>
+                {twoFactor && (
+                    <div className="flex gap-[6px]">
+                        <span className="flex min-h-[44px] flex-1 items-center justify-center rounded-10 border-1.5 border-accent bg-surface-raised font-mono font-bold">
+                            6-digit code
+                        </span>
+                    </div>
+                )}
+                <span className={cn('text-[13px] font-semibold', twoFactor ? 'text-success' : 'text-ink-muted')}>
+                    {twoFactor ? 'Two-factor is on' : 'Two-factor is off'}
+                </span>
                 <span className={cn('text-[13px] font-semibold', signInEmails ? 'text-success' : 'text-ink-muted')}>
                     {signInEmails ? 'New sign-in emails on' : 'New sign-in emails off'}
                 </span>

@@ -7,6 +7,7 @@ import { safeRedirectPath } from '@/lib/safeRedirect';
 import { startGoogleSignIn } from '../googleSignIn';
 import { signInWithIdentifier } from '../login';
 import { loginErrorMessage } from '../loginErrors';
+import { useSecondFactorStep, type SecondFactorStep } from './useSecondFactorStep';
 
 export interface LoginState {
     /** An e-mail or a username (Signin.dc.html "Email or username"). */
@@ -18,6 +19,8 @@ export interface LoginState {
     onPassword: (value: string) => void;
     onSubmit: (e: FormEvent) => Promise<void>;
     onGoogle: () => void;
+    /** The authentication-code step, when two-factor is on (ADR F-144). */
+    secondFactor: SecondFactorStep;
 }
 
 /** Email-or-username/password sign-in (server-side, F-101), Google OAuth and `?error=`/`?redirect=`. */
@@ -31,6 +34,16 @@ export function useLogin(): LoginState {
     // F17: an error sent back by the OAuth callback (?error=) is shown, not silently dropped.
     const [error, setError] = useState<string | null>(() => loginErrorMessage(searchParams.get('error')));
     const [loading, setLoading] = useState(false);
+    const proceed = () => {
+        // The session cookies came back on the response; the header and socket pick them up here.
+        refetchProfile();
+        // S6: only a path on this site is followed; anything else goes to /lobby.
+        router.push(safeRedirectPath(searchParams.get('redirect')));
+        router.refresh();
+    };
+    // Read once: the URL clean-up below drops `?mfa=1` from the address bar.
+    const [resumeSecondFactor] = useState(() => searchParams.get('mfa') === '1');
+    const secondFactor = useSecondFactorStep(proceed, resumeSecondFactor);
 
     useEffect(() => {
         if (typeof window !== 'undefined' && window.location.search) {
@@ -66,14 +79,14 @@ export function useLogin(): LoginState {
             setLoading(false);
             return;
         }
-        // The session cookies came back on the response; the header and socket pick them up here.
-        refetchProfile();
-        // S6: only a path on this site is followed; anything else goes to /lobby.
-        router.push(safeRedirectPath(searchParams.get('redirect')));
-        router.refresh();
+        if (await secondFactor.check()) {
+            setLoading(false);
+            return;
+        }
+        proceed();
     };
 
     const onGoogle = () => void startGoogleSignIn(setError);
 
-    return { identifier, password, error, loading, onIdentifier, onPassword, onSubmit, onGoogle };
+    return { identifier, password, error, loading, onIdentifier, onPassword, onSubmit, onGoogle, secondFactor };
 }

@@ -136,3 +136,13 @@ describe('GET /auth/confirm', () => {
         expect(res.headers.get('location')).toBe('http://localhost/lobby?email=confirmed')
     })
 })
+
+describe('POST /api/account/email with two-factor on (ADR F-144)', () => {
+    test('an AAL1 session cannot change the e-mail: 403 mfa_required, nothing mailed', async () => {
+        signInWithCookie(uid('me'))
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: uid('me'), aal: 'aal1' } }, error: null })
+        db.auth.getUser.mockResolvedValue({ data: { user: { id: uid('me'), email: 'me@example.com', factors: [{ status: 'verified' }] } }, error: null } as any)
+        expect(await json(await post({ email: 'new@example.com' }))).toEqual({ status: 403, body: { error: 'mfa_required' } })
+        expect(db.auth.updateUser).not.toHaveBeenCalled()
+    })
+})

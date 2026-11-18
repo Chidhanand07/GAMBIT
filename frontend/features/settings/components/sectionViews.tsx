@@ -154,6 +154,7 @@ export function accountView({ profile, state }: ViewProps): SectionView {
             <AccountPreview
                 email={state.account.emailChange.value.trim() || state.email}
                 signInEmails={state.accountDraft.draft.security.emailOnNewSignIn}
+                twoFactor={state.account.twoFactor.enabled}
             />
         ),
     };

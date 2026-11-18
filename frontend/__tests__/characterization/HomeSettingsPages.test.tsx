@@ -383,19 +383,20 @@ describe('settings page', () => {
     // `notification|privacy|sign-in emails` in the unbacked list): Notifications and Privacy are
     // stored on the server and enforced, so their tabs and rows are offered now. F-143 (was
     // `change email` in both lists): the Account e-mail is editable and changed through Supabase.
+    // F-144 (was `two-factor|2fa` in both lists): two-factor is real Supabase TOTP.
     test('[REDESIGN-INTEGRATION] only settings that work are offered: no unbacked account, gameplay or profile controls', () => {
         render(<SettingsPage />)
         const sections = within(screen.getByRole('group', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
         expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account'])
         // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
         // those are real profile columns now; everything else here still has no backing.
-        const unbacked = /two-factor|2fa|delete account|premove|takeback|move by|piece set|visib/i
+        const unbacked = /delete account|premove|takeback|move by|piece set|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]
             const names = controls.map(c => `${c.getAttribute('aria-label') ?? ''} ${c.textContent ?? ''} ${(c as HTMLInputElement).placeholder ?? ''}`)
             expect(names.filter(n => unbacked.test(n))).toEqual([])
-            expect(document.body.textContent).not.toMatch(/two-factor|delete account|premove|show my country|show rating history/i)
+            expect(document.body.textContent).not.toMatch(/delete account|premove|show my country|show rating history/i)
         }
     })
 

@@ -129,6 +129,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-141](#f-141) | What each Notifications / Privacy switch does, and where it is enforced | B3 | SETTINGS-PREFS |
 | [F-142](#f-142) | Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet | B3 | SETTINGS-PREFS |
 | [F-143](#f-143) | Change e-mail: `updateUser` on the session client, token-hash confirm route, strict rate limit | B3 | CHANGE-EMAIL |
+| [F-144](#f-144) | Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced on account changes and at sign-in | B3 | TWO-FACTOR |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3418,4 +3419,34 @@ rate limit that fails closed.** (Track B3, item 2; NX-07, SEC-09, NODE-12.)
     store in production; development without Upstash still works.
 - **Templates** and redirect URLs: DEPLOY.md §1b-2.
 - **When 2FA is on** the change additionally needs an AAL2 session (F-144).
+
+## F-144
+
+**Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced by the server on account changes
+and by the app at sign-in.** (Track B3, item 3; NX-07, NX-10, SEC-09.)
+
+- **Context.** Settings.dc.html: Account → "Two-factor authentication — Ask for a code when you sign
+  in", and a "6-digit code" box in the sign-in preview. Supabase Auth's MFA API (enrol, challenge,
+  verify, unenrol, assurance level) is a client API on the user's own session.
+- **Decision.**
+  - *Enrol* (`lib/mfa.ts`): `mfa.enroll({ factorType: 'totp', issuer: 'Gambit' })` → dialog with
+    the QR code (Supabase's SVG data URL) and the secret → `challengeAndVerify` with the code. An
+    abandoned enrolment is unenrolled on Cancel and any stale unverified factor is removed before a
+    new one. The switch shows the real factor state (it is not part of the Save draft).
+  - *Turn off*: always asks for a code first (proves the factor and raises the session to AAL2,
+    which Supabase requires to remove a verified factor), then `unenroll` and a session refresh.
+  - *Server*: `requireFreshUser()` (every account-changing route) now also reads the factors of the
+    user Supabase Auth returns; with a verified factor the token's `aal` claim must be `aal2`, else
+    403 `mfa_required`. Covered: profile edits, settings, change e-mail (F-143), delete account
+    (F-145).
+  - *Sign-in*: after `signInWithPassword` the login page checks
+    `getAuthenticatorAssuranceLevel()`; `aal1` → `aal2` shows a code step and only a verified code
+    continues. `SecondFactorGate` (layout) sends an AAL1 session with a factor (e.g. after Google)
+    from any page to `/login?mfa=1`. Both are optimistic, like the proxy (NX-09).
+- **Residual risk (accepted, revisit).** Read-only route handlers use `requireUser()` (verified
+  claims, no network call) and do not look at factors, so a stolen password alone could read the
+  data those routes return until AAL2 is required everywhere. Doing that per request needs either a
+  `getUser()` round trip or a Custom Access Token Hook that adds a "has verified factor" claim; the
+  hook is the planned follow-up (DEPLOY.md would gain one dashboard step).
+- **Operations.** MFA (TOTP) must be enabled in the Supabase project: DEPLOY.md §1b-3.
 

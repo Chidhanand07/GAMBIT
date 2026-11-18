@@ -124,6 +124,22 @@ link(s) and changes nothing until they are followed. Configure, in **Authenticat
    requests per user per hour (`changeEmail`, Upstash), and refuses the request (503) when the
    limiter's store is unavailable or, in production, not configured (fail closed).
 
+### 1b-3. Two-factor authentication (TOTP)
+
+Settings → Account → "Two-factor authentication" uses Supabase Auth MFA with TOTP factors
+(ADR F-144). In **Authentication → Multi-Factor**: enable **TOTP (App Authenticator)** — both
+*enroll* and *verify* (on by default on new projects; if it is off, turning two-factor on in the app
+fails with "Two-factor authentication could not be changed"). Nothing else is needed: factors live in
+Supabase's `auth` schema.
+
+What the app enforces once a user has a verified factor:
+- sign-in: after the password (or Google), the code is asked before any page opens (`/login`
+  second step; other pages send an unfinished sign-in back there);
+- account changes (`PATCH /api/profile/me`, `PATCH /api/settings`, `POST /api/account/email`,
+  `POST /api/account/delete`) need an AAL2 session, else 403 `mfa_required`;
+- turning two-factor off needs a fresh code (Supabase itself refuses to remove a verified factor
+  from an AAL1 session).
+
 ### 1c. Storage bucket for avatars
 The settings page uploads avatars from the browser to a Storage bucket named `avatars`. No migration
 creates it: create a **public** bucket `avatars` in **Storage**, with a policy that lets signed-in

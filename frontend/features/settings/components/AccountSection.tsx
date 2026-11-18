@@ -3,7 +3,9 @@ import type { SettingsPageState } from '../hooks/useSettingsPage';
 import type { SettingsProfile } from '../types';
 import { EmailField } from './EmailField';
 import { SaveBar } from './SettingsCard';
-import { AccountSettingRow } from './SettingRow';
+import { Switch } from '@/components/ui/Switch';
+import { AccountSettingRow, RowShell } from './SettingRow';
+import { TwoFactorDialog } from './TwoFactorDialog';
 import { FIELD, READONLY_INPUT } from './styles';
 
 const DEFAULT_RATING = 1200;
@@ -46,8 +48,17 @@ export function AccountSection({ profile, state }: { profile: SettingsProfile; s
             <EmailField email={account.emailChange} link={account.emailLink} />
             <Ratings profile={profile} />
             <div>
+                <RowShell label="Two-factor authentication" hint="Ask for a code when you sign in.">
+                    <Switch
+                        label="Two-factor authentication"
+                        checked={account.twoFactor.enabled}
+                        disabled={!account.twoFactor.known}
+                        onChange={account.twoFactor.toggle}
+                    />
+                </RowShell>
                 <AccountSettingRow row={SIGN_IN_EMAIL_ROW} prefs={accountDraft.draft} onChange={state.setAccountPref} />
             </div>
+            <TwoFactorDialog tf={account.twoFactor} />
             <SaveBar
                 onSave={() => void account.save()}
                 onReset={state.resetAll}
