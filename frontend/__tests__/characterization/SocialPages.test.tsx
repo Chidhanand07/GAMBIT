@@ -259,12 +259,16 @@ describe('leaderboard', () => {
         username, display_name: null, avatar_url: null, rating_rapid: rating, rating_bullet: rating - 100,
         games_played: 10, wins: 4, ...extra,
     })
+    // Redesign (Leaderboard.dc.html): the table is an ARIA grid of role="row" divs; the podium a "Top three" group.
+    const dataRows = () => screen.getAllByRole('row').slice(1)
+    const podium = () => screen.queryByRole('group', { name: 'Top three' })
 
     test('skeleton while loading, then empty state', async () => {
         let resolve!: (v: any) => void
         fetchMock.mockImplementation(() => new Promise(r => { resolve = r }))
-        const { container } = render(<LeaderboardPage />)
-        expect(container.querySelectorAll('.skeleton')).toHaveLength(8)
+        render(<LeaderboardPage />)
+        // was: 8 `.skeleton` blocks
+        expect(screen.getByRole('status', { name: 'Loading rankings' }).children).toHaveLength(8)
         await act(async () => resolve(jsonResponse([])))
         await flush()
         expect(fetchMock.mock.calls).toEqual([['/api/leaderboard?field=rating_rapid']])
@@ -274,32 +278,62 @@ describe('leaderboard', () => {
     test('podium order, table rows, stats; switching filter refetches', async () => {
         const players = [P('a', 1800, { display_name: 'Ace' }), P('b', 1700), P('c', 1600, { games_played: 0 }), P('d', 1500)]
         fetchMock.mockImplementation(async () => jsonResponse(players))
-        const { container } = render(<LeaderboardPage />)
+        render(<LeaderboardPage />)
         await flush()
-        const podium = container.querySelector('.grid.grid-cols-3.gap-3.mb-6')!
-        expect([...podium.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/profile/b', '/profile/a', '/profile/c'])
-        expect(within(podium as HTMLElement).getByText('#1')).toBeInTheDocument()
-        const rows = container.querySelectorAll('tbody tr')
+        expect([...podium()!.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/profile/b', '/profile/a', '/profile/c'])
+        expect(within(podium()!).getByText('#1')).toBeInTheDocument()
+        const rows = dataRows()
         expect(rows).toHaveLength(4)
         expect(rows[0].textContent).toBe('1AAce@a1800rapid1040%')
         expect(rows[2].textContent).toBe('3Cc@c1600rapid00%')
-        expect(screen.getByText('Total Players').previousSibling!.textContent).toBe('4')
-        expect(screen.getByText('Avg Rating').previousSibling!.textContent).toBe('1650')
+        expect(within(rows[0]).getByRole('link', { name: 'Ace' })).toHaveAttribute('href', '/profile/a')
+        expect(screen.getByText('Total players').previousSibling!.textContent).toBe('4')
+        expect(screen.getByText('Avg rating').previousSibling!.textContent).toBe('1650')
+        expect(screen.getByText('Online now').previousSibling!.textContent).toBe('1')
+        expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
         fireEvent.click(screen.getByRole('button', { name: 'Bullet' }))
         await flush()
         expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_bullet'])
-        expect(container.querySelectorAll('tbody tr')[0].textContent).toBe('1AAce@a1700bullet1040%')
+        expect(screen.getByRole('button', { name: 'Bullet' })).toHaveAttribute('aria-pressed', 'true')
+        expect(dataRows()[0].textContent).toBe('1AAce@a1700bullet1040%')
     })
 
     test('fewer than three players: no podium; non-ok response shows the empty state', async () => {
         fetchMock.mockImplementationOnce(async () => jsonResponse([P('solo', 1234.6, { avatar_url: 'http://img/s.png' })]))
-        const { container } = render(<LeaderboardPage />)
+        render(<LeaderboardPage />)
         await flush()
-        expect(container.querySelector('.grid.grid-cols-3.gap-3.mb-6')).toBeNull()
-        expect(container.querySelector('tbody img')).toHaveAttribute('src', 'http://img/s.png')
+        expect(podium()).toBeNull()
+        expect(dataRows()[0].querySelector('img')).toHaveAttribute('src', 'http://img/s.png')
         fetchMock.mockImplementationOnce(async () => jsonResponse(null, false))
         fireEvent.click(screen.getByRole('button', { name: 'Blitz' }))
         await flush()
         expect(screen.getByText('No ranked players yet')).toBeInTheDocument()
+    })
+
+    test('signed in: own row is marked "You" and the standing card shows rank, rating and record', async () => {
+        profile = { id: 'me', username: 'b', display_name: 'Bee', rating_rapid: 1700.2, games_played: 20, wins: 15 }
+        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800), P('b', 1700), P('c', 1600)]))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(within(dataRows()[1]).getByText('You')).toBeInTheDocument()
+        expect(within(dataRows()[0]).queryByText('You')).toBeNull()
+        expect(screen.getByText('Your standing')).toBeInTheDocument()
+        expect(screen.getByText('#2', { selector: 'span.font-display' })).toBeInTheDocument()
+        expect(screen.getByText('Bee · Rapid · 20 games · 75% wins')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Play a game' })).toHaveAttribute('href', '/lobby')
+    })
+
+    test('signed in but outside the returned board: rank shows a dash; guests get no standing card', async () => {
+        profile = { id: 'me', username: 'zed', display_name: null, rating_rapid: 900, games_played: 0, wins: 0 }
+        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+        const { unmount } = render(<LeaderboardPage />)
+        await flush()
+        expect(screen.getByText('—')).toBeInTheDocument()
+        expect(screen.getByText('zed · Rapid · 0 games · 0% wins')).toBeInTheDocument()
+        unmount()
+        profile = null
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.queryByText('Your standing')).toBeNull()
     })
 })
