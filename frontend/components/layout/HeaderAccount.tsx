@@ -54,7 +54,7 @@ export function HeaderAccount({ user, onlineCount, notifications, onSignOut, nav
                 ref={bellRef}
                 type="button"
                 aria-label="Notifications"
-                aria-haspopup="menu"
+                aria-haspopup="dialog"
                 aria-expanded={open === 'notifications'}
                 onClick={() => toggle('notifications')}
                 className={ROUND_BUTTON}

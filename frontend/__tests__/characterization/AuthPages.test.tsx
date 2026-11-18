@@ -3,6 +3,7 @@
  * app/auth/exchange/page.tsx, app/login/page.tsx, app/signup/page.tsx.
  * Black-box: render the default export, mock only next/* and the Supabase client.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const replace = jest.fn()
@@ -443,4 +444,15 @@ describe('signup', () => {
         }))
         expect(screen.getByText('Sign in').closest('a')).toHaveAttribute('href', '/login')
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('sign-in and sign-up have no axe violations', async () => {
+        const login = render(<LoginPage />)
+        await expectAccessible(login.container)
+        login.unmount()
+        const signup = render(<SignupPage />)
+        await flush()
+        await expectAccessible(signup.container)
+    }, AXE_TIMEOUT_MS)
 })

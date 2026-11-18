@@ -1,6 +1,7 @@
 /**
  * Characterization tests (fe-misc, PR 16 track) for app/page.tsx (landing) and app/settings/page.tsx.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -273,6 +274,15 @@ describe('settings page', () => {
         expect(dots).toHaveLength(2)
         for (const dot of dots) expect(dot).toHaveClass('bg-mark-preview-dot', 'h-[34%]', 'left-[33%]')
     })
+
+    test('[A4] every settings section has no axe violations', async () => {
+        const { container } = render(<SettingsProvider><SettingsPage /></SettingsProvider>)
+        await expectAccessible(container)
+        for (const section of ['Board & pieces', 'Gameplay', 'Account']) {
+            fireEvent.click(screen.getByRole('button', { name: section }))
+            await expectAccessible(container)
+        }
+    }, AXE_TIMEOUT_MS)
 
     test('Gameplay: auto-queen and resign confirmation drive the preview demo', () => {
         render(<SettingsPage />)

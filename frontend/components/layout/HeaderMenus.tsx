@@ -105,7 +105,7 @@ function NotificationBody({ notifications }: { notifications: HeaderNotification
         );
     if (items.length === 0) return <div className={cn(note, 'text-ink-muted')}>No notifications</div>;
     return (
-        <div className="flex max-h-[360px] flex-col gap-[2px] overflow-y-auto">
+        <div role="menu" aria-label="Notification list" className="flex max-h-[360px] flex-col gap-[2px] overflow-y-auto">
             {items.map((item) => (
                 <NotificationRow key={item.id} item={item} />
             ))}
@@ -123,7 +123,7 @@ interface NotificationsMenuProps extends MenuShellProps {
  */
 export function NotificationsMenu({ notifications, ...shell }: NotificationsMenuProps) {
     return (
-        <Popover label="Notifications" className="w-[320px] max-w-[calc(100vw-48px)]" {...shell}>
+        <Popover label="Notifications" role="dialog" className="w-[320px] max-w-[calc(100vw-48px)]" {...shell}>
             <div className="flex items-center justify-between gap-3 pb-2 pl-3 pr-1 pt-1">
                 <span className="font-display text-[17px] font-semibold">Notifications</span>
                 <button

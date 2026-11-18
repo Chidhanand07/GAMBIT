@@ -123,6 +123,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-103](#f-103) | Analysis engine readout rebuilt from the design's "Game info" rows; no Reset (the mockup has none) | v2 | A2-4 |
 | [F-104](#f-104) | Remaining chosen deviations follow the mockups: Mark all read, guest presence, Games row, friend status, preview marks, one Reset | v2 | A2-5 |
 | [F-105](#f-105) | Screens without a mockup are built from the mockups' components; the legacy theme is deleted | v2 | A3 |
+| [F-106](#f-106) | Accessibility at parity: focus ring, reduced motion, AA contrast fixes, notifications panel as a dialog, axe tests | v2 | A4 |
 
 ---
 
@@ -2571,3 +2572,41 @@ the Dependabot part of F-057).**
   that pointed at them (`page`, `elevated`, `hover`, `text-*`, `border-*`, `accent-hover`), the
   legacy `rounded-lg`, `shadow-board`, the 0.5px default border width and the `.btn-press` /
   `.toast-enter` utilities. A test fails if any of them comes back.
+
+## F-106
+
+**Accessibility at parity (A4).**
+
+- **Focus.** One rule in `globals.css` gives every control without its own focus style a 2px
+  solid accent outline (offset 2px; inside the square on the board) plus the design's
+  `--shadow-focus-ring` halo. The halo alone (gold at 28 %) is under 3:1 on the dark surfaces,
+  so the solid outline carries the contrast (accent ≥ 6.3:1 on every surface). Fields keep the
+  mockups' own focus (accent border + halo).
+- **Reduced motion.** A global `prefers-reduced-motion: reduce` rule stops every animation,
+  transition and smooth scroll; components also use `motion-safe:` for spinners, pulses and
+  transitions, and a test fails on an unguarded `animate-*` or `transition-[…]` class.
+- **Keyboard and names.** The notifications panel was `role="menu"` (as in the mockups) but
+  holds a heading, the "Mark all read" button and status / alert messages, which a menu may not
+  contain (axe `aria-required-children`). It is now a non-modal `role="dialog"` named
+  "Notifications" (the bell says `aria-haspopup="dialog"`), and the notifications themselves stay
+  a `role="menu"` list with arrow-key navigation. The settings avatar file input got a name.
+- **Contrast (WCAG AA), checked from the tokens** by `__tests__/a11y/contrast.test.ts` (jsdom
+  cannot measure rendered colour). Only pairs the mockups themselves fail were changed:
+
+  | Pair (mockup values) | Mockup | Now |
+  |---|---|---|
+  | `ink-faint` #7C8E83 on `surface` #183026 (chat empty line, move numbers, slider ticks) | 4.06:1 | #87998D, 4.68:1 (also 5.72:1 on `bg-base`) |
+  | coordinate `board-dark` #B58863 on `board-light` #F0D9B5 (maple) | 2.29:1 | `on-accent` #10140F, 13.55:1 / 5.90:1 on the dark square |
+  | coordinate on green squares | 2.84:1 | `on-accent`, 15.76:1 / 5.55:1 |
+  | coordinate on slate squares | 2.06:1 | `on-accent`, 14.38:1 / 6.99:1 |
+  | coordinate on walnut squares | 3.69:1 | `on-accent` on light 10.06:1, `ink` on dark 6.00:1 |
+
+  Everything else the screens use passes as designed (e.g. `ink-muted` ≥ 5.89:1,
+  `accent` ≥ 6.35:1 on every surface, `on-accent` on `accent` 10.87:1, `success-ink` on
+  `success-bg` 7.37:1, field border `line-field` on `bg-base` 3.34:1).
+- **Tests.** `jest-axe` (devDependency) runs axe-core on each page's main composition: game
+  (player, resign dialog, spectator), analysis, lobby, profile, leaderboard, challenge, invite,
+  offline (setup and game), game review, sign-in / sign-up, every settings section, the header
+  with notifications open, 404, error, a loading skeleton and the challenge toast. `region` is off
+  (pages render without the root layout's landmarks) and `color-contrast` is off (no layout in
+  jsdom; covered by the token test).

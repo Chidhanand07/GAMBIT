@@ -35,7 +35,9 @@ function UsernameStatusIcon({ status }: { status: UsernameStatus }) {
             data-username-status={status}
             className="absolute right-4 top-1/2 flex -translate-y-1/2"
         >
-            {status === 'checking' && <Loader2 aria-hidden="true" size={16} className="animate-spin text-ink-muted" />}
+            {status === 'checking' && (
+                <Loader2 aria-hidden="true" size={16} className="text-ink-muted motion-safe:animate-spin" />
+            )}
             {status === 'available' && (
                 <Check aria-hidden="true" size={16} strokeWidth={2.5} className="text-success" />
             )}

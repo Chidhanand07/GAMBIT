@@ -32,7 +32,7 @@ function RatedSwitch({ rated, onToggle }: { rated: boolean; onToggle: () => void
             >
                 <span
                     className={cn(
-                        'absolute top-[3px] h-5 w-5 rounded-full bg-ink transition-[left] duration-200',
+                        'absolute top-[3px] h-5 w-5 rounded-full bg-ink motion-safe:transition-[left] motion-safe:duration-200',
                         rated ? 'left-[24px]' : 'left-[3px]',
                     )}
                 />

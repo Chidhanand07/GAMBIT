@@ -27,7 +27,10 @@ const Centered = ({ children }: { children: ReactNode }) => (
 );
 
 const Spinner = () => (
-    <div aria-hidden="true" className="h-12 w-12 animate-spin rounded-full border-4 border-line border-t-accent" />
+    <div
+        aria-hidden="true"
+        className="h-12 w-12 rounded-full motion-safe:animate-spin border-4 border-line border-t-accent"
+    />
 );
 
 /** Loading, error and "analysing" screens shown before the review is ready. */

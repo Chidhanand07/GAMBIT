@@ -3,26 +3,30 @@
 export type BoardTheme = 'maple' | 'green' | 'slate' | 'walnut';
 export type BoardFrame = 'compact' | 'game' | 'analysis' | 'hero' | 'preview';
 
-/** Square fills and the coordinate ink drawn on them (the opposite square colour). */
+/**
+ * Square fills and the coordinate ink drawn on them. The mockups draw each label in the opposite
+ * square colour (2.1–3.7:1); A4 needs 4.5:1, so labels use the dark ink, or the cream ink on the
+ * walnut theme's dark squares (F-106).
+ */
 export const THEMES: Record<BoardTheme, { light: string; dark: string; lightInk: string; darkInk: string }> = {
-    maple: { light: 'bg-board-light', dark: 'bg-board-dark', lightInk: 'text-board-dark', darkInk: 'text-board-light' },
+    maple: { light: 'bg-board-light', dark: 'bg-board-dark', lightInk: 'text-on-accent', darkInk: 'text-on-accent' },
     green: {
         light: 'bg-board-green-light',
         dark: 'bg-board-green-dark',
-        lightInk: 'text-board-green-dark',
-        darkInk: 'text-board-green-light',
+        lightInk: 'text-on-accent',
+        darkInk: 'text-on-accent',
     },
     slate: {
         light: 'bg-board-slate-light',
         dark: 'bg-board-slate-dark',
-        lightInk: 'text-board-slate-dark',
-        darkInk: 'text-board-slate-light',
+        lightInk: 'text-on-accent',
+        darkInk: 'text-on-accent',
     },
     walnut: {
         light: 'bg-board-walnut-light',
         dark: 'bg-board-walnut-dark',
-        lightInk: 'text-board-walnut-dark',
-        darkInk: 'text-board-walnut-light',
+        lightInk: 'text-on-accent',
+        darkInk: 'text-ink',
     },
 };
 

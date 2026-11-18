@@ -23,6 +23,8 @@ function AvatarRow({ profile, form }: { profile: SettingsProfile; form: ProfileS
                 ref={form.fileInputRef}
                 type="file"
                 accept="image/*"
+                aria-label="Profile photo"
+                tabIndex={-1}
                 className="hidden"
                 onChange={form.handleAvatarUpload}
             />

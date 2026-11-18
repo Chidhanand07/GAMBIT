@@ -6,6 +6,7 @@
  * payloads and the less-travelled branches: custom time control, reconnect
  * re-queue, search timer, active-game banner, private-game options and errors.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
@@ -446,4 +447,11 @@ describe('private game modal', () => {
         click(screen.getByRole('button', { name: 'Invite with a link' }))
         expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument()
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('the lobby has no axe violations', async () => {
+        const { container } = await renderLobby()
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

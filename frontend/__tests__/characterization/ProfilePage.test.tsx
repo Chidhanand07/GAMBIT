@@ -7,6 +7,7 @@
  * @/lib/supabase/client and global.fetch. "LEGACY:" marks behaviour that looks
  * wrong but is asserted as-is.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -672,4 +673,11 @@ describe('presence', () => {
         await settle()
         expect(removeChannel).not.toHaveBeenCalled()
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('the profile page (overview) has no axe violations', async () => {
+        const { container } = await renderProfile()
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

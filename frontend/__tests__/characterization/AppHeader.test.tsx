@@ -4,6 +4,7 @@
  * [REDESIGN-2]: the same behaviours (notification fetches, challenge socket wiring and payloads,
  * auth states, menus, sign out, the site menu) asserted against the new markup.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
@@ -179,7 +180,10 @@ describe('notifications', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/notifications'], ['/api/notifications']])
         expect(screen.getByText('Top-level message')).toBeInTheDocument()
         expect(screen.getByText('Friend request')).toBeInTheDocument()
-        expect(screen.getByRole('menu', { name: 'Notifications' })).toBeInTheDocument()
+        // [A4] was: role="menu" — the panel holds a heading, a button and status messages, which a
+        // menu may not contain, so it is a (non-modal) dialog around the menu of notifications
+        expect(screen.getByRole('dialog', { name: 'Notifications' })).toBeInTheDocument()
+        expect(bell()).toHaveAttribute('aria-haspopup', 'dialog')
         expect(bell()).toHaveAttribute('aria-expanded', 'true')
         expect(row('Payload message')).toHaveAttribute('data-unread', 'true')
         expect(row('Top-level message')).toHaveAttribute('data-unread', 'false')
@@ -476,4 +480,13 @@ describe('site menu', () => {
         fireEvent.keyDown(menu, { key: 'ArrowUp' })
         expect(items[3]).toHaveFocus()
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('the signed-in header with the notifications panel open has no axe violations', async () => {
+        const { container } = render(<AppHeader />)
+        click(bell())
+        await screen.findByText('Payload message')
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

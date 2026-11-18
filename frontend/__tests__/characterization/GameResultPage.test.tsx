@@ -9,6 +9,7 @@
  * data-square, pieces by data-piece, the last move by data-mark, the best-move ring by data-best,
  * the badge by data-classification, controls by their accessible names.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -256,4 +257,14 @@ describe('review screen', () => {
         expect(screen.queryByText(/Est. performance/)).toBeNull()
         expect(screen.getAllByText('White').length).toBeGreaterThan(0)
     })
+})
+
+describe('accessibility [A4]', () => {
+    // axe schedules its work with timers; this file runs on fake ones by default
+    beforeEach(() => jest.useRealTimers())
+
+    test('the game review page has no axe violations', async () => {
+        const { container } = await renderPage()
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

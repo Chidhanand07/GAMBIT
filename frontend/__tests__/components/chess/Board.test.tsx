@@ -91,11 +91,12 @@ describe('Board', () => {
     test('animate={false} makes pieces jump; coordinates show ranks on the left file and files on the bottom rank', () => {
         const { container } = render(<Board fen={START} animate={false} showCoordinates />)
         expect(container.querySelector('.g-piece-slot')).toHaveClass('g-instant')
-        expect(within(sq(container, 'a8')).getByText('8')).toHaveClass('text-board-dark')
+        // [F-106] was: the opposite square colour (text-board-dark / -light, 2.3:1) — now the dark ink (AA)
+        expect(within(sq(container, 'a8')).getByText('8')).toHaveClass('text-on-accent')
         expect(within(sq(container, 'a1')).getByText('1')).toBeInTheDocument()
         expect(within(sq(container, 'a1')).getByText('a')).toBeInTheDocument()
-        expect(within(sq(container, 'a1')).getByText('a')).toHaveClass('text-board-light')
-        expect(within(sq(container, 'h1')).getByText('h')).toHaveClass('text-board-dark')
+        expect(within(sq(container, 'a1')).getByText('a')).toHaveClass('text-on-accent')
+        expect(within(sq(container, 'h1')).getByText('h')).toHaveClass('text-on-accent')
         expect(sq(container, 'e4').textContent).toBe('')
     })
 

@@ -10,6 +10,7 @@
  * import feedback is a status line instead of alert() / a tab switch. Each behaviour below is the
  * one pinned before; "was:" notes give the old assertion where it changed shape.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -56,6 +57,13 @@ const playE4 = () => {
     click(sq('e4'))
 }
 const EMPTY_MOVES = 'Make a move or import a game to see the move list.'
+
+describe('accessibility [A4]', () => {
+    test('the page has no axe violations', async () => {
+        const { container } = render(<AnalysisPage />)
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
+})
 
 describe('initial render', () => {
     test('renders 64 squares, the start position, analysis tab and empty move list', () => {

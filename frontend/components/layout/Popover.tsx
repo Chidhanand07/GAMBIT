@@ -8,6 +8,11 @@ interface PopoverProps {
     onClose: () => void;
     /** Accessible name of the menu ("Account", "Site", "Notifications"). */
     label: string;
+    /**
+     * `menu` (default) for lists of actions; `dialog` for a panel that also holds a heading,
+     * buttons and status messages (notifications, A4).
+     */
+    role?: 'menu' | 'dialog';
     /** Clicks inside this element (the trigger cluster) do not count as outside clicks. */
     containerRef: RefObject<HTMLElement | null>;
     /** Gets focus back when Escape closes the menu. */
@@ -39,7 +44,8 @@ function moveFocus(e: KeyboardEvent<HTMLDivElement>) {
  * A header menu panel (`.gp`, design/Main.dc.html): closes on a mousedown outside
  * `containerRef` and on Escape (focus returns to the trigger).
  */
-export function Popover({ open, onClose, label, containerRef, triggerRef, className, style, children }: PopoverProps) {
+export function Popover(props: PopoverProps) {
+    const { open, onClose, label, role = 'menu', containerRef, triggerRef, className, style, children } = props;
     const onCloseRef = useRef(onClose);
     useEffect(() => {
         onCloseRef.current = onClose;
@@ -65,7 +71,7 @@ export function Popover({ open, onClose, label, containerRef, triggerRef, classN
 
     if (!open) return null;
     return (
-        <div role="menu" aria-label={label} className={cn('gp', className)} style={style} onKeyDown={moveFocus}>
+        <div role={role} aria-label={label} className={cn('gp', className)} style={style} onKeyDown={moveFocus}>
             {children}
         </div>
     );

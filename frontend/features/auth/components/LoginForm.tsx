@@ -62,7 +62,7 @@ export function LoginForm() {
                 >
                     {login.loading ? (
                         <>
-                            <Loader2 aria-hidden="true" size={20} className="animate-spin" /> Signing in...
+                            <Loader2 aria-hidden="true" size={20} className="motion-safe:animate-spin" /> Signing in...
                         </>
                     ) : (
                         'Sign in'

@@ -78,7 +78,7 @@ export function PlayerBar(props: PlayerBarProps) {
                     <span aria-hidden="true" className="block h-[5px] overflow-hidden rounded-pill bg-surface">
                         <span
                             className={cn(
-                                'block h-full rounded-pill transition-[width] duration-400 ease-[ease]',
+                                'block h-full rounded-pill motion-safe:transition-[width] motion-safe:duration-400 motion-safe:ease-[ease]',
                                 low ? 'bg-danger' : 'bg-accent',
                             )}
                             style={{ width: `${timePercent}%` }}

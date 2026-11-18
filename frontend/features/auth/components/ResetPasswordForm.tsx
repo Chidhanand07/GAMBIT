@@ -39,7 +39,7 @@ export function ResetPasswordForm() {
                         disabled={reset.status === 'loading'}
                     >
                         {reset.status === 'loading' ? (
-                            <Loader2 aria-label="Sending" size={20} className="animate-spin" />
+                            <Loader2 aria-label="Sending" size={20} className="motion-safe:animate-spin" />
                         ) : (
                             'Send Reset Link'
                         )}

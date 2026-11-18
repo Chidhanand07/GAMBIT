@@ -33,7 +33,8 @@ export function SignupForm() {
                 >
                     {signup.loading ? (
                         <>
-                            <Loader2 aria-hidden="true" size={18} className="animate-spin" /> Creating account...
+                            <Loader2 aria-hidden="true" size={18} className="motion-safe:animate-spin" /> Creating
+                            account...
                         </>
                     ) : (
                         'Sign up'

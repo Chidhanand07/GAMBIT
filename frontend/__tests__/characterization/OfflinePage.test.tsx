@@ -11,6 +11,7 @@
  * aria-pressed / data-dot / data-mark; "Thinking…" is the status line "MAVERICK is thinking...",
  * and the Game Over overlay is the controls card's result state (status + Rematch).
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -370,4 +371,16 @@ describe('playing as black', () => {
         expect(pieceOn(container, 'e1', true)).toBe('wk')
         expect(squares(container)[0]).toHaveAttribute('data-square', 'h1')
     })
+})
+
+describe('accessibility [A4]', () => {
+    // axe schedules its work with timers; this file runs on fake ones by default
+    beforeEach(() => jest.useRealTimers())
+
+    test('setup and the running game have no axe violations', async () => {
+        const { container } = render(<ComputerPage />)
+        await expectAccessible(container)
+        click(screen.getByRole('button', { name: 'Start Game' }))
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

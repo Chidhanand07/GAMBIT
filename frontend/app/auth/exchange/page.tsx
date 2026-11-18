@@ -16,7 +16,7 @@ function ExchangeHandler() {
 
     return (
         <div className="min-h-screen flex items-center justify-center">
-            <div role="status" aria-label="Signing in" className="w-8 h-8 border-2 border-line border-t-accent rounded-full animate-spin" />
+            <div role="status" aria-label="Signing in" className="w-8 h-8 border-2 border-line border-t-accent rounded-full motion-safe:animate-spin" />
         </div>
     )
 }
@@ -26,7 +26,7 @@ export default function ExchangePage() {
         <Suspense
             fallback={
                 <div className="min-h-screen flex items-center justify-center">
-                    <div role="status" aria-label="Signing in" className="w-8 h-8 border-2 border-line border-t-accent rounded-full animate-spin" />
+                    <div role="status" aria-label="Signing in" className="w-8 h-8 border-2 border-line border-t-accent rounded-full motion-safe:animate-spin" />
                 </div>
             }
         >

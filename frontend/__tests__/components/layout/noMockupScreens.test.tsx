@@ -62,3 +62,20 @@ test('the legacy tokens are gone from the theme and the stylesheet', () => {
     for (const variable of ['--bg-page:', '--bg-elevated:', '--accent:', '--text-primary:', '--border-strong:', '.btn-press', '.toast-enter'])
         expect(css).not.toContain(variable)
 })
+
+describe('accessibility [A4]', () => {
+    test('404, error, a loading skeleton and the challenge toast have no axe violations', async () => {
+        const { expectAccessible } = await import('../../helpers/axe')
+        const { ChallengeToast } = await import('@/features/navigation/components/ChallengeToast')
+        for (const ui of [
+            <NotFound key="nf" />,
+            <ErrorPage key="err" error={new Error('x')} reset={jest.fn()} />,
+            <PageSkeleton key="sk" layout="board" label="Loading game" />,
+            <ChallengeToast key="ct" challenge={{ from_username: 'bob', time_control: '3+0', is_rated: true }} onAccept={jest.fn()} onDecline={jest.fn()} />,
+        ]) {
+            const { container, unmount } = render(ui)
+            await expectAccessible(container)
+            unmount()
+        }
+    }, 20_000)
+})

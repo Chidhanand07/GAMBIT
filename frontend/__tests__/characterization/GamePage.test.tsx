@@ -11,6 +11,7 @@
  * board (data-square / data-piece), clocks (role="timer", "5:00"), status line ("Your move",
  * "Bob is thinking...", "Checkmate. You win!"), chat card, confirmation dialogs and result state.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
@@ -1142,4 +1143,17 @@ describe('board controls', () => {
         expect(bottom).toHaveAccessibleName('Your clock')
         expect(top).toHaveAccessibleName('Black clock')
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('player view, the resign dialog and a spectator view have no axe violations', async () => {
+        const { container, unmount } = await renderGame()
+        await expectAccessible(container)
+        click(screen.getAllByRole('button', { name: 'Resign' })[0])
+        await expectAccessible(document.body)
+        unmount()
+        profile = { ...ME, id: 'spectator-id' }
+        const spectator = await renderGame()
+        await expectAccessible(spectator.container)
+    }, AXE_TIMEOUT_MS)
 })

@@ -33,7 +33,7 @@
     --color-accent:           #EFBF5B;
     --color-ink:              #F6F0E0;
     --color-ink-muted:        #B7C2B3;
-    --color-ink-faint:        #7C8E83;
+    --color-ink-faint:        #87998D; /* mockups: #7C8E83 (4.06:1 on surface); AA, F-106 */
     --color-ink-disabled:     #5A7365;
     --color-ink-placeholder:  #7F9387;
     --color-ink-bright:       #FFFFFF;
@@ -468,6 +468,29 @@
     min-height: 100vh;
     overflow-x: hidden;
     width: 100%;
+  }
+
+  /*
+   * A4: one visible focus indicator for every control that has none of its own — a solid gold
+   * outline plus the design's focus-ring halo (--shadow-focus-ring, the `.fi:focus` ring of the
+   * auth fields). Fields keep their own ring (border + halo) through their more specific rules.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex], [role="button"], [role="switch"], [role="menuitem"]):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    box-shadow: var(--shadow-focus-ring);
+  }
+  /* Board squares sit inside the board's clipped frame: draw the ring inside the square. */
+  [data-square]:focus-visible { outline-offset: -3px; }
+
+  /* A4: with "reduce motion" nothing animates or slides anywhere (components add motion-safe too). */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
   /* Shared element rules from every mockup's <style> block. */

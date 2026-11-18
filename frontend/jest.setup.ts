@@ -8,3 +8,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 process.env.GAMBIT_ENGINE_URL = 'http://engine.test';
 // Shared secret the server-side engine client sends as X-Engine-Key (never NEXT_PUBLIC_).
 process.env.ENGINE_SHARED_SECRET = 'test-engine-secret';
+
+// A4: `expect(await axe(container)).toHaveNoViolations()` (jest-axe; see __tests__/helpers/axe.ts).
+import { toHaveNoViolations } from 'jest-axe';
+expect.extend(toHaveNoViolations);

@@ -2,6 +2,7 @@
  * Characterization tests (fe-misc, PR 16 track) for
  * app/challenge/[username]/page.tsx, app/join/[token]/page.tsx and app/leaderboard/page.tsx.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
@@ -375,4 +376,33 @@ describe('leaderboard', () => {
         await flush()
         expect(screen.queryByText('Your standing')).toBeNull()
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('challenge, invite and leaderboard pages have no axe violations', async () => {
+        profile = { id: 'me', username: 'me1', display_name: null }
+        fetchMock.mockImplementation(async () => jsonResponse({ id: 'bob-id', username: 'bob', display_name: 'Bobby', avatar_url: null, rating_rapid: 1333 }))
+        const challenge = render(<ChallengePage params={routeParams({ username: 'bob' })} />)
+        await flush()
+        await expectAccessible(challenge.container)
+        challenge.unmount()
+
+        fetchMock.mockImplementation(async (url: string) =>
+            url.includes('/api/games/join/')
+                ? jsonResponse({ id: 'g-1', white_id: 'creator', black_id: null, time_control: '5', is_rated: true, white: { username: 'alice' }, black: null })
+                : jsonResponse({ id: 'guest' }))
+        const join = render(<JoinPage params={routeParams({ token: 'tok_FAKE_0001' })} />)
+        await flush()
+        await expectAccessible(join.container)
+        join.unmount()
+
+        fetchMock.mockImplementation(async () => jsonResponse([
+            { username: 'a', display_name: 'Ace', rating_rapid: 1800, games_played: 10, wins: 4 },
+            { username: 'b', display_name: null, rating_rapid: 1700, games_played: 5, wins: 1 },
+            { username: 'c', display_name: null, rating_rapid: 1600, games_played: 0, wins: 0 },
+        ]))
+        const board = render(<LeaderboardPage />)
+        await flush()
+        await expectAccessible(board.container)
+    }, AXE_TIMEOUT_MS)
 })
