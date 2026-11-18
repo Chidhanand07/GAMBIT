@@ -86,6 +86,16 @@ test('Cancel search leaves the queue', async () => {
     expect(screen.queryByText('Finding an opponent...')).not.toBeInTheDocument()
 })
 
+test('the search line shows the real rating range from the server (Main.dc.html) [F-132]', async () => {
+    render(<LobbyPage />)
+    await userEvent.click(screen.getByText('Play Online'))
+    expect(screen.getByRole('status')).not.toHaveTextContent('rating range')
+    serverSends('queue_joined', { position: 1, estimated_wait: 10, search_window: { min: 925, max: 1125 } })
+    expect(screen.getByRole('status')).toHaveTextContent(/· rating range 925 to 1125 · 0:00/)
+    serverSends('search_window', { min: null, max: null })
+    expect(screen.getByRole('status')).toHaveTextContent(/· any rating · 0:00/)
+})
+
 test('a match sends the player to the game page', async () => {
     render(<LobbyPage />)
     await userEvent.click(screen.getByText('Play Online'))

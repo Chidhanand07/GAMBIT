@@ -72,9 +72,12 @@ describe('mount & static content', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/games/active'], ['/api/games/live']])
     })
 
-    test('subscribes to match_found, match_failed, game_start and connect (no queue_joined / queue_status handling)', async () => {
+    // Was: no queue_joined handling. queue_joined and search_window now carry the rating window (F-132).
+    test('subscribes to match_found, match_failed, game_start, connect, queue_joined and search_window (no queue_status)', async () => {
         await renderLobby()
-        expect(socket.listenedEvents()).toEqual(['connect', 'game_start', 'match_failed', 'match_found'])
+        expect(socket.listenedEvents()).toEqual([
+            'connect', 'game_start', 'match_failed', 'match_found', 'queue_joined', 'search_window',
+        ])
         expect(socket.emit).not.toHaveBeenCalled()
     })
 

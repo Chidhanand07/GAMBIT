@@ -217,8 +217,13 @@ export interface GameIdPayload {
     game_id: string;
 }
 
+/** Opponent ratings the matchmaker accepts for this player right now; both null = any rating (F-132). */
+export type SearchWindow = { min: number; max: number } | { min: null; max: null };
+
 export interface ServerToClientEvents {
-    queue_joined: (payload: { position: number; estimated_wait: number }) => void;
+    queue_joined: (payload: { position: number; estimated_wait: number; search_window?: SearchWindow }) => void;
+    /** The player's rating window widened while they wait (F-132). */
+    search_window: (payload: SearchWindow) => void;
     /** Broadcast to every socket. */
     queue_status: (payload: { players_searching: number }) => void;
     match_found: (payload: MatchFoundPayload) => void;

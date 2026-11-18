@@ -6,6 +6,7 @@ const {
     sortByLongestWaiting,
     findOpponent,
     planPairs,
+    searchWindow,
 } = require('../../src/domain/matchmaking/pairing');
 
 const NOW = 1_700_000_000_000;
@@ -191,4 +192,41 @@ describe('planPairs [MULTI-INSTANCE]', () => {
     });
 
     test('empty queue → no pairs', () => expect(planPairs([], fixedClock)).toEqual([]));
+});
+
+describe('searchWindow [F-132]', () => {
+    const established = { rating: 1025, isProvisional: false };
+
+    test.each([
+        [0, { min: 975, max: 1075 }],
+        [10, { min: 975, max: 1075 }],
+        [11, { min: 925, max: 1125 }],
+        [35, { min: 875, max: 1175 }],
+        [60, { min: 775, max: 1275 }],
+        [120, { min: 625, max: 1425 }],
+        [121, { min: null, max: null }],
+    ])('an established player after %ps', (sec, window) => {
+        expect(searchWindow(established, sec)).toEqual(window);
+    });
+
+    test('never below 0', () => {
+        expect(searchWindow({ rating: 30, isProvisional: false }, 0)).toEqual({ min: 0, max: 80 });
+    });
+
+    test('a provisional player: the provisional band, at any wait', () => {
+        expect(searchWindow({ rating: 1500, isProvisional: true }, 0)).toEqual({ min: 800, max: 1400 });
+        expect(searchWindow({ rating: 1500, isProvisional: true }, 500)).toEqual({ min: 800, max: 1400 });
+    });
+
+    test('agrees with isRatingCompatible from the player\'s own side', () => {
+        for (const sec of [0, 15, 40, 90]) {
+            const { min, max } = searchWindow(established, sec);
+            const radius = getSearchRadius(sec);
+            for (const r of [min - 1, min, max, max + 1]) {
+                const other = { rating: r, isProvisional: false };
+                const inside = r >= min && r <= max;
+                expect(isRatingCompatible(established, other, radius, 0)).toBe(inside);
+            }
+        }
+    });
 });

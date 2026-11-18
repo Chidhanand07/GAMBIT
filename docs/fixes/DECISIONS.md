@@ -156,6 +156,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 |---|---|---|---|
 | [F-130](#f-130) | Spectator counts in Redis with a heartbeat; the lobby reads them over its socket | B2 | LIVE-1 |
 | [F-131](#f-131) | Friend "Away": each tab reports idleness in its presence payload | B2 | LIVE-2 |
+| [F-132](#f-132) | The lobby's rating range is the matchmaker's own window, pushed when it widens | B2 | LIVE-3 |
 
 ---
 
@@ -3188,4 +3189,27 @@ their owner (B1 item 8).**
 - **Proof.** `lib/presence/presenceStatus.test.ts`, `components/useIdleStatus.test.tsx`,
   `characterization/PresenceProvider.test.tsx` (re-track after idle and on input), lobby and profile
   page tests.
+
+## F-132
+
+**The lobby's rating range is the matchmaker's own window, pushed when it widens (LIVE-3).**
+
+- **Context.** Main.dc.html shows "rating range 925 to 1125" while searching; the redesign left it out
+  because nothing computed it. It must be the range the matchmaker would really use, not a guess.
+- **Decision.** A pure `searchWindow(entry, waitedSec)` in `domain/matchmaking/pairing.js`, built from the
+  same constants `isRatingCompatible` uses: an established player accepts rating ± `getSearchRadius(wait)`
+  (floored at 0); once the radius is unlimited the window is open (`{ min: null, max: null }`, shown as
+  "any rating"); a provisional player accepts established opponents in the provisional band (800 to 1400).
+  The server sends it in `queue_joined.search_window`, and the instance that queued the player emits
+  `search_window` to that socket on its 1 s pass whenever it changes (a handful of times per search, as
+  the radius steps up). The client never computes it: no copy of the rules in the browser.
+- **Honest limits (documented, not hidden).** The window is the player's own side of the rule: an opponent
+  who has waited longer may accept them from further away, and a provisional player also meets any other
+  provisional player. The text says what this player accepts, which is what the mockup's line means.
+- **Multi-instance.** Each instance only tells the players it queued (`local`); the queue entry, and so
+  `joined_at` and the rating, are the ones in Redis. A player re-queued on another instance after a
+  reconnect gets a fresh `queue_joined` from it.
+- **Proof.** `domain/pairing.test.js` (every radius step, floor, provisional, agreement with
+  `isRatingCompatible`), `services/matchmakingService.test.js` (sent once per step, to the right socket,
+  stops after leaving), lobby hook and page tests. `queue_joined` expectations gained the field.
 

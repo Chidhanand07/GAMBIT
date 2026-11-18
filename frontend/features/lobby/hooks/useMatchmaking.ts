@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useState } from 'react';
 import type { useRouter } from 'next/navigation';
 import type { Socket } from 'socket.io-client';
 import { emitWithAck } from '@/lib/socket/ack';
-import type { JoinQueuePayload } from '@/types/socket';
+import type { JoinQueuePayload, SearchWindow } from '@/types/socket';
 import type { TimeControl } from '@/types/timeControl';
 import type { LobbyProfile } from '../types';
 
@@ -31,8 +31,22 @@ interface MatchmakingOptions {
 
 type MatchFoundPayload = { id?: string; game_id?: string; white_id: string; black_id: string };
 type SocketListener = Parameters<Socket['on']>[1];
-type QueueEvent = 'match_found' | 'match_failed' | 'game_start' | 'connect';
-const QUEUE_EVENTS: readonly QueueEvent[] = ['match_found', 'match_failed', 'game_start', 'connect'];
+type QueueEvent = 'match_found' | 'match_failed' | 'game_start' | 'connect' | 'queue_joined' | 'search_window';
+const QUEUE_EVENTS: readonly QueueEvent[] = [
+    'match_found',
+    'match_failed',
+    'game_start',
+    'connect',
+    'queue_joined',
+    'search_window',
+];
+
+/** A well-formed window from the server, or null (then no range is shown). */
+function parseWindow(value: unknown): SearchWindow | null {
+    const w = value as { min?: unknown; max?: unknown } | null | undefined;
+    if (w?.min === null && w?.max === null) return { min: null, max: null };
+    return typeof w?.min === 'number' && typeof w?.max === 'number' ? { min: w.min, max: w.max } : null;
+}
 
 /** The single join_queue shape (F8). The server ignores `user` and queues the handshake user. */
 export function queuePayload(userId: string, terms: QueueTerms): JoinQueuePayload {
@@ -72,6 +86,8 @@ export function useMatchmaking(options: MatchmakingOptions) {
     const [queued, setQueued] = useState<QueueTerms | null>(null);
     const searching = queued !== null;
     const searchTime = useSearchTimer(searching);
+    // The rating range the matchmaker pairs this player with right now (F-132); only while searching.
+    const [lastWindow, setWindow] = useState<SearchWindow | null>(null);
 
     const sendJoin = (terms: QueueTerms) => {
         if (!socket || !profile) return;
@@ -104,6 +120,8 @@ export function useMatchmaking(options: MatchmakingOptions) {
         connect: () => {
             if (queued) sendJoin(queued);
         },
+        queue_joined: (data: { search_window?: unknown }) => setWindow(parseWindow(data?.search_window)),
+        search_window: (data: unknown) => setWindow(parseWindow(data)),
     };
     // The listeners below are registered once per socket and look the handler up when an
     // event fires, so they always see the latest render's state.
@@ -123,6 +141,7 @@ export function useMatchmaking(options: MatchmakingOptions) {
     }, [socket]);
 
     const joinQueue = (terms: QueueTerms) => {
+        setWindow(null);
         setQueued(terms);
         sendJoin(terms);
     };
@@ -132,5 +151,5 @@ export function useMatchmaking(options: MatchmakingOptions) {
         setQueued(null);
     };
 
-    return { searching, searchTime, joinQueue, cancelSearch };
+    return { searching, searchTime, searchWindow: searching ? lastWindow : null, joinQueue, cancelSearch };
 }

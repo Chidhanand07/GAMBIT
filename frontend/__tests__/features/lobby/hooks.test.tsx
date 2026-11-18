@@ -160,6 +160,24 @@ describe('useMatchmaking', () => {
         expect(onQueueRefused).toHaveBeenLastCalledWith('rate_limited');
     });
 
+    test('the rating window comes from the server: queue_joined, then each widening; gone when not searching [F-132]', () => {
+        const { result } = setup();
+        expect(result.current.searchWindow).toBeNull();
+        act(() => result.current.joinQueue(terms));
+        expect(result.current.searchWindow).toBeNull();
+        act(() => fake.serverSends('queue_joined', { position: 1, estimated_wait: 10, search_window: { min: 975, max: 1075 } }));
+        expect(result.current.searchWindow).toEqual({ min: 975, max: 1075 });
+        act(() => fake.serverSends('search_window', { min: 925, max: 1125 }));
+        expect(result.current.searchWindow).toEqual({ min: 925, max: 1125 });
+        act(() => fake.serverSends('search_window', { min: null, max: null }));
+        expect(result.current.searchWindow).toEqual({ min: null, max: null });
+        act(() => fake.serverSends('search_window', { min: 'x' }));
+        expect(result.current.searchWindow).toBeNull();
+        act(() => fake.serverSends('search_window', { min: 1, max: 2 }));
+        act(() => result.current.cancelSearch());
+        expect(result.current.searchWindow).toBeNull();
+    });
+
     test('match_failed stops the search and reports it; nothing navigates [G12]', () => {
         const onMatchFailed = jest.fn();
         const { result } = setup({ onMatchFailed });

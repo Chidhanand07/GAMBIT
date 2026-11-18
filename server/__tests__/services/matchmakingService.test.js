@@ -35,7 +35,9 @@ test('requestMatch queues with the DB rating for the time control, never the cli
     const { svc, emitter } = setup({ profiles: { a: profile('a', 1700) } });
     await svc.requestMatch({ user: { id: 'a', rating: 3000 }, time_control: '10', increment: 0 }, 'sa');
     expect(await svc.queuedEntry('a')).toMatchObject({ rating: 1700, joined_at: T, isRated: true, socketId: 'sa' });
-    expect(emitter.sent).toEqual([{ room: 'sa', event: 'queue_joined', args: [{ position: 1, estimated_wait: 10 }] }]);
+    expect(emitter.sent).toEqual([
+        { room: 'sa', event: 'queue_joined', args: [{ position: 1, estimated_wait: 10, search_window: { min: 1650, max: 1750 } }] },
+    ]);
 });
 
 test('requestMatch ignores payloads without a user id and unknown users', async () => {
@@ -302,5 +304,55 @@ describe('shared queue across instances [MULTI-INSTANCE, NODE-17]', () => {
         await expect(svc.leaveQueueBySocket('sb')).resolves.toBeUndefined();
         expect(log.error).toHaveBeenCalledWith('[matchmaking] leaveQueue failed:', 'redis down');
         expect(log.error).toHaveBeenCalledWith('[matchmaking] leaveQueueBySocket failed:', 'redis down');
+    });
+});
+
+describe('rating window [F-132]', () => {
+    function timed(profiles) {
+        let now = T;
+        const emitter = fakeEmitter();
+        const svc = createMatchmakingService({
+            gamesRepo: { insertReturning: jest.fn() },
+            profilesRepo: { findForMatchmaking: jest.fn((id) => result(profiles[id] ?? null)) },
+            gameStore: fakeGameStore(),
+            emitter,
+            queue: fakeMatchmakingQueue(),
+            instanceId: 'inst-1',
+            now: () => now,
+            random: () => 0.9,
+        });
+        return { svc, emitter, advance: (ms) => (now += ms) };
+    }
+    const windows = (emitter) => emitter.named('search_window').map((e) => e.args[0]);
+
+    test('widens as the wait grows, sent once per step, to the player who waits', async () => {
+        const { svc, emitter, advance } = timed({ a: profile('a', 1025) });
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '10', increment: 0 }, 'sa');
+        expect(emitter.named('queue_joined')[0].args[0].search_window).toEqual({ min: 975, max: 1075 });
+        await svc.matchPlayers();
+        expect(windows(emitter)).toEqual([]);
+        advance(11_000);
+        await svc.matchPlayers();
+        await svc.matchPlayers();
+        expect(windows(emitter)).toEqual([{ min: 925, max: 1125 }]);
+        expect(emitter.named('search_window')[0].room).toBe('sa');
+        advance(200_000);
+        await svc.matchPlayers();
+        expect(windows(emitter).at(-1)).toEqual({ min: null, max: null });
+    });
+
+    test('a provisional player is told the provisional band', async () => {
+        const { svc, emitter } = timed({ p: profile('p', 1500, 2) });
+        await svc.requestMatch({ user: { id: 'p' }, time_control: '10', increment: 0 }, 'sp');
+        expect(emitter.named('queue_joined')[0].args[0].search_window).toEqual({ min: 800, max: 1400 });
+    });
+
+    test('nothing more is sent once the player left the queue', async () => {
+        const { svc, emitter, advance } = timed({ a: profile('a', 1500) });
+        await svc.requestMatch({ user: { id: 'a' }, time_control: '10', increment: 0 }, 'sa');
+        await svc.leaveQueue('a');
+        advance(30_000);
+        await svc.matchPlayers();
+        expect(windows(emitter)).toEqual([]);
     });
 });
