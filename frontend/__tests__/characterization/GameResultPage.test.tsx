@@ -18,6 +18,7 @@ jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, cl
 import GameResultPage from '@/app/game/[id]/result/page'
 import { DEFAULT_SETTINGS } from '@/features/settings/model'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
+import { settingsStore } from '../helpers/settingsStore'
 import { routeParams } from '../helpers/params'
 
 const WHITE_CLS = [
@@ -221,7 +222,7 @@ describe('review screen', () => {
     test('board preferences: no last-move tint or coordinates when switched off; the theme colours the squares', async () => {
         const stored = { ...DEFAULT_SETTINGS, highlightLastMove: false, showCoordinates: false, boardTheme: 'walnut' as const }
         const { container } = render(
-            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+            <SettingsProvider store={settingsStore(stored)}>
                 <GameResultPage params={routeParams({ id: 'g1' })} />
             </SettingsProvider>,
         )

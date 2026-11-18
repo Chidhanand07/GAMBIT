@@ -71,6 +71,7 @@ On a fresh project nothing is deployed yet, so all migrations can be applied tog
    | 13 | `20261113100000_rating_atomic.sql` | `public.apply_game_result`, `games.rated_at` |
    | 14 | `20261114100000_drop_legacy_clock_columns.sql` | drops `games.white_time_ms` / `black_time_ms` |
    | 15 | `20261114200000_profiles_revoke_service_role_update.sql` | `service_role` loses `UPDATE` on `profiles` |
+   | 16 | `20261118300000_user_preferences.sql` | `user_preferences` (owner-only RLS; `service_role` reads only) and the `leaderboard_profiles` view (ADR F-140) |
 
    On an existing project, follow the rollout rules in **Deploy order** above.
 3. If you apply files by hand and use the Supabase CLI history, record each one:
@@ -85,6 +86,13 @@ Notes on the late migrations:
   live, profile edits from the old web app fail with a permission error until the deploy (ratings are
   unaffected: they go through `apply_game_result`). Rollback:
   `GRANT UPDATE ON TABLE public.profiles TO service_role;`.
+
+- `20261118300000_user_preferences.sql` (SETTINGS-PREFS, ADR F-140): additive. Apply it **before**
+  deploying the web app and game server that read it: the new leaderboard reads the
+  `leaderboard_profiles` view, and both servers refuse a challenge or a spectator when they cannot
+  read `user_preferences` (fail closed). pgTAP: `supabase/tests/080_user_preferences.test.sql`.
+  Rollback: `DROP VIEW public.leaderboard_profiles; DROP TABLE public.user_preferences;
+  DROP FUNCTION public.user_preferences_touch();`.
 
 The same migrations and the pgTAP tests in `supabase/tests/` run in CI on an empty database
 (job `Database (Supabase)`, section 8).

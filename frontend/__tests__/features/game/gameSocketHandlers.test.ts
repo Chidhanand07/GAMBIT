@@ -59,7 +59,8 @@ test('connect marks connected then re-emits join_game only (no authenticate) [S2
     const { ctx, fire, dispatched } = makeCtx()
     fire('connect')
     expect(dispatched()).toEqual([{ type: 'connectionChanged', connected: true }])
-    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['join_game', 'g1']])
+    // F-140 (was [['join_game', 'g1']]): the join carries an ack callback for the spectator refusal.
+    expect((ctx.socket.emit as jest.Mock).mock.calls).toEqual([['join_game', 'g1', expect.any(Function)]])
 })
 
 test('move_rejected: clears the optimistic move for this game only [S1]', () => {

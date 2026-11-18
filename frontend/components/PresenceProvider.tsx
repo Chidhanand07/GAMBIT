@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { loadBrowserClient } from '@/lib/supabase/lazyClient';
 import { useProfile } from '@/components/ProfileProvider';
 import { presenceSets, type PresenceMeta, type PresenceSets, type TabStatus } from '@/lib/presence/presenceStatus';
+import { useUserSettings } from '@/features/settings/SettingsProvider';
 import { useIdleStatus } from './useIdleStatus';
 
 interface PresenceValue {
@@ -46,6 +47,7 @@ interface PresenceOptions {
     profileId: string | undefined;
     usernameRef: { current: string | undefined };
     statusRef: { current: TabStatus };
+    showOnlineRef: { current: boolean };
     update: (sets: PresenceSets) => void;
     onSubscribed: (channel: RealtimeChannel) => void;
     isMounted: () => boolean;
@@ -53,7 +55,7 @@ interface PresenceOptions {
 
 /** Subscribes to the shared channel: joins it (tracked) when signed in, only listens as a guest. */
 function openPresence(supabase: SupabaseClient, options: PresenceOptions) {
-    const { profileId, usernameRef, statusRef, update, onSubscribed, isMounted } = options;
+    const { profileId, usernameRef, statusRef, showOnlineRef, update, onSubscribed, isMounted } = options;
     const channel = profileId
         ? supabase.channel(CHANNEL, { config: { presence: { key: profileId } } })
         : supabase.channel(CHANNEL);
@@ -68,26 +70,40 @@ function openPresence(supabase: SupabaseClient, options: PresenceOptions) {
     channel.subscribe(async (subscription: string) => {
         if (subscription !== 'SUBSCRIBED' || !isMounted() || !profileId) return;
         onSubscribed(channel);
-        await channel.track(payload(profileId, usernameRef.current, statusRef.current));
+        // "Show when I am online" off: listen without announcing (F-140).
+        if (showOnlineRef.current) await channel.track(payload(profileId, usernameRef.current, statusRef.current));
     });
     return channel;
 }
 
 /**
+ * Whether this user announces themselves: "Show when I am online" (ADR F-140). Presence is
+ * self-announced, so not tracking is what hides the badge. Until the settings have loaded, or
+ * when they failed to load, the user is not announced (fail closed).
+ */
+function useShowOnline(): boolean {
+    const { account, status } = useUserSettings();
+    return status === 'ready' && account.privacy.showOnline;
+}
+
+/**
  * The shared presence channel. A signed-in viewer joins it (tracked under their profile id, with
  * the tab's idle status, F-131); a guest only listens, so the "online" figures the mockups show
- * are real for guests too (F-104), except on the landing (F-111).
+ * are real for guests too (F-104), except on the landing (F-111). A user who turned "Show when I
+ * am online" off listens without announcing themselves (F-140).
  */
 export default function PresenceProvider({ children }: { children: React.ReactNode }) {
     const [sets, setSets] = useState<PresenceSets>(NOBODY);
     const { profile, loading } = useProfile();
     const guestQuiet = GUEST_QUIET_PATHS.includes(usePathname() ?? '');
+    const showOnline = useShowOnline();
 
     const profileId = profile?.id;
     const status = useIdleStatus(Boolean(profileId));
     // Read when the channel subscribes; a rename or an idle change alone must not re-subscribe.
     const usernameRef = useRef(profile?.username);
     const statusRef = useRef(status);
+    const showOnlineRef = useRef(showOnline);
     const channelRef = useRef<RealtimeChannel | null>(null);
     useEffect(() => {
         usernameRef.current = profile?.username;
@@ -112,7 +128,7 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
             .then((supabase) => {
                 if (!mounted) return;
                 const isMounted = () => mounted;
-                const opts = { profileId, usernameRef, statusRef, update, onSubscribed, isMounted };
+                const opts = { profileId, usernameRef, statusRef, showOnlineRef, update, onSubscribed, isMounted };
                 joined = { supabase, channel: openPresence(supabase, opts) };
             })
             .catch(() => {});
@@ -130,8 +146,21 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
 
     // Going idle or coming back re-tracks this tab's payload on the open channel.
     useEffect(() => {
-        if (profileId) void channelRef.current?.track(payload(profileId, usernameRef.current, status)).catch(() => {});
+        if (!profileId || !showOnlineRef.current) return;
+        void channelRef.current?.track(payload(profileId, usernameRef.current, status)).catch(() => {});
     }, [status, profileId]);
+
+    // The setting changed while subscribed: announce or withdraw without re-subscribing.
+    useEffect(() => {
+        if (showOnlineRef.current === showOnline) return;
+        showOnlineRef.current = showOnline;
+        const channel = channelRef.current;
+        if (!channel || !profileId) return;
+        const change = showOnline
+            ? channel.track(payload(profileId, usernameRef.current, statusRef.current))
+            : channel.untrack();
+        change.catch(() => {});
+    }, [showOnline, profileId]);
 
     const value = useMemo(
         () => ({

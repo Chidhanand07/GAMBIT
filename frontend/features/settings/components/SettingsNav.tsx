@@ -1,11 +1,13 @@
 import { cn } from '@/lib/design/cn';
 
-export type SettingsSection = 'profile' | 'board' | 'gameplay' | 'account';
+export type SettingsSection = 'profile' | 'board' | 'gameplay' | 'notifications' | 'privacy' | 'account';
 
 export const SECTIONS: { id: SettingsSection; label: string }[] = [
     { id: 'profile', label: 'Public profile' },
     { id: 'board', label: 'Board & pieces' },
     { id: 'gameplay', label: 'Gameplay' },
+    { id: 'notifications', label: 'Notifications' },
+    { id: 'privacy', label: 'Privacy' },
     { id: 'account', label: 'Account' },
 ];
 

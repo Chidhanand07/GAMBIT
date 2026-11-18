@@ -13,6 +13,7 @@ jest.mock('@/lib/sounds', () => ({
 import { usePlayerInput } from '@/features/offline/hooks/usePlayerInput'
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
+import { settingsStore } from '../../helpers/settingsStore'
 
 /** White pawn on a7, one step from promoting. */
 const PROMOTION_FEN = '7k/P7/8/8/8/8/8/4K3 w - - 0 1'
@@ -20,7 +21,7 @@ const PROMOTION_FEN = '7k/P7/8/8/8/8/8/4K3 w - - 0 1'
 function setup(changes: Partial<UserSettings>, blocked = false) {
     const stored = { ...DEFAULT_SETTINGS, ...changes }
     const wrapper = ({ children }: { children: ReactNode }) => (
-        <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>{children}</SettingsProvider>
+        <SettingsProvider store={settingsStore(stored)}>{children}</SettingsProvider>
     )
     const game = new Chess(PROMOTION_FEN)
     const deps = { setLastMove: jest.fn(), refresh: jest.fn(), maverickMove: jest.fn() }

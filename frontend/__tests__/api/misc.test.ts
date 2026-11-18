@@ -41,12 +41,13 @@ describe('notifications', () => {
 })
 
 describe('GET /api/leaderboard', () => {
+    // F-140: the list reads leaderboard_profiles (the profiles that did not opt out).
     // F-125 (was: 'defaults to rapid, top 50' ordered by rating only): the default board is All, a
     // player without a rating on the board is left out, and ties are ordered by username.
     test('defaults to All, top 50, best first, ties by username', async () => {
-        db.queue('profiles', { data: [{ username: 'a' }], error: null })
+        db.queue('leaderboard_profiles', { data: [{ username: 'a' }], error: null })
         expect((await json(await leaderboard(req('/api/leaderboard')))).body).toEqual([{ username: 'a' }])
-        const call = db.callsFor('profiles')[0]
+        const call = db.callsFor('leaderboard_profiles')[0]
         expect(call.ops).toEqual(expect.arrayContaining([
             ['not', 'rating_all', 'is', null],
             ['order', 'rating_all', { ascending: false, nullsFirst: false }],
@@ -58,7 +59,7 @@ describe('GET /api/leaderboard', () => {
 
     test.each(['rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical', 'rating_all'])('accepts field=%s', async (field) => {
         await leaderboard(req(`/api/leaderboard?field=${field}`))
-        expect(db.callsFor('profiles')[0].ops).toContainEqual(['order', field, { ascending: false, nullsFirst: false }])
+        expect(db.callsFor('leaderboard_profiles')[0].ops).toContainEqual(['order', field, { ascending: false, nullsFirst: false }])
     })
 
     test.each(['password', 'id); drop table profiles;--', 'email'])('rejects field=%s without querying', async (field) => {
@@ -69,22 +70,22 @@ describe('GET /api/leaderboard', () => {
 
     // F-125 (was: a HEAD count of every profile): the count is of the players ranked on that board.
     test('sends the number of players ranked on the board (a HEAD count) as X-Total-Count', async () => {
-        db.queue('profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: null, count: 1234 })
+        db.queue('leaderboard_profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: null, count: 1234 })
         const res = await leaderboard(req('/api/leaderboard?field=rating_blitz'))
         expect(res.headers.get('X-Total-Count')).toBe('1234')
-        const count = db.callsFor('profiles')[1]
+        const count = db.callsFor('leaderboard_profiles')[1]
         expect(count.ops).toEqual([['select', 'id', { count: 'exact', head: true }], ['not', 'rating_blitz', 'is', null]])
     })
 
     test('no X-Total-Count when the count fails; the list is still returned', async () => {
-        db.queue('profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: { message: 'x' } })
+        db.queue('leaderboard_profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: { message: 'x' } })
         const res = await leaderboard(req('/api/leaderboard'))
         expect(res.headers.get('X-Total-Count')).toBeNull()
         expect((await json(res)).body).toEqual([{ username: 'a' }])
     })
 
     test('database error → empty list', async () => {
-        db.queue('profiles', { data: null, error: { message: 'x' } })
+        db.queue('leaderboard_profiles', { data: null, error: { message: 'x' } })
         expect(await json(await leaderboard(req('/api/leaderboard')))).toEqual({ status: 200, body: [] })
     })
 })

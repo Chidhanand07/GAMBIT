@@ -118,7 +118,10 @@ describe('disconnect during an active game', () => {
         await sleep(80);
         expect(notices).toEqual([]);
         expect((await getGame(game.id)).disconnectInfo).toBeNull();
-        expect(supabase.calls).toEqual([]);
+        // F-140 (was `supabase.calls` toEqual []): the join reads the players' "Allow spectators";
+        // nothing is written.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
+        expect(supabase.callsFor('user_preferences').map((c) => c.ops[0][0])).toEqual(['select']);
     });
 
     test('completed game or a user without a game → no notice, no DB write', async () => {

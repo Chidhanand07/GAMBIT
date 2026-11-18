@@ -125,6 +125,9 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
 | [F-127](#f-127) | Public-profile fields (city, website, favourites, pronouns, style, experience): CHECK + zod, owner-only grants | B1 | PROFILE-FIELDS |
 | [F-160](#f-160) | Achievements "N in a row" and "Top N" from the longest win streak and the best pool's `leaderboard_rank` | STACK | ACHIEVEMENTS |
+| [F-140](#f-140) | Preferences live in `public.user_preferences` (owner-only RLS, column grants); browser copy uploaded once | B3 | SETTINGS-PREFS |
+| [F-141](#f-141) | What each Notifications / Privacy switch does, and where it is enforced | B3 | SETTINGS-PREFS |
+| [F-142](#f-142) | Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet | B3 | SETTINGS-PREFS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3312,3 +3315,77 @@ their owner (B1 item 8).**
   Review affordance in the mockup and stay as they are.
 - Tests: `ProfilePage.test.tsx` (Review → `/analysis?game=g-row`, was `/game/g-row`; aborted row keeps
   `/game/<id>`), `GameResultPage.test.tsx` ("Open in analysis"), `features/analysis/links.test.ts`.
+
+## F-140
+
+**Preferences live in `public.user_preferences`; the browser copy is uploaded once.** (Track B3,
+item 1; SEC-03, SEC-08, NX-07.)
+
+- **Context.** Settings.dc.html shows play preferences (Board & pieces, Gameplay), Notifications,
+  Privacy and the Account switches. The play preferences lived only in localStorage behind the
+  `SettingsStore` port; the rest had no storage at all.
+- **Options.** (a) columns on `profiles` (world-readable; would need column-level SELECT revokes on a
+  table everyone reads); (b) one JSON blob per user; (c) a table keyed by user id with typed
+  columns for what servers enforce and one `play` JSON object for the client-only board settings.
+- **Decision.** (c), migration `20261118300000_user_preferences.sql`. RLS on; policies select /
+  insert / update own row only (`(select auth.uid()) = user_id`), no DELETE policy; `authenticated`
+  gets SELECT, INSERT and UPDATE on the preference columns only (never `user_id` on UPDATE, never the
+  timestamps); `service_role` gets SELECT only (the game server and the web app's privacy filters
+  read, nobody but the owner writes). `challenge_policy` is a CHECK-ed enum; `play` must be an object
+  of at most 4 KB and is normalised with `parseSettings` before it is stored. pgTAP:
+  `supabase/tests/080_user_preferences.test.sql` (25 assertions).
+- **Writes** go through `PATCH /api/settings` on the caller's session client (as the profile edits
+  do, F-086): UPDATE first, INSERT when there is no row, one retry of the UPDATE when a concurrent
+  first save wins the INSERT. Not an upsert: PostgREST's `DO UPDATE` would need UPDATE on `user_id`.
+- **Client.** The `SettingsStore` port is kept; `load()` may now return a promise and `save()`
+  rejects on failure. `createAccountSettingsStore` reads `/api/settings`; signed out (401) it falls
+  back to localStorage as before. When a signed-in user has no row yet (`stored: false`), the
+  browser's play preferences are PATCHed once and then removed from localStorage; a failed upload
+  keeps them for the next load. The provider reloads on SIGNED_IN / SIGNED_OUT / USER_UPDATED and
+  keeps the old object when the copy did not change, so an open draft survives a token refresh.
+- **Fail closed.** The provider exposes `status`; privacy behaviour that runs in the browser (not
+  announcing presence) waits for `ready` and stays off on `error`.
+
+## F-141
+
+**What each Notifications / Privacy switch does, and where it is enforced.**
+
+| Switch | Effect | Enforced in |
+|---|---|---|
+| Challenges | the bell row for an incoming challenge (the live challenge toast is kept: it is how a challenge is accepted) and the desktop alert | game server `socialService` via `preferencesService.notify`; browser `useChallengeBanner` |
+| Friend requests | the `friend_request` bell row (new: nothing created one before) | `POST /api/friends/request` → `notifyFriendRequest` |
+| Game results | a `game_result` bell row per player ("You won" / "You lost" / "Draw", time control, rating change); only the call that finished the row sends it, so an outbox re-drive cannot duplicate it | game server `gameResultEffects` |
+| Your turn (daily games) | a `your_turn` bell row for the player to move after each move in a game with ≥ 1440 minutes on the clock | game server `moveRecorder` |
+| Browser notifications | asks the browser for permission when switched on; then a desktop notification for an incoming challenge while the tab is hidden (in the foreground the in-app toast shows) | browser only (`lib/browserNotifications`) |
+| Show when I am online | the user is not tracked in the shared presence channel (presence is self-announced, so not announcing is what hides the badge) | `PresenceProvider`; untracks live when switched off |
+| Who can challenge me | `nobody` → `challenges_closed`; `friends` → `friends_only` unless an accepted friendship exists; refused challenges are neither stored nor relayed | game server `socialService.requestChallenge` |
+| Show on leaderboard | left out of the leaderboard list and its count | view `public.leaderboard_profiles` (service_role only) read by `GET /api/leaderboard` |
+| Allow spectators | a non-player is refused `join_game` / `spectate_game` for an active game (`spectating_off`, the game page returns to the lobby); the game is left out of `GET /api/games/live` | game server `gameService`; web app `listLiveGames` |
+
+- **Fail closed.** Privacy checks that cannot read the preferences refuse (`preferences_unavailable`
+  for a challenge, `spectating_off` for a spectator, an empty live list). A notification whose
+  switch cannot be read is not sent.
+- **Not covered.** Finished games stay public history (`games` is world-readable under RLS since the
+  initial schema): "Allow spectators" guards the live room and the live list, not the archive.
+- **Defaults.** Without a provider (isolated components) the defaults are `ready`; in the app the
+  provider starts `loading`.
+
+## F-142
+
+**Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet.**
+
+- **Context.** The brief: a shown preference with no feature behind it gets the minimal real
+  behaviour or an ADR. Three switches have no feature in the app today:
+  - *Weekly email digest*: the app sends no e-mail of its own (Supabase Auth sends only auth mail);
+    a digest needs a mail provider, a scheduler and a template.
+  - *Appear in search*: there is no player search. Usernames are looked up only exactly (profile
+    URLs, "Add friend" on a profile); hiding those lookups would break adding a friend from their
+    profile, which is not what the switch says.
+  - *Email me on new sign-ins*: needs device recognition and a mailer; Supabase Auth has no
+    "new sign-in" notification.
+- **Decision.** The three are real, stored, server-side preferences (columns `notify_email_digest`,
+  `appear_in_search`, `email_on_new_sign_in`) shown and saved exactly as the mockup has them, so the
+  feature that later sends a digest, adds search or sends sign-in mail reads the user's existing
+  choice. Nothing reads them today. Revisit with the first of those features; the search feature
+  must filter on `appear_in_search` server-side (lib/server, like the leaderboard view).
+

@@ -222,3 +222,31 @@ describe('notificationsRepository', () => {
         expect(ops).toEqual(expected);
     });
 });
+
+describe('preferencesRepository [F-140]', () => {
+    const { createPreferencesRepository } = require('../../src/repositories/preferencesRepository');
+
+    test('findByUserIds reads only the enforced columns of the given users', async () => {
+        const { table, ops } = await run(createPreferencesRepository(supabase).findByUserIds(['a', 'b']));
+        expect(table).toBe('user_preferences');
+        expect(ops).toEqual([
+            ['select', 'user_id, challenge_policy, allow_spectators, notify_challenges, notify_game_results, notify_your_turn'],
+            ['in', 'user_id', ['a', 'b']],
+        ]);
+    });
+});
+
+describe('friendshipsRepository [F-140]', () => {
+    const { createFriendshipsRepository } = require('../../src/repositories/friendshipsRepository');
+
+    test('findAcceptedBetween: an accepted friendship in either direction', async () => {
+        const { table, ops } = await run(createFriendshipsRepository(supabase).findAcceptedBetween('a', 'b'));
+        expect(table).toBe('friendships');
+        expect(ops).toEqual([
+            ['select', 'id'],
+            ['eq', 'status', 'accepted'],
+            ['or', 'and(requester_id.eq.a,addressee_id.eq.b),and(requester_id.eq.b,addressee_id.eq.a)'],
+            ['limit', 1],
+        ]);
+    });
+});

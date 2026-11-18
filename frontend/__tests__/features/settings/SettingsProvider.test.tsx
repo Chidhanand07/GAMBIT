@@ -13,19 +13,9 @@ import { useSettingsDraft } from '@/features/settings/hooks/useSettingsDraft';
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model';
 import { SettingsProvider, useBoardPrefs, useUserSettings } from '@/features/settings/SettingsProvider';
 import type { SettingsStore } from '@/features/settings/store';
+import { settingsStore } from '../../helpers/settingsStore';
 
-function memoryStore(initial: UserSettings = DEFAULT_SETTINGS): SettingsStore & { saved: UserSettings[] } {
-    let current = initial;
-    const saved: UserSettings[] = [];
-    return {
-        saved,
-        load: () => current,
-        save: (s) => {
-            current = s;
-            saved.push(s);
-        },
-    };
-}
+const memoryStore = (initial: UserSettings = DEFAULT_SETTINGS) => settingsStore(initial);
 
 const wrap = (store: SettingsStore) =>
     function Wrapper({ children }: { children: ReactNode }) {
@@ -52,13 +42,14 @@ describe('SettingsProvider', () => {
         expect(document.documentElement.style.getPropertyValue('--piece-slide-duration')).toBe('150ms');
     });
 
-    test('save persists through the store and updates every consumer', () => {
+    test('save persists through the store and updates every consumer', async () => {
         const store = memoryStore();
         const { result } = renderHook(() => ({ ctx: useUserSettings(), prefs: useBoardPrefs() }), {
             wrapper: wrap(store),
         });
-        act(() => result.current.ctx.save({ ...DEFAULT_SETTINGS, boardTheme: 'green', pieceAnimation: 'off' }));
+        await act(() => result.current.ctx.save({ ...DEFAULT_SETTINGS, boardTheme: 'green', pieceAnimation: 'off' }));
         expect(store.saved).toHaveLength(1);
+        expect(store.saved[0].play).toMatchObject({ boardTheme: 'green', pieceAnimation: 'off' });
         expect(result.current.prefs).toMatchObject({ theme: 'green', animate: false });
         expect(document.documentElement.style.getPropertyValue('--piece-slide-duration')).toBe('0ms');
     });
@@ -70,7 +61,7 @@ describe('SettingsProvider', () => {
 });
 
 describe('useSettingsDraft', () => {
-    test('edits stay in the draft until Save; Reset restores the defaults into the draft', () => {
+    test('edits stay in the draft until Save; Reset restores the defaults into the draft', async () => {
         const store = memoryStore();
         const { result } = renderHook(() => ({ draft: useSettingsDraft(), saved: useUserSettings().settings }), {
             wrapper: wrap(store),
@@ -78,7 +69,7 @@ describe('useSettingsDraft', () => {
         act(() => result.current.draft.set('boardTheme', 'walnut'));
         expect(result.current.draft.draft.boardTheme).toBe('walnut');
         expect(result.current.saved.boardTheme).toBe('maple');
-        act(() => result.current.draft.commit());
+        await act(() => result.current.draft.commit());
         expect(result.current.saved.boardTheme).toBe('walnut');
         expect(result.current.draft.status).toBe('Changes saved.');
         act(() => result.current.draft.reset());

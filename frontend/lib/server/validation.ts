@@ -61,6 +61,18 @@ const optionalField = (max: number) => z.string().trim().min(1).max(max).nullish
 /** An optional link: an https URL with a host (F-127; the database CHECK is the same rule). */
 const optionalHttpsUrl = z.string().trim().max(PROFILE_TEXT_LIMITS.website).refine(isHttpsUrl).nullish();
 
+const MAX_PLAY_KEYS = 32;
+const MAX_PLAY_TOKEN_LENGTH = 32;
+const optionalFlag = z.boolean().optional();
+
+/**
+ * The play preferences object (features/settings/model.ts): short string or boolean values
+ * only, a bounded number of keys. The route normalises it with parseSettings before storing.
+ */
+const playPreferences = z
+    .record(z.string().max(MAX_PLAY_TOKEN_LENGTH), z.union([z.string().max(MAX_PLAY_TOKEN_LENGTH), z.boolean()]))
+    .refine((value) => Object.keys(value).length <= MAX_PLAY_KEYS);
+
 export const schemas = {
     /**
      * Any 8-4-4-4-12 hex id. z.guid(), not z.uuid(): zod 4's uuid() also checks the RFC 9562
@@ -127,6 +139,30 @@ export const schemas = {
         pronouns: z.enum(PRONOUNS).nullish(),
         playingStyle: z.enum(PLAYING_STYLES).nullish(),
         experience: z.enum(EXPERIENCE_LEVELS).nullish(),
+    }),
+    /** PATCH /api/settings (ADR F-140): any subset of the sections and their keys. */
+    preferencesPatch: z.object({
+        play: playPreferences.optional(),
+        notifications: z
+            .object({
+                challenges: optionalFlag,
+                friendRequests: optionalFlag,
+                gameResults: optionalFlag,
+                yourTurn: optionalFlag,
+                emailDigest: optionalFlag,
+                browser: optionalFlag,
+            })
+            .optional(),
+        privacy: z
+            .object({
+                showOnline: optionalFlag,
+                challengePolicy: z.enum(['everyone', 'friends', 'nobody']).optional(),
+                appearInSearch: optionalFlag,
+                showOnLeaderboard: optionalFlag,
+                allowSpectators: optionalFlag,
+            })
+            .optional(),
+        security: z.object({ emailOnNewSignIn: optionalFlag }).optional(),
     }),
     gamePatch: z.object({ draw_offer: z.boolean().optional(), rematch_requested: z.boolean().optional() }),
     computerMove: z.object({

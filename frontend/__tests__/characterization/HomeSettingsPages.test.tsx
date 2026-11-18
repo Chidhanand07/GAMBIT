@@ -280,9 +280,18 @@ describe('settings page', () => {
         expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    test('Board & pieces: rows edit the live preview; Save stores them, Reset restores the defaults', () => {
+    // F-140 (was: Save wrote `gambit-settings` to localStorage): signed in, Save PATCHes
+    // /api/settings; the browser copy is uploaded once on the first load and then cleared.
+    test('Board & pieces: rows edit the live preview; Save stores them on the server, Reset restores the defaults', async () => {
         localStorage.clear()
+        localStorage.setItem('gambit-settings', JSON.stringify({ boardTheme: 'slate' }))
+        fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+            url === '/api/settings' && !init?.method ? jsonResponse({ stored: false }) : jsonResponse({ stored: true, play: {} }))
         render(<SettingsProvider><SettingsPage /></SettingsProvider>)
+        await flush()
+        const patches = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/settings' && init?.method === 'PATCH')
+        expect(JSON.parse(patches()[0][1].body)).toEqual({ play: expect.objectContaining({ boardTheme: 'slate' }) })
+        expect(localStorage.getItem('gambit-settings')).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
         const coords = screen.getByRole('switch', { name: 'Show coordinates' })
         const preview = () => screen.getByRole('img', { name: 'Board preview' })
@@ -296,9 +305,10 @@ describe('settings page', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Walnut' }))
         expect(screen.getByRole('button', { name: 'Walnut' })).toHaveAttribute('aria-pressed', 'true')
         expect(screen.getByRole('img', { name: 'Board preview' }).querySelector('.bg-board-walnut-light')).not.toBeNull()
-        expect(localStorage.getItem('gambit-settings')).toBeNull()
+        expect(patches()).toHaveLength(1)
         fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-        expect(JSON.parse(localStorage.getItem('gambit-settings')!)).toMatchObject({ boardTheme: 'walnut', showCoordinates: true })
+        await flush()
+        expect(JSON.parse(patches()[1][1].body).play).toMatchObject({ boardTheme: 'walnut', showCoordinates: true })
         expect(screen.getByRole('status')).toHaveTextContent('Changes saved.')
         fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
         expect(screen.getByRole('button', { name: 'Maple' })).toHaveAttribute('aria-pressed', 'true')
@@ -342,6 +352,19 @@ describe('settings page', () => {
         }
     }, AXE_TIMEOUT_MS)
 
+    test('F-140: a failed save says so and keeps the edit in the draft', async () => {
+        fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+            init?.method === 'PATCH' ? jsonResponse({ error: 'x' }, false) : jsonResponse({ stored: true, play: {} }))
+        render(<SettingsProvider><SettingsPage /></SettingsProvider>)
+        await flush()
+        fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Green' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        expect(screen.getByRole('alert')).toHaveTextContent('Could not save your settings. Try again.')
+        expect(screen.getByRole('button', { name: 'Green' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
     test('Gameplay: auto-queen and resign confirmation drive the preview demo', () => {
         render(<SettingsPage />)
         fireEvent.click(screen.getByRole('button', { name: 'Gameplay' }))
@@ -356,13 +379,16 @@ describe('settings page', () => {
         expect(screen.getByText('You resigned. Game over.')).toBeInTheDocument()
     })
 
-    test('[REDESIGN-INTEGRATION] only settings that work are offered: no Notifications/Privacy tabs or unbacked account, gameplay or profile controls', () => {
+    // F-140 (was: sections ['Public profile', 'Board & pieces', 'Gameplay', 'Account'] and
+    // `notification|privacy|sign-in emails` in the unbacked list): Notifications and Privacy are
+    // stored on the server and enforced, so their tabs and rows are offered now.
+    test('[REDESIGN-INTEGRATION] only settings that work are offered: no unbacked account, gameplay or profile controls', () => {
         render(<SettingsPage />)
         const sections = within(screen.getByRole('group', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
-        expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Account'])
+        expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account'])
         // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
         // those are real profile columns now; everything else here still has no backing.
-        const unbacked = /notification|privacy|two-factor|2fa|sign-in emails|delete account|change email|premove|takeback|move by|piece set|visib/i
+        const unbacked = /two-factor|2fa|delete account|change email|premove|takeback|move by|piece set|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]

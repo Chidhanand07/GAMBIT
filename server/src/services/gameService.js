@@ -22,6 +22,18 @@ const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
 
 const DISCONNECT_TIMEOUT_SECONDS = 20;
+const SPECTATING_OFF = Object.freeze({ ok: false, error: 'spectating_off' });
+
+/**
+ * May someone who is not playing `game` watch it? Only an active game is guarded: a finished
+ * game is public history. Fails closed (the preferences service answers false on errors).
+ * @param {GameCtx} ctx
+ * @param {any} game
+ */
+async function spectatorAllowed(ctx, game) {
+    if (game.status !== 'active' || !ctx.preferences) return true;
+    return ctx.preferences.spectatingAllowed([game.whiteId, game.blackId]);
+}
 
 /**
  * @typedef {import('./emitter').Emitter} Emitter
@@ -43,6 +55,15 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {SpectatorsPort} [spectators] live spectator counts (F-130); without it none are sent
  * @property {() => number} [now]
+ * @property {PreferencesPort} [preferences] the players' "Allow spectators" and notification switches
+ *   (ADR F-140); index.js always passes it. Without it everyone may watch and nobody is notified.
+ */
+
+/**
+ * @typedef {object} PreferencesPort
+ * @property {(playerIds: string[]) => Promise<boolean>} spectatingAllowed
+ * @property {(n: { userId: string, column: import('../domain/preferences').NotificationColumn,
+ *   type: string, payload: object }) => Promise<boolean>} notify
  */
 
 /**
@@ -99,10 +120,13 @@ async function loadOrRestore({ gameStore, gamesRepo, now }, gameId, client) {
  * @param {string} userId the connection's verified user
  */
 async function joinGame(ctx, gameId, client, userId) {
+    const loaded = await loadOrRestore(ctx, gameId, client);
+    // A spectator the players do not allow never enters the room (ADR F-140).
+    if (loaded && !isParticipant(loaded, userId) && !(await spectatorAllowed(ctx, loaded))) return SPECTATING_OFF;
     client.join(gameRoom(gameId));
-
-    const game = await loadOrRestore(ctx, gameId, client);
-    if (!game) return;
+    if (!loaded) return;
+    // Re-read after joining: a move made in between is in the state sent below.
+    const game = (await ctx.gameStore.getGame(gameId)) ?? loaded;
     // Only a live game is linked: a link to a finished game would never be cleaned up (G17).
     if (game.status === 'active' && isParticipant(game, userId)) {
         ctx.sessions.linkSocket(client.id, gameId);
@@ -302,15 +326,17 @@ function createGameService(deps) {
     /** @type {GameCtx} */
     const ctx = { ...deps, now, moves: createMoveRecorder({ ...deps, now }), finalizer };
     return {
-        /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<void>} */
+        /** @type {(gameId: string, client: ClientPort, userId: string) => Promise<{ ok: boolean, error?: string } | void>} */
         joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),
         /**
-         * `spectate_game`: join the room only if the game exists (H8).
-         * @type {(gameId: string, client: ClientPort, userId?: string) => Promise<void>}
+         * `spectate_game`: join the room only if the game exists (H8) and its players allow
+         * spectators (ADR F-140); a signed-in viewer is counted (F-130).
+         * @type {(gameId: string, client: ClientPort, userId?: string) => Promise<{ ok: boolean, error?: string } | void>}
          */
         spectate: async (gameId, client, userId) => {
             const game = await deps.gameStore.getGame(gameId);
             if (!game) return;
+            if (!(await spectatorAllowed(ctx, game))) return SPECTATING_OFF;
             client.join(gameRoom(gameId));
             if (userId) await viewerCount(ctx, game, userId, client.id);
         },

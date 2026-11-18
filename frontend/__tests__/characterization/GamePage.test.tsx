@@ -43,6 +43,7 @@ jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast: jest.fn() }) 
 import GamePage from '@/app/game/[id]/page'
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
 import { SettingsProvider, useUserSettings } from '@/features/settings/SettingsProvider'
+import { settingsStore } from '../helpers/settingsStore'
 import * as sounds from '@/lib/sounds'
 import { routeParams } from '../helpers/params'
 
@@ -90,7 +91,7 @@ async function renderGame(id = 'g1') {
 /** The page under a SettingsProvider holding `changes` over the default settings. */
 async function renderGameWithSettings(changes: Partial<UserSettings>) {
     const stored = { ...DEFAULT_SETTINGS, ...changes }
-    const store = { load: () => stored, save: jest.fn() }
+    const store = settingsStore(stored)
     const utils = render(
         <SettingsProvider store={store}>
             <GamePage params={routeParams({ id: 'g1' })} />
@@ -114,7 +115,7 @@ function MoveSoundsSwitch() {
 }
 function renderGameWithSoundSwitch() {
     return render(
-        <SettingsProvider store={{ load: () => DEFAULT_SETTINGS, save: jest.fn() }}>
+        <SettingsProvider store={settingsStore(DEFAULT_SETTINGS)}>
             <MoveSoundsSwitch />
             <GamePage params={routeParams({ id: 'g1' })} />
         </SettingsProvider>,
@@ -158,7 +159,17 @@ describe('mount', () => {
         await renderGame()
         // Was (LEGACY): the socket effect depended on myColor, so resolving the seat re-emitted the join.
         // S2: identity travels in the socket handshake, so no `authenticate` is emitted.
-        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
+        // F-140 (was ['join_game', 'g1']): the join carries an ack callback, for the spectator refusal.
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1', expect.any(Function)]])
+    })
+
+    test('F-140: a spectator the players do not allow (spectating_off) is sent back to the lobby', async () => {
+        await renderGame()
+        const ack = socket.emit.mock.calls[0][2]
+        ack({ ok: false, error: 'game_not_found' })
+        expect(push).not.toHaveBeenCalledWith('/lobby')
+        ack({ ok: false, error: 'spectating_off' })
+        expect(push).toHaveBeenCalledWith('/lobby')
     })
 
     test('a refreshed profile object (same user) does not re-join or re-register handlers [F2]', async () => {
@@ -324,7 +335,7 @@ describe('mount', () => {
         await screen.findAllByText(/Alice|Bob/)
         const reads = spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length
         rerender(
-            <SettingsProvider store={{ load: () => DEFAULT_SETTINGS, save: jest.fn() }}>
+            <SettingsProvider store={settingsStore(DEFAULT_SETTINGS)}>
                 <MoveSoundsSwitch />
                 <GamePage params={routeParams({ id: 'g1' })} />
             </SettingsProvider>,
@@ -540,7 +551,8 @@ describe('server events', () => {
         socket.emit.mockClear()
         socket.serverSends('connect')
         expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument()
-        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1']])
+        // F-140 (was ['join_game', 'g1']): with the ack callback for the spectator refusal.
+        expect(socket.emit.mock.calls).toEqual([['join_game', 'g1', expect.any(Function)]])
     })
 })
 
@@ -1105,13 +1117,14 @@ describe('board controls', () => {
         renderGameWithSoundSwitch()
         await screen.findAllByText(/Alice|Bob/)
         const registrations = socket.on.mock.calls.length
-        click(screen.getAllByTitle('Toggle sound')[0])
+        // F-140: saving a setting is async (the store may be the server), so the click is awaited.
+        await act(async () => { click(screen.getAllByTitle('Toggle sound')[0]) })
         // Was (LEGACY): soundOn was a dependency of the socket effect, so toggling re-emitted join_game.
         expect(socket.emitted('join_game')).toEqual(['g1'])
         expect(socket.on.mock.calls.length).toBe(registrations)
         socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4' })
         expect(sounds.playMoveSound).not.toHaveBeenCalled()
-        click(screen.getAllByTitle('Toggle sound')[0])
+        await act(async () => { click(screen.getAllByTitle('Toggle sound')[0]) })
         socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5' })
         expect(sounds.playMoveSound).toHaveBeenCalledTimes(1)
     })

@@ -1,24 +1,30 @@
 import { useState } from 'react';
 import type { SettingsSection } from '../components/SettingsNav';
 import type { SettingsProfile } from '../types';
+import { useAccountPrefsDraft } from './useAccountPrefsDraft';
 import { useAuthEmail } from './useAuthEmail';
+import { useBrowserNotifications } from './useBrowserNotifications';
 import { useProfileSettings } from './useProfileSettings';
-import { useSettingsDraft } from './useSettingsDraft';
+import { DEFAULTS_RESTORED, useSettingsDraft } from './useSettingsDraft';
 
-const DEFAULTS_RESTORED = 'Defaults restored.';
-
-/** State of the settings page: active section, the profile form, the preferences draft and the email. */
+/**
+ * State of the settings page: active section, the profile form, the play-preferences draft,
+ * the account-preferences draft (Notifications, Privacy, Account) and the email.
+ */
 export function useSettingsPage(profile: SettingsProfile | null, refetch: () => void) {
     const [section, setSectionState] = useState<SettingsSection>('profile');
     const [profileNote, setProfileNote] = useState('');
     const form = useProfileSettings(profile, refetch);
     const draft = useSettingsDraft();
+    const accountDraft = useAccountPrefsDraft();
+    const browser = useBrowserNotifications();
     const email = useAuthEmail();
 
     const setSection = (next: SettingsSection) => {
         setSectionState(next);
         setProfileNote('');
         draft.clearStatus();
+        accountDraft.clearStatus();
     };
     const saveProfile = () => {
         setProfileNote('');
@@ -26,17 +32,35 @@ export function useSettingsPage(profile: SettingsProfile | null, refetch: () => 
     };
     /**
      * "Reset to defaults" (Settings.dc.html): one reset for every section. Unsaved profile edits go
-     * back to the saved profile and the play preferences to their defaults; nothing is stored until
-     * Save. Every bar then says "Defaults restored.".
+     * back to the saved profile, the play and account preferences to their defaults; nothing is
+     * stored until Save. Every bar then says "Defaults restored.".
      */
     const resetAll = () => {
         form.resetFields();
         draft.reset();
+        accountDraft.resetAll();
         setProfileNote(DEFAULTS_RESTORED);
+    };
+    /** Account rows: turning "Browser notifications" on asks the browser for permission first. */
+    const setAccountPref = (sectionKey: Parameters<typeof accountDraft.set>[0], key: string, value: unknown) => {
+        accountDraft.set(sectionKey, key, value);
+        if (sectionKey === 'notifications' && key === 'browser' && value === true) void browser.request();
     };
     const profileStatus = profileNote || (form.saved ? 'Changes saved.' : '');
 
-    return { section, setSection, form, draft, email, saveProfile, resetAll, profileStatus };
+    return {
+        section,
+        setSection,
+        form,
+        draft,
+        accountDraft,
+        setAccountPref,
+        browserPermission: browser.permission,
+        email,
+        saveProfile,
+        resetAll,
+        profileStatus,
+    };
 }
 
 export type SettingsPageState = ReturnType<typeof useSettingsPage>;

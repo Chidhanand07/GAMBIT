@@ -10,6 +10,11 @@ import type { RatingField, SpeedBucket } from '@/types/timeControl';
 export type LeaderboardField = RatingField | 'rating_all';
 
 const LEADERBOARD_SIZE = 50;
+/**
+ * The public leaderboard reads `leaderboard_profiles`: every profile except those whose owner
+ * turned "Show on leaderboard" off (view in 20261118300000_user_preferences.sql, ADR F-140).
+ */
+const LEADERBOARD_SOURCE = 'leaderboard_profiles';
 const RATING_FIELD_PREFIX = 'rating_';
 const LEADERBOARD_COLUMNS = `username, display_name, rating_all, rating_bullet, rating_blitz, rating_rapid, rating_classical,
     rated_games_bullet, rated_games_blitz, rated_games_rapid, rated_games_classical, games_played, wins, losses, draws`;
@@ -19,7 +24,7 @@ const STANDING_COLUMNS = `rating_all, rating_bullet, rating_blitz, rating_rapid,
 /** The top 50 of a board; a player without a rating there (All before a rated game) is not listed. */
 export function listLeaderboard(admin: SupabaseClient, field: LeaderboardField) {
     return admin
-        .from('profiles')
+        .from(LEADERBOARD_SOURCE)
         .select(LEADERBOARD_COLUMNS)
         .not(field, 'is', null)
         .order(field, { ascending: false, nullsFirst: false })
@@ -29,7 +34,7 @@ export function listLeaderboard(admin: SupabaseClient, field: LeaderboardField) 
 
 /** How many players the board ranks (a HEAD count, no rows read). */
 export function countLeaderboardPlayers(admin: SupabaseClient, field: LeaderboardField) {
-    return admin.from('profiles').select('id', { count: 'exact', head: true }).not(field, 'is', null);
+    return admin.from(LEADERBOARD_SOURCE).select('id', { count: 'exact', head: true }).not(field, 'is', null);
 }
 
 /** The board name public.leaderboard_rank takes: "all" or the pool. */
