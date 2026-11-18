@@ -16,7 +16,6 @@ something odd, the test asserts the odd behaviour and marks it with a
 | `HomeSettingsPages.test.tsx` | `app/page.tsx` (landing) and `app/settings/page.tsx` |
 | `ProfileProvider.test.tsx` / `PresenceProvider.test.tsx` | the two context providers |
 | `sounds.test.ts` | `lib/sounds.ts` |
-| `KnightCanvas.test.tsx` | `components/ui/KnightBackground.tsx` (recorded canvas calls, digest snapshots) |
 | `AnalysisPage.test.tsx` | `app/analysis/page.tsx` |
 | `AppHeader.test.tsx` | `features/navigation/components/AppHeaderContainer.tsx` (was `Navbar.test.tsx`, rewritten for the redesign) |
 | `OfflinePage.test.tsx` | `app/offline/page.tsx` |
