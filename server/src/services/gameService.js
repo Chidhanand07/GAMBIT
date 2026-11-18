@@ -10,12 +10,10 @@
  * Clocks are persisted in one column pair, `white_clock_ms` / `black_clock_ms`
  * (G2): the same pair the restore reads.
  */
-const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
+const { freezeClocks, resumeClocks } = require('../domain/clock');
 const { REASON } = require('../domain/adjudication');
 const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
-const { requestsView } = require('../domain/pendingRequests');
-const { premoveView } = require('../domain/premove');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom, playerRoom } = require('./emitter');
@@ -23,6 +21,7 @@ const { createDrawOffers } = require('./drawOfferService');
 const { createGameFinalizer } = require('./gameFinalizer');
 const { createPremoves } = require('./premoveService');
 const { createTakebacks } = require('./takebackService');
+const { sendState } = require('./gameStateSync');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
 
@@ -138,7 +137,10 @@ async function joinGame(ctx, gameId, client, userId) {
         // Visible to every instance: is any socket of this player still at this board?
         client.join(playerRoom(gameId, userId));
     }
-    sendState(ctx, game, client, { viewerId: userId, spectators: await viewerCount(ctx, game, userId, client.id) });
+    sendState(ctx.now(), game, client, {
+        viewerId: userId,
+        spectators: await viewerCount(ctx, game, userId, client.id),
+    });
 }
 
 /**
@@ -159,47 +161,6 @@ async function viewerCount({ spectators }, game, userId, socketId) {
         log.error(`[spectators] game ${game.id}:`, /** @type {Error} */ (e).message);
         return undefined;
     }
-}
-
-/**
- * Send `client` the authoritative view of `game`: the result when it is over,
- * otherwise position, move log and clocks (`game_state_sync`), the standing requests,
- * and the viewer's own queued premove.
- * @param {GameCtx} ctx
- * @param {any} game
- * @param {ClientPort} client
- * @param {{ viewerId?: string, spectators?: number }} [viewer] the connection's verified user, and
- *   how many watch when known
- */
-function sendState(ctx, game, client, { viewerId, spectators } = {}) {
-    // If game is already completed in Redis, notify joining client
-    if (game.status === 'completed') {
-        client.emit('game_end', {
-            game_id: game.id,
-            result: resultLabel(game.result),
-            reason: game.reason || 'Game over',
-            white_id: game.whiteId,
-            black_id: game.blackId,
-        });
-        return;
-    }
-
-    // Real remaining time (frozen while a player is disconnected or before the first move).
-    const { whiteMs, blackMs } = clocksAt(game, ctx.now());
-
-    client.emit('game_state_sync', {
-        fen: game.fen,
-        moveLog: game.moveLog || [],
-        whiteMs,
-        blackMs,
-        activeSide: game.activeSide,
-        clockActive: isClockRunning(game),
-        whiteId: game.whiteId,
-        blackId: game.blackId,
-        ...(spectators === undefined ? {} : { spectators }),
-        ...requestsView(game),
-        ...premoveView(game, viewerId),
-    });
 }
 
 /**
@@ -257,7 +218,7 @@ async function makeMove(ctx, data, userId, client) {
         const at = ctx.now();
         await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at), at);
     } else if (outcome.game) {
-        sendState(ctx, outcome.game, client, { viewerId: userId });
+        sendState(ctx.now(), outcome.game, client, { viewerId: userId });
     }
     return { ok: false, error: outcome.reason };
 }

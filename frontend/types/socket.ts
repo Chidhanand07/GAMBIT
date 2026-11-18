@@ -6,6 +6,17 @@
 import type { Game, MoveLogEntry, PlayerColor } from './game';
 import type { Profile } from './profile';
 import type { TimeControl } from './timeControl';
+import type {
+    DrawDeclinedPayload,
+    DrawOfferedPayload,
+    PremoveDiscardedPayload,
+    TakebackAppliedPayload,
+    TakebackDeclinedPayload,
+    TakebackPrefsPayload,
+    TakebackRequestedPayload,
+} from './gameRequests';
+
+export type * from './gameRequests';
 
 type ChallengeColor = PlayerColor | 'random';
 
@@ -170,61 +181,10 @@ export interface GameStateSyncPayload {
     premove?: { from: string; to: string; promotion?: string };
 }
 
-/** The owner's premove was not legal after the opponent's move and was dropped. */
-export interface PremoveDiscardedPayload {
-    game_id: string;
-    reason: 'illegal_move';
-}
-
-/** A player asked to take back their last move (`plies`: 1, or 2 when the opponent replied). */
-export interface TakebackRequestedPayload {
-    game_id: string;
-    by: PlayerColor;
-    plies: number;
-}
-
-/** A player declined the standing takeback request. */
-export interface TakebackDeclinedPayload {
-    game_id: string;
-    by: PlayerColor;
-}
-
-/** The takeback was granted: the restored position, move log and clocks. */
-export interface TakebackAppliedPayload {
-    game_id: string;
-    plies: number;
-    fen: string;
-    moveLog: MoveLogEntry[];
-    whiteMs: number;
-    blackMs: number;
-    activeSide: 'w' | 'b';
-    clockActive: boolean;
-}
-
-/** Both players' takeback settings after one of them changed. */
-export interface TakebackPrefsPayload {
-    game_id: string;
-    white?: boolean;
-    black?: boolean;
-}
-
 /** A live game's spectator count changed (F-130). */
 export interface SpectatorsChangedPayload {
     game_id: string;
     count: number;
-}
-
-/** A player offered a draw (`ply`: moves played at that moment). */
-export interface DrawOfferedPayload {
-    game_id: string;
-    by: PlayerColor;
-    ply: number;
-}
-
-/** A player declined the standing draw offer. */
-export interface DrawDeclinedPayload {
-    game_id: string;
-    by: PlayerColor;
 }
 
 /** An accepted move, broadcast to the room. Every field is computed by the server. */
