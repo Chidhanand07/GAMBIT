@@ -101,7 +101,7 @@ describe('PresenceProvider', () => {
             ['on', 'presence', 'join'],
             ['on', 'presence', 'leave'],
             ['subscribe'],
-            ['track', { user_id: 'u1', username: 'unknown' }],
+            ['track', { user_id: 'u1', username: 'unknown', status: 'online' }],
         ])
         presence = { a: [], b: [], c: [] }
         act(() => presenceHandlers.join())
@@ -160,5 +160,38 @@ describe('PresenceProvider', () => {
         expect(supabase.channel).toHaveBeenCalledTimes(1)
         expect(supabase.channel.mock.calls[0][1]).toEqual({ config: { presence: { key: 'u1' } } })
         pathname = '/lobby'
+    })
+})
+
+describe('away status [LIVE-2]', () => {
+    function Away() {
+        const { awayUserIds, onlineUserIds } = usePresence()
+        return <div data-testid="away">{[...onlineUserIds].map((id) => `${id}:${awayUserIds.has(id) ? 'away' : 'on'}`).join(',')}</div>
+    }
+
+    test('re-tracks this tab as away after AWAY_AFTER_MS without input, and online on input', async () => {
+        jest.useFakeTimers()
+        try {
+            profile = { id: 'u1', username: 'alice' }
+            render(<PresenceProvider><Away /></PresenceProvider>)
+            await flush() // the Supabase client loads lazily (F-111)
+            await act(async () => { await subscribeCb!('SUBSCRIBED') })
+            expect(channel.track).toHaveBeenLastCalledWith({ user_id: 'u1', username: 'alice', status: 'online' })
+            await act(async () => { jest.advanceTimersByTime(5 * 60_000) })
+            expect(channel.track).toHaveBeenLastCalledWith({ user_id: 'u1', username: 'alice', status: 'away' })
+            await act(async () => { window.dispatchEvent(new Event('keydown')) })
+            expect(channel.track).toHaveBeenLastCalledWith({ user_id: 'u1', username: 'alice', status: 'online' })
+        } finally {
+            jest.useRealTimers()
+        }
+    })
+
+    test('exposes who is away from the channel state', async () => {
+        profile = { id: 'u1', username: 'alice' }
+        render(<PresenceProvider><Away /></PresenceProvider>)
+        await flush() // the Supabase client loads lazily (F-111)
+        presence = { u1: [{ status: 'online' }], u2: [{ status: 'away' }] }
+        act(() => presenceHandlers.sync())
+        expect(screen.getByTestId('away')).toHaveTextContent('u1:on,u2:away')
     })
 })

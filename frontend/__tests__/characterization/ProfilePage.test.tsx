@@ -46,7 +46,8 @@ jest.mock('@/lib/supabase/client', () => ({
 
 // F11: the Online badge reads PresenceProvider's shared presence set.
 let onlineUserIds: ReadonlySet<string> = new Set()
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds, awayUserIds }) }))
+let awayUserIds: ReadonlySet<string> = new Set()
 
 import ProfilePage from '@/app/profile/[username]/page'
 import { routeParams } from '../helpers/params'
@@ -78,6 +79,7 @@ beforeEach(() => {
     channels.length = 0
     removeChannel.mockClear()
     onlineUserIds = new Set()
+    awayUserIds = new Set()
     window.history.replaceState(null, '', '/')
     routes = {
         '/api/profile/bob': BOB,
@@ -689,6 +691,21 @@ describe('presence', () => {
         onlineUserIds = new Set(['someone-else'])
         rerender(page())
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
+    })
+
+    test('the Overview friends card shows Online, Away and Offline (Profile.dc.html) [LIVE-2]', async () => {
+        routes['/api/friends?userId=u-bob'] = [
+            { id: 'f1', username: 'ann', display_name: null, friendship_id: 'a' },
+            { id: 'f2', username: 'cal', display_name: null, friendship_id: 'b' },
+            { id: 'f3', username: 'dee', display_name: null, friendship_id: 'c' },
+        ]
+        onlineUserIds = new Set(['f1', 'f2'])
+        awayUserIds = new Set(['f2'])
+        await renderProfile()
+        const line = (name: string) => screen.getByRole('link', { name }).parentElement!
+        expect(line('ann')).toHaveTextContent('Online')
+        expect(line('cal')).toHaveTextContent('Away')
+        expect(line('dee')).toHaveTextContent('Offline')
     })
 
     // F11 (was: 'unmount removes the channel'): there is no page-owned channel to remove.

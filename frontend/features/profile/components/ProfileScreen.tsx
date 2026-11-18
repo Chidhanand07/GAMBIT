@@ -86,7 +86,7 @@ function ActiveTab({ s, profile }: { s: ProfilePageState; profile: Profile }) {
                     facts={aboutFacts(profile)}
                     badges={achievements(record, s.stats.stats)}
                     friends={s.friends.friends}
-                    onlineIds={s.onlineIds}
+                    presence={s.presence}
                     recentGames={s.recent.games}
                     recentLoading={s.recent.loading}
                     onSeeFriends={() => s.setActiveTab('friends')}

@@ -24,7 +24,7 @@ const serverSends = (event: string, payload: any) => act(() => { handlers.get(ev
 let profile: any = { id: 'me', username: 'me1', rating_blitz: 1400 }
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42, onlineUserIds: new Set(['f-on']) }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42, onlineUserIds: new Set(['f-on', 'f-away']), awayUserIds: new Set(['f-away']) }) }))
 
 import LobbyPage from '@/app/lobby/page'
 
@@ -36,6 +36,7 @@ const liveGames = [{
 const friends = [
     { id: 'f-off', username: 'zed', display_name: null, avatar_url: null, rating_rapid: 1100.4, rating_blitz: 1050, friendship_id: 'x' },
     { id: 'f-on', username: 'amy', display_name: 'Amy', avatar_url: null, rating_rapid: 1376, rating_blitz: 1239, friendship_id: 'y' },
+    { id: 'f-away', username: 'moe', display_name: null, avatar_url: null, rating_rapid: 1200, rating_blitz: 1200, friendship_id: 'z' },
 ]
 
 let fetchMock: jest.Mock
@@ -139,6 +140,9 @@ test('Friend lists my friends, online first, and Challenge opens the challenge p
     expect(screen.getByText('Online · 1239')).toBeInTheDocument()
     expect(screen.getByText('Offline · 1050')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Challenge Amy' })).toHaveAttribute('href', '/challenge/amy')
+    // Away (every tab idle) can still be challenged, as in Main.dc.html [LIVE-2].
+    expect(screen.getByText('Away · 1200')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Challenge moe' })).toHaveAttribute('href', '/challenge/moe')
     expect(screen.queryByRole('link', { name: 'Challenge zed' })).not.toBeInTheDocument()
 })
 

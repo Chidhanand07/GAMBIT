@@ -155,6 +155,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | ADR | Title | PR | Items |
 |---|---|---|---|
 | [F-130](#f-130) | Spectator counts in Redis with a heartbeat; the lobby reads them over its socket | B2 | LIVE-1 |
+| [F-131](#f-131) | Friend "Away": each tab reports idleness in its presence payload | B2 | LIVE-2 |
 
 ---
 
@@ -3165,4 +3166,26 @@ their owner (B1 item 8).**
   `integration/spectatorsTwoInstances.test.js` (two full instances over one real Redis: viewers on both,
   players see every change, a killed instance's viewer is pruned by the survivor); socket, schema and
   frontend tests.
+
+## F-131
+
+**Friend "Away": each tab reports idleness in its presence payload (LIVE-2).**
+
+- **Context.** Profile.dc.html and Main.dc.html list friends as Online (green), Away (amber) or Offline
+  (grey); presence (F-080) only knew present or not.
+- **Decision.** The existing Supabase presence channel (`gambit-online-users`, keyed by profile id)
+  carries a `status` in each tab's payload: `online`, or `away` after `AWAY_AFTER_MS` (5 minutes) with no
+  pointer, key, wheel or touch input. A hidden tab gets no input, so it goes away on the same timer;
+  becoming visible counts as input. A change re-tracks the payload on the open channel (no re-subscribe).
+  A user is Away only when every tab says so; one active tab is Online; a tab of an older client without
+  a status counts as Online. `PresenceProvider` exposes `awayUserIds` next to `onlineUserIds` (still every
+  present user, so the online counts do not change).
+- **Trust.** Idleness is the client's own report about itself and only changes a label; nothing is
+  authorised by it (identity is still the presence key the provider tracks for the signed-in profile).
+- **UI.** Lobby: Online, then Away, then Offline; Away friends can still be challenged (Main.dc.html
+  enables Challenge for every status but Offline). Profile Overview: dot and label per status.
+- **Not done.** The live game seat's "online" flag keeps using presence only (the design has no Away there).
+- **Proof.** `lib/presence/presenceStatus.test.ts`, `components/useIdleStatus.test.tsx`,
+  `characterization/PresenceProvider.test.tsx` (re-track after idle and on input), lobby and profile
+  page tests.
 

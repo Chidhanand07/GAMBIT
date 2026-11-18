@@ -22,7 +22,7 @@ let profile: any = null
 let onlineCount = 42
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount, onlineUserIds: new Set<string>() }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount, onlineUserIds: new Set<string>(), awayUserIds: new Set<string>() }) }))
 const toast = jest.fn()
 jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 

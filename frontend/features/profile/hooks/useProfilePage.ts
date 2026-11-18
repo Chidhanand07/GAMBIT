@@ -6,7 +6,7 @@ import { useFriends } from './useFriends';
 import { useFriendStatus } from './useFriendStatus';
 import { useGameHistory } from './useGameHistory';
 import { useProfileData } from './useProfileData';
-import { useOnlineIds, useProfilePresence } from './useProfilePresence';
+import { usePresenceSets, useProfilePresence } from './useProfilePresence';
 import { useProfileStats } from './useProfileStats';
 import { useProfileTab } from './useProfileTab';
 import { useRecentGames } from './useRecentGames';
@@ -26,7 +26,7 @@ export function useProfilePage(username: string) {
     const stats = useProfileStats({ username, activeTab, profile });
     const friends = useFriends({ activeTab, profile, isOwnProfile });
     const isOnline = useProfilePresence(profile?.id);
-    const onlineIds = useOnlineIds();
+    const presence = usePresenceSets();
     const [filter, setFilter] = useState<GameFilter>('All');
     const [mode, setMode] = useState<SpeedBucket>('blitz');
 
@@ -42,7 +42,7 @@ export function useProfilePage(username: string) {
         stats,
         friends,
         isOnline,
-        onlineIds,
+        presence,
         filter,
         setFilter,
         shownGames,

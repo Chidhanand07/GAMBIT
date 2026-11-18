@@ -6,15 +6,16 @@ jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, cl
 
 const friend = (id: string, username: string) => ({ id, username, display_name: null, friendship_id: `f-${id}` }) as never
 
-test('status text and dot per friend; Away needs the optional away set', () => {
+// Stacking (was: `onlineIds` + optional `awayIds` props): the card takes the presence sets of
+// PresenceProvider, where away users are also present (F-131).
+test('status text and dot per friend; Away from the away set', () => {
     render(
         <OverviewTab
             profileId="me"
             facts={[]}
             badges={[]}
             friends={[friend('a', 'ann'), friend('b', 'ben'), friend('c', 'cid')]}
-            onlineIds={new Set(['a', 'b'])}
-            awayIds={new Set(['b'])}
+            presence={{ present: new Set(['a', 'b']), away: new Set(['b']) }}
             recentGames={[]}
             recentLoading={false}
             onSeeFriends={jest.fn()}

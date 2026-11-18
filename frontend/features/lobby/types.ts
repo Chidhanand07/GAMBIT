@@ -1,5 +1,6 @@
 // Types local to the lobby feature.
 import type { useProfile } from '@/components/ProfileProvider';
+import type { PresenceStatus } from '@/lib/presence/presenceStatus';
 
 /** The signed-in profile exactly as ProfileProvider exposes it. */
 export type LobbyProfile = NonNullable<ReturnType<typeof useProfile>['profile']>;
@@ -20,8 +21,8 @@ export interface LobbyFriend {
     avatar_url: string | null;
     /** Rating in the pool of the selected time control (GET /api/friends returns every pool, F-125). */
     rating: number;
-    /** In the shared presence set right now. */
-    online: boolean;
+    /** Online, Away (every tab idle) or Offline, from the shared presence channel. */
+    status: PresenceStatus;
 }
 
 /** Which play-mode panel is open under the "You're playing" bar. */
