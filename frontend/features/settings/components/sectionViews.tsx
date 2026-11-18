@@ -151,7 +151,10 @@ export function accountView({ profile, state }: ViewProps): SectionView {
             </SettingsCard>
         ),
         preview: (
-            <AccountPreview email={state.email} signInEmails={state.accountDraft.draft.security.emailOnNewSignIn} />
+            <AccountPreview
+                email={state.account.emailChange.value.trim() || state.email}
+                signInEmails={state.accountDraft.draft.security.emailOnNewSignIn}
+            />
         ),
     };
 }

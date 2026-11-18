@@ -128,6 +128,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-140](#f-140) | Preferences live in `public.user_preferences` (owner-only RLS, column grants); browser copy uploaded once | B3 | SETTINGS-PREFS |
 | [F-141](#f-141) | What each Notifications / Privacy switch does, and where it is enforced | B3 | SETTINGS-PREFS |
 | [F-142](#f-142) | Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet | B3 | SETTINGS-PREFS |
+| [F-143](#f-143) | Change e-mail: `updateUser` on the session client, token-hash confirm route, strict rate limit | B3 | CHANGE-EMAIL |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3388,4 +3389,33 @@ item 1; SEC-03, SEC-08, NX-07.)
   feature that later sends a digest, adds search or sends sign-in mail reads the user's existing
   choice. Nothing reads them today. Revisit with the first of those features; the search feature
   must filter on `appear_in_search` server-side (lib/server, like the leaderboard view).
+
+## F-143
+
+**Change e-mail: `updateUser({ email })` on the session client, a token-hash confirm route, and a
+rate limit that fails closed.** (Track B3, item 2; NX-07, SEC-09, NODE-12.)
+
+- **Context.** Settings.dc.html shows the Account e-mail as an editable field ("Used for sign-in and
+  account recovery."). Until now it was read-only.
+- **Decision.**
+  - `POST /api/account/email` (body `{ email }`, trimmed, lower-cased, ≤ 254, `z.email()`):
+    `requireFreshUser()` → strict rate limit → `auth.updateUser({ email }, { emailRedirectTo })` on
+    the caller's **session** client (never the admin API, which would skip confirmation). The
+    current address is refused (400). Supabase errors map to fixed messages (409 exists, 429 mail
+    limit, 400 invalid, else 500, logged without the address).
+  - Supabase mails the link(s) per the project's settings (one to the new address; one to the
+    current address too with *Secure email change*). Nothing changes until they are followed.
+  - `GET /auth/confirm?token_hash&type=email_change&next`: `verifyOtp({ type: 'email_change',
+    token_hash })` on a response-cookie client, then a redirect to `next` (same-site paths only, S6)
+    with `?email=confirmed`, or `?email=link_invalid`. Token-hash rather than the PKCE `?code=` link:
+    the PKCE verifier lives in the cookie of the browser that asked, so a link opened from another
+    device or mail client would fail. Only `email_change` is accepted.
+  - UI: the field shows the pending address ("Confirmation sent to …") from Supabase's `new_email`
+    (so it survives a reload), the error when refused, and the link result when the user comes back.
+    The Account card's Save sends the e-mail first, then the switches; a refused e-mail saves nothing.
+  - Rate limit `changeEmail` 5 / user / hour through `enforceStrictRateLimit`: unlike the other
+    limits (which fail open, RATE-LIMITS ADR), a store error refuses with 503, and so does a missing
+    store in production; development without Upstash still works.
+- **Templates** and redirect URLs: DEPLOY.md §1b-2.
+- **When 2FA is on** the change additionally needs an AAL2 session (F-144).
 

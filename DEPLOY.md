@@ -97,6 +97,33 @@ Notes on the late migrations:
 The same migrations and the pgTAP tests in `supabase/tests/` run in CI on an empty database
 (job `Database (Supabase)`, section 8).
 
+### 1b-2. Auth e-mail templates and settings for the Account page
+
+Settings → Account lets a signed-in user change their e-mail (ADR F-143). The web app calls
+`supabase.auth.updateUser({ email })` on the user's own session; Supabase mails the confirmation
+link(s) and changes nothing until they are followed. Configure, in **Authentication**:
+
+1. **Providers → Email**: keep **Confirm email** on, and turn **Secure email change** on (the
+   default): Supabase then mails a link to the current *and* the new address, and the change
+   happens only when both are followed. With it off, only the new address gets a link.
+2. **URL Configuration → Redirect URLs**: add `https://<your-app>/auth/confirm` (and
+   `http://localhost:3000/auth/confirm` for local development).
+3. **Email Templates → Change Email Address**: the link must go to the app's `/auth/confirm` route,
+   which verifies the token on the server (so it works in any browser, not only the one that asked):
+
+   ```html
+   <h2>Confirm your new email</h2>
+   <p>Follow this link to confirm the change of your Gambit email from {{ .Email }} to {{ .NewEmail }}:</p>
+   <p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email_change&next=/settings">Confirm email change</a></p>
+   ```
+
+   The same template is used for the mail to the current address when *Secure email change* is on.
+   The route accepts only `type=email_change`; any other or expired link lands on
+   `/settings?email=link_invalid`, a good one on `/settings?email=confirmed`.
+4. **Rate limits**: Supabase's own "emails sent per hour" limit still applies. The app adds 5 change
+   requests per user per hour (`changeEmail`, Upstash), and refuses the request (503) when the
+   limiter's store is unavailable or, in production, not configured (fail closed).
+
 ### 1c. Storage bucket for avatars
 The settings page uploads avatars from the browser to a Storage bucket named `avatars`. No migration
 creates it: create a **public** bucket `avatars` in **Storage**, with a policy that lets signed-in

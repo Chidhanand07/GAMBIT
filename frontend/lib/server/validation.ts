@@ -140,6 +140,10 @@ export const schemas = {
         playingStyle: z.enum(PLAYING_STYLES).nullish(),
         experience: z.enum(EXPERIENCE_LEVELS).nullish(),
     }),
+    /** POST /api/account/email (ADR F-143): the new address, trimmed and lower-cased. */
+    emailChange: z.object({
+        email: z.string().trim().toLowerCase().max(MAX_EMAIL_LENGTH).pipe(z.email()),
+    }),
     /** PATCH /api/settings (ADR F-140): any subset of the sections and their keys. */
     preferencesPatch: z.object({
         play: playPreferences.optional(),

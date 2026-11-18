@@ -1,9 +1,10 @@
 import { SIGN_IN_EMAIL_ROW } from '../accountRows';
 import type { SettingsPageState } from '../hooks/useSettingsPage';
 import type { SettingsProfile } from '../types';
+import { EmailField } from './EmailField';
 import { SaveBar } from './SettingsCard';
 import { AccountSettingRow } from './SettingRow';
-import { FIELD, HINT, READONLY_INPUT } from './styles';
+import { FIELD, READONLY_INPUT } from './styles';
 
 const DEFAULT_RATING = 1200;
 
@@ -35,26 +36,20 @@ function Ratings({ profile }: { profile: SettingsProfile }) {
 
 /** Username, email, the four ratings (rounded, 1200 when missing), the account switches and Save. */
 export function AccountSection({ profile, state }: { profile: SettingsProfile; state: SettingsPageState }) {
-    const { accountDraft, email } = state;
+    const { accountDraft, account } = state;
     return (
         <>
             <label className={`${FIELD} pt-2`}>
                 <span className="font-semibold">Username</span>
                 <input type="text" value={profile.username} readOnly className={READONLY_INPUT} />
             </label>
-            {email && (
-                <label className={FIELD}>
-                    <span className="font-semibold">Email</span>
-                    <input type="email" value={email} readOnly className={READONLY_INPUT} />
-                    <span className={HINT}>Used for sign-in and account recovery.</span>
-                </label>
-            )}
+            <EmailField email={account.emailChange} link={account.emailLink} />
             <Ratings profile={profile} />
             <div>
                 <AccountSettingRow row={SIGN_IN_EMAIL_ROW} prefs={accountDraft.draft} onChange={state.setAccountPref} />
             </div>
             <SaveBar
-                onSave={() => void accountDraft.commit()}
+                onSave={() => void account.save()}
                 onReset={state.resetAll}
                 saving={accountDraft.saving}
                 status={accountDraft.status}

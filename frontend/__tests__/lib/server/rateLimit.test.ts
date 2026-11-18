@@ -76,8 +76,9 @@ describe('limit()', () => {
 describe('RATE_LIMITS', () => {
     test('every rule is a positive limit over a positive window, with a unique id', () => {
         const rules = Object.values(RATE_LIMITS)
+        // F-143 (was the five public-write rules only): + changeEmail, a strict per-user limit.
         expect(rules.map((r) => r.id).sort()).toEqual(
-            ['friendRequest', 'loginEmail', 'loginIp', 'maverickMove', 'signup'].sort(),
+            ['changeEmail', 'friendRequest', 'loginEmail', 'loginIp', 'maverickMove', 'signup'].sort(),
         )
         for (const r of rules) {
             expect(r.limit).toBeGreaterThan(0)

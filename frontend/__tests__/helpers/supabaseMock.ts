@@ -55,6 +55,8 @@ export function createSupabaseMock() {
             getClaims: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: null, error: null })),
             getSession: jest.fn(async () => ({ data: { session: null }, error: null })),
             signInWithPassword: jest.fn(async () => ({ data: { session: null }, error: null })),
+            updateUser: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: { user: null }, error: null })),
+            verifyOtp: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: { user: null }, error: null })),
             admin: {
                 createUser: jest.fn(async () => ({ data: { user: null }, error: null })),
                 deleteUser: jest.fn(async () => ({ data: null, error: null })),
@@ -88,6 +90,8 @@ export function createSupabaseMock() {
             client.auth.getClaims.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.getSession.mockReset().mockResolvedValue({ data: { session: null }, error: null })
             client.auth.signInWithPassword.mockReset().mockResolvedValue({ data: { session: null }, error: null })
+            client.auth.updateUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
+            client.auth.verifyOtp.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.admin.createUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.admin.deleteUser.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.admin.getUserById.mockReset().mockResolvedValue({ data: { user: null }, error: null })

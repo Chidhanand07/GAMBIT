@@ -9,7 +9,10 @@ const profile = {
     rating_bullet: 1200, rating_blitz: 1200, rating_rapid: 1025.4, rating_classical: 1200, created_at: '2024-01-01',
 }
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile, loading: false, refetch: jest.fn() }) }))
-jest.mock('@/lib/supabase/client', () => ({ createClient: () => ({}) }))
+let authUser: { email: string; new_email: string | null } = { email: 'me@example.com', new_email: null }
+jest.mock('@/lib/supabase/client', () => ({
+    createClient: () => ({ auth: { getUser: async () => ({ data: { user: authUser } }) } }),
+}))
 
 import SettingsPage from '@/app/settings/page'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
@@ -20,10 +23,16 @@ const flush = async () => {
     for (let i = 0; i < 5; i++) await act(async () => {})
 }
 
+const reply = (status: number, body: unknown) => ({ ok: status < 300, status, headers: new Headers(), json: async () => body })
 let fetchMock: jest.Mock
+let emailReply = reply(200, { pending: true, email: 'new@example.com' })
 beforeEach(() => {
-    fetchMock = jest.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => [{ username: 'x' }, { username: 'me1' }] }))
+    authUser = { email: 'me@example.com', new_email: null }
+    emailReply = reply(200, { pending: true, email: 'new@example.com' })
+    fetchMock = jest.fn(async (url: string) =>
+        url === '/api/account/email' ? emailReply : reply(200, [{ username: 'x' }, { username: 'me1' }]))
     ;(global as any).fetch = fetchMock
+    window.history.replaceState(null, '', '/settings')
 })
 
 function open(section: string, store = settingsStore()) {
@@ -126,3 +135,59 @@ describe('Account', () => {
         expect(store.current().account.security.emailOnNewSignIn).toBe(false)
     })
 })
+
+describe('Account: change email (F-143)', () => {
+    const emailBox = () => screen.getByPlaceholderText('you@example.com') as HTMLInputElement
+
+    test('editable, prefilled with the sign-in address; Save sends a changed address and shows it pending', async () => {
+        const store = open('Account')
+        await flush()
+        expect(emailBox().value).toBe('me@example.com')
+        fireEvent.change(emailBox(), { target: { value: 'New@Example.com' } })
+        expect(within(screen.getByRole('complementary', { name: 'Live preview' })).getByText('New@Example.com')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        const call = fetchMock.mock.calls.find(([url]) => url === '/api/account/email')!
+        expect(JSON.parse(call[1].body)).toEqual({ email: 'new@example.com' })
+        expect(screen.getByText('Confirmation sent to new@example.com. Follow the link in that email to finish the change.')).toBeInTheDocument()
+        expect(store.saved).toHaveLength(1)
+    })
+
+    test('an unchanged address sends nothing; a refused change shows the reason and the switches are not saved', async () => {
+        const store = open('Account')
+        await flush()
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        expect(fetchMock.mock.calls.some(([url]) => url === '/api/account/email')).toBe(false)
+        emailReply = reply(409, { error: 'An account with this email already exists.' })
+        fireEvent.change(emailBox(), { target: { value: 'taken@example.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        expect(screen.getByRole('alert')).toHaveTextContent('An account with this email already exists.')
+        expect(store.saved).toHaveLength(1)
+        emailReply = reply(429, { error: 'rate_limited' })
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        expect(screen.getByRole('alert')).toHaveTextContent('Too many attempts. Try again later.')
+    })
+
+    test('a change already waiting for confirmation is shown on load; Reset puts the current address back', async () => {
+        authUser = { email: 'me@example.com', new_email: 'later@example.com' }
+        open('Account')
+        await flush()
+        expect(screen.getByText(/Confirmation sent to later@example.com/)).toBeInTheDocument()
+        fireEvent.change(emailBox(), { target: { value: 'x@example.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+        expect(emailBox().value).toBe('me@example.com')
+    })
+
+    test('back from a confirmation link: the Account card opens and says how it went', async () => {
+        window.history.replaceState(null, '', '/settings?email=link_invalid')
+        render(<SettingsProvider store={settingsStore()}><SettingsPage /></SettingsProvider>)
+        await flush()
+        expect(screen.getByRole('heading', { name: 'Account' })).toBeInTheDocument()
+        expect(screen.getByRole('alert')).toHaveTextContent('That confirmation link is invalid or has expired.')
+        expect(window.location.search).toBe('')
+    })
+})
+

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { SettingsSection } from '../components/SettingsNav';
 import type { SettingsProfile } from '../types';
 import { useAccountPrefsDraft } from './useAccountPrefsDraft';
-import { useAuthEmail } from './useAuthEmail';
+import { useAccountCard } from './useAccountCard';
 import { useBrowserNotifications } from './useBrowserNotifications';
 import { useProfileSettings } from './useProfileSettings';
 import { DEFAULTS_RESTORED, useSettingsDraft } from './useSettingsDraft';
@@ -17,8 +17,14 @@ export function useSettingsPage(profile: SettingsProfile | null, refetch: () => 
     const form = useProfileSettings(profile, refetch);
     const draft = useSettingsDraft();
     const accountDraft = useAccountPrefsDraft();
+    const account = useAccountCard(accountDraft);
     const browser = useBrowserNotifications();
-    const email = useAuthEmail();
+    // Back from an e-mail confirmation link: open the Account card, where the result is shown.
+    const [shownLink, setShownLink] = useState(account.emailLink);
+    if (account.emailLink !== shownLink) {
+        setShownLink(account.emailLink);
+        if (account.emailLink) setSectionState('account');
+    }
 
     const setSection = (next: SettingsSection) => {
         setSectionState(next);
@@ -39,6 +45,7 @@ export function useSettingsPage(profile: SettingsProfile | null, refetch: () => 
         form.resetFields();
         draft.reset();
         accountDraft.resetAll();
+        account.reset();
         setProfileNote(DEFAULTS_RESTORED);
     };
     /** Account rows: turning "Browser notifications" on asks the browser for permission first. */
@@ -56,7 +63,8 @@ export function useSettingsPage(profile: SettingsProfile | null, refetch: () => 
         accountDraft,
         setAccountPref,
         browserPermission: browser.permission,
-        email,
+        account,
+        email: account.email,
         saveProfile,
         resetAll,
         profileStatus,
