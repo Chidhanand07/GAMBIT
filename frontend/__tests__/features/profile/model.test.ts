@@ -3,7 +3,6 @@ import {
     achievements,
     colourRows,
     filterGames,
-    peakRating,
     statFacts,
     timeControlLabel,
     gameRowDetail,
@@ -42,18 +41,6 @@ describe('achievements', () => {
     test('first win, highest wins and games milestones reached', () => {
         expect(achievements(record(120, 55)).map((b) => b.name)).toEqual(['First win', '50 wins', '100 games']);
         expect(achievements(record(12, 1)).map((b) => b.name)).toEqual(['First win', '10 games']);
-    });
-});
-
-describe('peakRating', () => {
-    test.each([
-        [1100, 1300, 1300],
-        [1100.4, 900, 1100],
-        [null, 1500.6, 1501],
-        [1200, null, null],
-        [1200, undefined, null],
-    ])('(%p, %p) → %p', (rating, peak, out) => {
-        expect(peakRating(rating, peak)).toBe(out);
     });
 });
 

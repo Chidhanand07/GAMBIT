@@ -45,17 +45,6 @@ export function achievements(record: ProfileRecord): Badge[] {
     return badges;
 }
 
-const isRating = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
-
-/**
- * Highest rating reached in a category: the stored peak, never below the current rating
- * (a peak column can lag one game behind). Null when the profile has no peak (F12).
- */
-export function peakRating(rating: number | null | undefined, peak: number | null | undefined): number | null {
-    if (!isRating(peak)) return null;
-    return Math.round(isRating(rating) ? Math.max(peak, rating) : peak);
-}
-
 export function matchesFriendSearch(friend: Pick<Friend, 'username' | 'display_name'>, query: string): boolean {
     if (!query) return true;
     const q = query.toLowerCase();

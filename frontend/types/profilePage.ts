@@ -64,5 +64,10 @@ export interface ProfileStats {
     ratings?: Partial<Record<SpeedBucket, number | null>>;
     byCategory?: Partial<Record<SpeedBucket, CategoryRecord>>;
     byColour?: Partial<Record<'white' | 'black', CategoryRecord>>;
+    /**
+     * Rating per pool: the one before the first recorded game, then the one after each rated game,
+     * oldest first (F-121). Empty for a pool without recorded games (games rated before F-120 have none).
+     */
+    ratingHistory?: Partial<Record<SpeedBucket, number[]>>;
     facts?: ProfileFacts;
 }

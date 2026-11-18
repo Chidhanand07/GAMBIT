@@ -19,8 +19,8 @@ const HISTORY_COLUMNS = `
             black:profiles!games_black_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;
 /** Columns the profile Stats tab needs: outcome, speed bucket, colour, accuracy and date. */
-const STATS_COLUMNS =
-    'id, time_control, status, winner_id, result, white_id, black_id, white_accuracy, black_accuracy, created_at';
+const STATS_COLUMNS = `id, time_control, status, winner_id, result, white_id, black_id, white_accuracy, black_accuracy,
+    created_at, ended_at, rating_category, white_rating_before, white_rating_after, black_rating_before, black_rating_after`;
 const FINISHED_STATUSES = ['completed', 'finished', 'ended'];
 
 /** A deadline that passed more than this long ago means the game timed out while the server was down. */

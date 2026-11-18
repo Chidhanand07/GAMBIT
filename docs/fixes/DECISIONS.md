@@ -117,6 +117,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
 | [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
 | [F-120](#f-120) | Rated games store both ratings before/after; only `apply_game_result` writes them | B1 | RATING-SNAPSHOT |
+| [F-121](#f-121) | Rating chart, Peak and Low from the stored snapshots (supersedes F-082) | B1 | RATING-HISTORY |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2927,3 +2928,21 @@ not a required check.**
 - **Rollout.** Migration first, then the web app (it only reads the columns). Rollback:
   `GRANT INSERT, UPDATE ON TABLE public.games TO service_role;` and re-create the function from
   `20261113100000_rating_atomic.sql`. pgTAP `060_game_rating_snapshots.test.sql`.
+
+## F-121
+
+**The profile's rating chart is drawn from the stored snapshots; Peak/Low come from them too
+(B1 item 2; supersedes F-082).**
+
+- **Context.** "Rating over time" (Profile.dc.html) needs a series per pool. F-082 read
+  `profiles.peak_<pool>`, a column no migration ever created, so Peak never showed.
+- **Decision.** `GET /api/profile/[username]/stats` returns `ratingHistory` per pool, built in
+  `lib/server/ratingHistory.ts` from the player's finished games: the rating before the first game
+  with a snapshot (F-120), then the rating after each one, ordered by `ended_at`. The page draws it
+  with the mockup's geometry (`features/profile/ratingChart.ts`): "Peak · Low · ±change over N
+  games", where N is the number of rated games (the mockup counted points). `peakRating` and the
+  `peak_*` reads are removed.
+- **Empty pool.** Without a recorded game the card keeps the grid and says that history is recorded
+  for rated games from now on and earlier games have none (they cannot be recomputed, F-120).
+- **Cost.** No extra query: the stats route already reads the player's finished games; it now also
+  selects the snapshot columns.

@@ -2,6 +2,7 @@ import 'server-only';
 import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
+import { ratingHistory, type SnapshotGameRow } from './ratingHistory';
 
 /** Rating reported for a bucket whose column is null. */
 const DEFAULT_RATING = 1200;
@@ -20,7 +21,7 @@ interface StatsProfileRow {
     rating_classical: number | null;
 }
 
-interface StatsGameRow extends OutcomeRow {
+interface StatsGameRow extends OutcomeRow, SnapshotGameRow {
     time_control: string | null;
     white_accuracy?: number | null;
     black_accuracy?: number | null;
@@ -118,6 +119,7 @@ export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[
         },
         byCategory: statsByCategory(games, profile.id),
         byColour: statsByColour(games, profile.id),
+        ratingHistory: ratingHistory(games, profile.id),
         facts: {
             averageAccuracy: averageAccuracy(games, profile.id),
             longestWinStreak: longestWinStreak(games, profile.id),

@@ -214,44 +214,36 @@ describe('header and overview tab', () => {
     })
 
     // Redesign: the per-mode ratings moved from Overview cards to the Stats tab's "Rating over time"
-    // card (one mode at a time, Blitz first). F12 (was: 'Peak = CURRENT rating (peak_* ignored)'):
-    // Peak reads peak_<category>, never below the current rating, and is hidden when unknown.
+    // card (one mode at a time, Blitz first). F-121 (was: 'Peak from peak_*' and 'Peak never below
+    // the current rating, hidden without a peak'; no migration ever created peak_*): Peak, Low and the
+    // change come from the stats' rating history, recorded per rated game since F-120.
     const showMode = (name: string) => click(screen.getByRole('button', { name }))
-    async function openStats() {
-        routes['/api/profile/bob/stats'] = {}
+    async function openStats(stats: unknown = {}) {
+        routes['/api/profile/bob/stats'] = stats
         await renderProfile()
         click(screen.getByRole('button', { name: 'Stats' }))
         await settle()
     }
 
-    test('rating card shows rounded ratings, "—" for missing, and Peak from peak_*', async () => {
-        await openStats()
+    test('rating card shows rounded ratings, "—" for missing, and Peak / Low / change from the history', async () => {
+        await openStats({ ratingHistory: { blitz: [1200, 1262, 1251], bullet: [], rapid: [1500, 1400] } })
         expect(screen.getByText('1251')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1350')).toBeInTheDocument()
-        showMode('Bullet')
-        expect(screen.getByText('1100')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1262 · Low 1200 · +51 over 2 games')).toBeInTheDocument()
+        expect(screen.getByRole('img', { name: 'Blitz rating over the last 2 games' })).toBeInTheDocument()
         showMode('Rapid')
         expect(screen.getByText('1400')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1500')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1500 · Low 1400 · -100 over 1 game')).toBeInTheDocument()
         showMode('Classical')
         expect(screen.getByText('—')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1600')).toBeInTheDocument()
-        expect(screen.queryByText('Peak 1100')).not.toBeInTheDocument()
     })
 
-    test('F12: Peak is never below the current rating and is hidden when the profile has no peak', async () => {
-        routes['/api/profile/bob'] = {
-            ...BOB, peak_bullet: 900, peak_blitz: null, peak_rapid: undefined, peak_classical: undefined,
-        }
-        await openStats()
+    test('F-121: a mode without recorded games says so and shows no Peak', async () => {
+        await openStats({ ratingHistory: { blitz: [] } })
         expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
+        expect(screen.getByText(/No blitz rating history yet/)).toBeInTheDocument()
         showMode('Bullet')
-        expect(screen.getByText('Peak 1100')).toBeInTheDocument()
-        for (const mode of ['Rapid', 'Classical']) {
-            showMode(mode)
-            expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
-        }
+        expect(screen.getByText('1100')).toBeInTheDocument()
+        expect(screen.getByText(/No bullet rating history yet/)).toBeInTheDocument()
     })
 
     // Redesign: the Record card became About facts ("Record", "Win rate").

@@ -162,6 +162,24 @@ describe('GET /api/profile/[username]/stats', () => {
         })
     })
 
+    test('rating history per pool from the stored snapshots, oldest first [F-121]', async () => {
+        const p = uid('p')
+        db.queue('profiles', { data: { id: p, games_played: 3, wins: 2, losses: 1, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                { time_control: '3', white_id: p, black_id: uid('x'), winner_id: p, rating_category: 'blitz', ended_at: '2026-11-11T10:00:00Z',
+                  white_rating_before: 1208, white_rating_after: 1215.6, black_rating_before: 1300, black_rating_after: 1293 },
+                { time_control: '3', white_id: uid('x'), black_id: p, winner_id: p, rating_category: 'blitz', ended_at: '2026-11-10T10:00:00Z',
+                  white_rating_before: 1250, white_rating_after: 1242, black_rating_before: 1200, black_rating_after: 1208 },
+                { time_control: '10', white_id: p, black_id: uid('x'), winner_id: uid('x'), ended_at: '2026-11-09T10:00:00Z' },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.ratingHistory).toEqual({ bullet: [], blitz: [1200, 1208, 1216], rapid: [], classical: [] })
+        expect(String(db.op(db.callsFor('games')[0], 'select')![0])).toContain('white_rating_after')
+    })
+
     test('F12: an aborted game is not counted, and a game nobody won is a draw, not a loss', async () => {
         db.queue('profiles', { data: { id: uid('p'), games_played: 0, wins: 0, losses: 0, draws: 0 }, error: null })
         db.queue('games', {

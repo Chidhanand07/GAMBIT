@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Tabs } from '@/components/ui/Tabs';
 import type { Profile } from '@/types/profile';
 import type { ProfilePageState } from '../hooks/useProfilePage';
-import { aboutFacts, achievements, peakRating } from '../model';
+import { aboutFacts, achievements } from '../model';
 import type { ProfileTab } from '../types';
 import { FriendsTab } from './FriendsTab';
 import { GamesTab } from './GamesTab';
@@ -59,8 +59,7 @@ function ActiveTab({ s, profile }: { s: ProfilePageState; profile: Profile }) {
                             mode={s.mode}
                             onMode={s.setMode}
                             rating={roundedRating(profile[`rating_${s.mode}`])}
-                            peak={peakRating(profile[`rating_${s.mode}`], profile[`peak_${s.mode}`])}
-                            played={s.stats.stats?.byCategory?.[s.mode]?.played ?? null}
+                            history={s.stats.stats?.ratingHistory?.[s.mode] ?? null}
                         />
                     }
                 />
