@@ -7,7 +7,7 @@ import { Chess } from 'chess.js';
 import { useSocket } from '@/components/SocketProvider';
 import { useProfile } from '@/components/ProfileProvider';
 import { useToast } from '@/components/Toast';
-import { useUserSettings } from '@/features/settings/SettingsProvider';
+import { useBoardPrefs, useUserSettings } from '@/features/settings/SettingsProvider';
 import type { GameWithPlayers } from '@/types/game';
 import { createInitialGameState, gameReducer } from '../state/gameReducer';
 import { bindGameCommands } from './gameCommands';
@@ -35,13 +35,15 @@ export function useGameController(gameId: string) {
     const { profile: myProfile } = useProfile();
     const { toast } = useToast();
     const { autoQueen, confirmResignDraw } = useUserSettings().settings;
+    // Settings → "Move sounds" (F-102): the game page has no sound control of its own.
+    const soundOn = useBoardPrefs().sound;
     const notify = (message: string) => toast(message, 'error');
     const [state, dispatch] = useReducer(gameReducer, undefined, createInitialGameState);
     const { moveListRef, ...refs } = useGameRefs();
     const { chessRef, clockSyncedRef, lastProcessedFenRef } = refs;
     const disconnect = useOpponentDisconnect();
-    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify, autoQueen });
-    const { myColor, soundOn, gameOver, gameData } = state;
+    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify, autoQueen, soundOn });
+    const { myColor, gameOver, gameData } = state;
     const { markDisconnected, markReconnected, opponentDisconnected } = disconnect;
 
     useMoveHistory({ gameId, state, chessRef, dispatch });

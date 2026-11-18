@@ -19,10 +19,8 @@ function drawWithoutConfirm() {
     // TODO(draw-offer): emit draw_offer once the server flow is approved — see design/DRAW-OFFER-PROPOSAL.md
 }
 
-function boardControls({ state, dispatch, confirmResignDraw = true }: BindOptions, resign: () => void) {
+function boardControls({ dispatch, confirmResignDraw = true }: BindOptions, resign: () => void) {
     return {
-        soundOn: state.soundOn,
-        onToggleSound: () => dispatch({ type: 'soundToggled' }),
         onFlip: () => dispatch({ type: 'flipToggled' }),
         onToggleFocus: () => dispatch({ type: 'focusToggled' }),
         onDraw: confirmResignDraw ? confirmWith(dispatch, 'draw') : drawWithoutConfirm,

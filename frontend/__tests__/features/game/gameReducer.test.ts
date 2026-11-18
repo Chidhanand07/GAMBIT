@@ -10,7 +10,7 @@ describe('initial state', () => {
         const s = createInitialGameState()
         expect(s).toMatchObject({
             fen: START_FEN, gameData: null, myColor: 'spectator', selectedSq: null, legalDests: [], lastMove: null,
-            moveList: [], fenSnapshots: [], viewIndex: null, flipped: false, soundOn: true,
+            moveList: [], fenSnapshots: [], viewIndex: null, flipped: false,
             chatMsg: '', connected: true, pendingPromotion: null, whiteRatingChange: null, blackRatingChange: null,
             whiteTime: 600, blackTime: 600, gameOver: null, rematchState: 'idle',
             rematchFromUser: '', confirm: null, focus: false, clockActive: false,
@@ -147,13 +147,16 @@ describe('server sync', () => {
 })
 
 describe('ui toggles', () => {
-    test('sound, flip, focus, chat, connection, confirmation dialog', () => {
+    // was: 'sound, flip, …' with a soundToggled action — [F-102] move sounds follow Settings,
+    // the game state has no sound switch of its own.
+    test('flip, focus, chat, connection, confirmation dialog', () => {
         const s = run([
-            { type: 'soundToggled' }, { type: 'flipToggled' }, { type: 'focusToggled' },
+            { type: 'flipToggled' }, { type: 'focusToggled' },
             { type: 'chatReceived', line: { from: 'bob', text: 'hi', fromUserId: 'opp' } },
             { type: 'connectionChanged', connected: false }, { type: 'confirmSet', value: 'resign' },
         ])
-        expect(s).toMatchObject({ soundOn: false, flipped: true, focus: true, connected: false, confirm: 'resign' })
+        expect(s).not.toHaveProperty('soundOn')
+        expect(s).toMatchObject({ flipped: true, focus: true, connected: false, confirm: 'resign' })
         expect(s.chatLog).toEqual([{ from: 'bob', text: 'hi', fromUserId: 'opp' }])
         expect(gameReducer(s, { type: 'confirmSet', value: null }).confirm).toBeNull()
     })

@@ -41,7 +41,7 @@ jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast: jest.fn() }) 
 
 import GamePage from '@/app/game/[id]/page'
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
-import { SettingsProvider } from '@/features/settings/SettingsProvider'
+import { SettingsProvider, useUserSettings } from '@/features/settings/SettingsProvider'
 import * as sounds from '@/lib/sounds'
 import { routeParams } from '../helpers/params'
 
@@ -97,6 +97,27 @@ async function renderGameWithSettings(changes: Partial<UserSettings>) {
     )
     await screen.findAllByText(/Alice|Bob/)
     return utils
+}
+
+/**
+ * [F-102] Move sounds are the Settings switch (the game page has no sound control): a stand-in
+ * for the Settings page that flips "Move sounds" while the game stays mounted.
+ */
+function MoveSoundsSwitch() {
+    const { settings, save } = useUserSettings()
+    return (
+        <button type="button" title="Toggle sound" onClick={() => save({ ...settings, moveSounds: !settings.moveSounds })}>
+            Settings: move sounds
+        </button>
+    )
+}
+function renderGameWithSoundSwitch() {
+    return render(
+        <SettingsProvider store={{ load: () => DEFAULT_SETTINGS, save: jest.fn() }}>
+            <MoveSoundsSwitch />
+            <GamePage params={routeParams({ id: 'g1' })} />
+        </SettingsProvider>,
+    )
 }
 
 /** A board square (a button while I may move, else a plain cell). */
@@ -209,7 +230,9 @@ describe('mount', () => {
         // ratings for a 5-minute game come from rating_blitz, rounded
         expect(screen.getByText('1512')).toBeInTheDocument()
         expect(screen.getByText('1488')).toBeInTheDocument()
-        expect(screen.getByText('You')).toBeInTheDocument()
+        // was: a "You" chip on my strip — [F-102] Game.dc.html has none; my clock is "Your clock"
+        expect(screen.queryByText('You')).not.toBeInTheDocument()
+        expect(screen.getAllByRole('timer').map(t => t.getAttribute('aria-label'))).toEqual(['Black clock', 'Your clock'])
         expect(screen.getByText('Your move')).toBeInTheDocument()
         expect(screen.getByText('No moves yet.')).toBeInTheDocument()
         // title, pills and game info from the game row
@@ -223,13 +246,17 @@ describe('mount', () => {
         profile = { ...ME, id: 'spectator-id' }
         await renderGame()
         expect(screen.queryByText('You')).not.toBeInTheDocument()
+        expect(screen.queryByRole('timer', { name: 'Your clock' })).toBeNull()
     })
 
-    test('the "You" badge follows my strip when I flip the board [F4]', async () => {
+    // was: 'the "You" badge follows my strip …' — [F-102] the mockup's strips carry no "You" chip;
+    // what marks my strip is my clock ("Your clock"), and it must follow the flip the same way.
+    test('my strip ("Your clock") follows when I flip the board [F4]', async () => {
         await renderGame()
         click(flipButton())
-        const badge = screen.getByText('You')
-        expect(badge.parentElement).toHaveTextContent('Alice')
+        expect(screen.getAllByRole('timer').map(t => t.getAttribute('aria-label'))).toEqual(['Your clock', 'Black clock'])
+        const myStrip = screen.getByRole('timer', { name: 'Your clock' }).parentElement!
+        expect(myStrip).toHaveTextContent('Alice')
     })
 
     test('black player: board flipped, white on top', async () => {
@@ -272,7 +299,8 @@ describe('mount', () => {
     test('the loaded game reads the CURRENT sound setting: muted before the fetch resolves, no start sound', async () => {
         let resolve!: (r: unknown) => void
         fetchMock.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
-        render(<GamePage params={routeParams({ id: 'g1' })} />)
+        // was: the page's own sound pill — [F-102] now Settings → "Move sounds"
+        renderGameWithSoundSwitch()
         click(screen.getAllByTitle('Toggle sound')[0])
         await act(async () => { resolve(jsonResponse(gameRow)) })
         await screen.findAllByText(/Alice|Bob/)
@@ -291,9 +319,15 @@ describe('mount', () => {
 
     test('restored history is read once per game id, not on every render', async () => {
         const spy = jest.spyOn(Storage.prototype, 'getItem')
-        const { rerender } = await renderGame()
+        const { rerender } = renderGameWithSoundSwitch()
+        await screen.findAllByText(/Alice|Bob/)
         const reads = spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length
-        rerender(<GamePage params={routeParams({ id: 'g1' })} />)
+        rerender(
+            <SettingsProvider store={{ load: () => DEFAULT_SETTINGS, save: jest.fn() }}>
+                <MoveSoundsSwitch />
+                <GamePage params={routeParams({ id: 'g1' })} />
+            </SettingsProvider>,
+        )
         click(screen.getAllByTitle('Toggle sound')[0])
         expect(spy.mock.calls.filter(([k]) => k === 'gambit-game-g1').length).toBe(reads)
         expect(reads).toBe(1)
@@ -1045,8 +1079,16 @@ describe('board controls', () => {
         expect(names).toEqual(['Alice', 'Bob'])
     })
 
-    test('toggling sound off silences move sounds without re-joining the game [F2]', async () => {
+    test('[F-102] the page itself has no sound control (Game.dc.html has no slot for one)', async () => {
         await renderGame()
+        expect(screen.queryByTitle('Toggle sound')).toBeNull()
+        expect(screen.queryByRole('button', { name: /sound/i })).toBeNull()
+    })
+
+    // [F-102] the switch is Settings → "Move sounds" now (was: the page's sound pill)
+    test('toggling sound off silences move sounds without re-joining the game [F2]', async () => {
+        renderGameWithSoundSwitch()
+        await screen.findAllByText(/Alice|Bob/)
         const registrations = socket.on.mock.calls.length
         click(screen.getAllByTitle('Toggle sound')[0])
         // Was (LEGACY): soundOn was a dependency of the socket effect, so toggling re-emitted join_game.

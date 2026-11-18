@@ -37,7 +37,6 @@ export interface GameState {
     /** null = live position. */
     viewIndex: number | null;
     flipped: boolean;
-    soundOn: boolean;
     chatMsg: string;
     chatLog: ChatLine[];
     connected: boolean;
@@ -74,7 +73,6 @@ export function createInitialGameState(): GameState {
         fenSnapshots: [],
         viewIndex: null,
         flipped: false,
-        soundOn: true,
         chatMsg: '',
         chatLog: [],
         connected: true,
@@ -125,7 +123,6 @@ export type GameAction =
     | { type: 'rematchStateSet'; value: RematchState }
     | { type: 'confirmSet'; value: ConfirmDialog }
     | { type: 'focusToggled' }
-    | { type: 'soundToggled' }
     | { type: 'flipToggled' };
 
 type ActionOf<K extends GameAction['type']> = Extract<GameAction, { type: K }>;
@@ -208,7 +205,6 @@ const handlers: Handlers = {
     rematchStateSet: (s, a) => ({ ...s, rematchState: a.value }),
     confirmSet: (s, a) => ({ ...s, confirm: a.value }),
     focusToggled: (s) => ({ ...s, focus: !s.focus }),
-    soundToggled: (s) => ({ ...s, soundOn: !s.soundOn }),
     flipToggled: (s) => ({ ...s, flipped: !s.flipped }),
 };
 

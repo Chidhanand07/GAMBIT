@@ -15,7 +15,7 @@ export interface GameHeaderView {
     subtitle: string;
     /** "Blitz 5 min" */
     timeControl: string;
-    /** "Rated" / "Unrated", the time control, and "Spectating" for a spectator. */
+    /** "Rated" / "Unrated", the time control, "N watching" when known, "Spectating" for a spectator. */
     pills: string[];
 }
 
@@ -46,11 +46,16 @@ export interface GameViewInput {
     isMyTurn: boolean;
     onlineUserIds: ReadonlySet<string>;
     opponentDisconnected: boolean;
+    /**
+     * How many people are watching (Game.dc.html "3 watching"). Optional: the live spectator
+     * count is not wired yet (data-live track); without it the pill is not shown.
+     */
+    watching?: number | null;
 }
 
 const otherSide = (c: PlayerColor): PlayerColor => (c === 'white' ? 'black' : 'white');
 
-function headerView(state: GameState, names: Record<PlayerColor, string>): GameHeaderView {
+function headerView(state: GameState, names: Record<PlayerColor, string>, watching?: number | null): GameHeaderView {
     const tc = state.gameData?.time_control;
     const speed = SPEED_BUCKET_LABELS[classifyTimeControl(tc)];
     const length = displayTimeControl(tc);
@@ -63,6 +68,7 @@ function headerView(state: GameState, names: Record<PlayerColor, string>): GameH
         pills: [
             state.gameData?.is_rated ? 'Rated' : 'Unrated',
             `${speed} ${length}`,
+            ...(typeof watching === 'number' ? [`${watching} watching`] : []),
             ...(myColor === 'spectator' ? ['Spectating'] : []),
         ],
     };
@@ -102,7 +108,7 @@ export function deriveGameView(input: GameViewInput): GameView {
         bottom,
         isMyTurn: input.isMyTurn,
         status: gameStatus({ gameOver, myColor, isMyTurn: input.isMyTurn, inCheck: liveChess.inCheck(), turn, names }),
-        header: headerView(state, names),
+        header: headerView(state, names, input.watching),
         info: infoView(state, balance.advantage, names),
         opponentName: names[myColor === 'spectator' ? turn : otherSide(myColor)],
     };

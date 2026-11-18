@@ -9,8 +9,8 @@ export function GameSeat({ seat }: { seat: SeatView }) {
         <PlayerBar
             name={seat.name}
             nameHref={seat.href}
-            badge={seat.isMe ? 'You' : null}
             rating={seat.rating}
+            country={seat.country}
             side={seat.side}
             avatarUrl={seat.avatarUrl}
             online={seat.online}

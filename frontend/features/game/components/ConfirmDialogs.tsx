@@ -9,6 +9,11 @@ interface ConfirmDialogsProps {
     open: ConfirmDialog;
     opponentName: string;
     rated: boolean;
+    /**
+     * Rating points at stake (Game.dc.html "about 7 rating points"). Optional: no estimate is
+     * computed yet (data-live track); without it the text names no figure.
+     */
+    ratingRisk?: number | null;
     onConfirmResign: () => void;
     onConfirmDraw: () => void;
     onCancel: () => void;
@@ -53,14 +58,21 @@ function Answers({
     );
 }
 
+/** " and about 7 rating points" with an estimate, " and rating points" without, "" unrated. */
+function resignStake(rated: boolean, ratingRisk?: number | null): string {
+    if (!rated) return '';
+    return typeof ratingRisk === 'number' ? ` and about ${ratingRisk} rating points` : ' and rating points';
+}
+
 /**
  * The Draw and Resign confirmations (Game.dc.html): focus-trapped alert dialogs, Esc or the
- * backdrop cancels. The resign text names no rating figure: the change is computed by the server.
+ * backdrop cancels. The resign text names a rating figure only when an estimate is passed in.
  */
 export function ConfirmDialogs({
     open,
     opponentName,
     rated,
+    ratingRisk,
     onConfirmResign,
     onConfirmDraw,
     onCancel,
@@ -74,7 +86,7 @@ export function ConfirmDialogs({
                 tone="danger"
                 iconPath={GAME_ICONS.resign}
                 title="Resign this game?"
-                description={`You will lose this game${rated ? ' and rating points' : ''}. This can't be undone.`}
+                description={`You will lose this game${resignStake(rated, ratingRisk)}. This can't be undone.`}
             >
                 <Answers yes="Yes, resign" no="Keep playing" onYes={onConfirmResign} onNo={onCancel} tone="danger" />
             </Dialog>

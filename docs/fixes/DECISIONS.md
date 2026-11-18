@@ -119,6 +119,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 |---|---|---|---|
 | [F-100](#f-100) | Board coordinates are off by default: the Game and Analysis mockups win over the Settings sample row | v2 | A2-1 |
 | [F-101](#f-101) | Sign in with "Email or username": server-side lookup, one failure message, one timing class | v2 | A2-2 |
+| [F-102](#f-102) | Game screen = Game.dc.html: sound lives in Settings, no bell in a game, no "You" chip, typed slots for watchers / rating risk / country | v2 | A2-3 |
 
 ---
 
@@ -2450,3 +2451,38 @@ the Dependabot part of F-057).**
 - **Consequences.** A username login without `SUPABASE_SECRET_KEY` reads as unknown (logged
   once per request, without the identifier). The message text changed from "Invalid email or
   password" to "Invalid email, username or password".
+
+## F-102
+
+**The live game screen follows `Game.dc.html` control for control (A2-3).**
+
+- **Context.** The previous pass kept two controls the mockup has no slot for (a sound pill above
+  the board; the notification bell, unreachable because the header is hidden on `/game/<id>`) and
+  added a "You" chip to the player's own strip. The brief: place such features only where the
+  design system's patterns allow, without changing the mockup's layout.
+- **Sound.** The mockup's row above the board holds one pill (Focus mode). The design system
+  already has a home for this preference: Settings → Board & pieces → "Move sounds", a stored
+  switch that `SettingsProvider` applies app-wide. The game page now reads it
+  (`useBoardPrefs().sound`) and has no sound control of its own; the per-game `soundOn` state and
+  its `soundToggled` action are gone. The F2 guarantees are kept and re-tested through the
+  Settings switch: changing it mid-game never re-joins the room, and a game that loads after the
+  switch was turned off plays no start sound. Rejected: a second pill (changes the layout), a
+  popover (the game page has none to put it in).
+- **Notifications during a game.** No bell: the mockup's game page has no header and no menu. A
+  challenge still arrives as the design's toast (`ChallengeToast`, mounted app-wide); every other
+  notification waits in the header bell, which is back as soon as the player leaves the game page.
+- **"You" chip.** Removed: the mockup's strips show name, rating, country chip and colour swatch
+  only. The player's strip stays identifiable to assistive tech through its clock ("Your clock"),
+  which also follows a flip (F4).
+- **Data the mockup shows that the app does not have yet** (data-live track): typed optional
+  inputs that render exactly as the mockup once a value is passed, and render nothing otherwise
+  (never a placeholder):
+  - `GameViewInput.watching?: number | null` → the "N watching" pill;
+  - `ConfirmDialogs.ratingRisk?: number | null` → "…and about N rating points…";
+  - `ProfileSummary.country?` → the strip's country chip (`SeatView.country`).
+- **Re-checked against the mockup, kept as is.** Flip / Draw / Resign grid and the focus column;
+  status line; Rematch / New game after the result (`showEnd`); Game info rows; chat: last 5
+  lines, 140 characters, quick replies send at once (the mockup's `say()` appends immediately);
+  moves card. History navigation (clicking a move, the "Viewing move … Return to live" notice)
+  adds no control to the layout and stays. Spectators get the read-only chat, an "A vs B" title
+  and a "Spectating" pill. Nothing the mockup shows had been removed, so nothing was restored.

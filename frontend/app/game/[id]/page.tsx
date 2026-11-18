@@ -24,12 +24,7 @@ export default function GamePage(props: { params: Promise<{ id: string }> }) {
                 subtitle={view.header.subtitle}
                 pills={view.header.pills}
                 boardTools={
-                    <BoardTools
-                        focus={screen.focus}
-                        onToggleFocus={controls.onToggleFocus}
-                        soundOn={controls.soundOn}
-                        onToggleSound={controls.onToggleSound}
-                    />
+                    <BoardTools focus={screen.focus} onToggleFocus={controls.onToggleFocus} />
                 }
                 board={<BoardArea screen={screen} />}
                 focusActions={<FocusActions {...gameActions(screen)} />}

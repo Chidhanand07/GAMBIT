@@ -114,6 +114,13 @@ describe('ConfirmDialogs', () => {
         rerender(<ConfirmDialogs {...props('resign')} rated={false} />)
         expect(screen.getByRole('alertdialog')).toHaveTextContent("You will lose this game. This can't be undone.")
     })
+
+    test('[F-102] with a rating estimate the text reads as the mockup: "about N rating points"', () => {
+        render(<ConfirmDialogs {...props('resign')} ratingRisk={7} />)
+        expect(screen.getByRole('alertdialog')).toHaveTextContent(
+            "You will lose this game and about 7 rating points. This can't be undone.",
+        )
+    })
 })
 
 describe('ChatCard', () => {
@@ -159,16 +166,19 @@ test('GameInfoCard: the five rows; a spectator has no "Your clock"', () => {
     expect(screen.queryByText('Your clock')).toBeNull()
 })
 
-test('BoardTools: Focus mode toggles with aria-pressed; sound toggle keeps its name', () => {
+// was: '…; sound toggle keeps its name' — [F-102] Game.dc.html has no sound control above the
+// board; move sounds are the Settings switch.
+test('BoardTools: Focus mode toggles with aria-pressed; no sound toggle', () => {
     const onToggleFocus = jest.fn()
-    const { rerender } = render(<BoardTools focus={false} onToggleFocus={onToggleFocus} soundOn onToggleSound={jest.fn()} />)
+    const { rerender } = render(<BoardTools focus={false} onToggleFocus={onToggleFocus} />)
     const focus = screen.getByRole('button', { name: 'Focus mode' })
     expect(focus).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(focus)
     expect(onToggleFocus).toHaveBeenCalled()
-    rerender(<BoardTools focus onToggleFocus={onToggleFocus} soundOn={false} onToggleSound={jest.fn()} />)
+    rerender(<BoardTools focus onToggleFocus={onToggleFocus} />)
     expect(screen.getByRole('button', { name: 'Exit focus' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: 'Toggle sound' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('button', { name: 'Toggle sound' })).toBeNull()
+    expect(screen.getAllByRole('button')).toHaveLength(1)
 })
 
 test('GameLayout: focus mode drops the title and side panels and shows the focus actions', () => {

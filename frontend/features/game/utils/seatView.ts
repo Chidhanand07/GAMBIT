@@ -20,6 +20,8 @@ export interface SeatView {
     /** Rating in this time control's category, with the rating change once the server sent it. */
     rating: string;
     avatarUrl: string | null;
+    /** Country chip (Game.dc.html "IN"), when the game API sends the player's country. */
+    country: string | null;
     online: boolean;
     /** To move (and the game is still running). */
     active: boolean;
@@ -108,6 +110,7 @@ export function seatView(side: PlayerColor, ctx: SeatContext): SeatView {
         href: player?.username ? `/profile/${player.username}` : null,
         rating: ratingText(player, tc, ratingChange),
         avatarUrl: player?.avatar_url ?? null,
+        country: player?.country ?? null,
         online: isOnline(side, ctx),
         active: running && ctx.turn === side,
         captures: capturesText(captured, lead),
