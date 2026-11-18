@@ -6,12 +6,10 @@ import type { HeaderNotifications, HeaderSession } from '@/components/layout/hea
 import { useProfile } from '@/components/ProfileProvider';
 import { usePresence } from '@/components/PresenceProvider';
 import { createClient } from '@/lib/supabase/client';
-import { useChallengeBanner } from '../hooks/useChallengeBanner';
 import { useNotifications, type NotificationError } from '../hooks/useNotifications';
-import { HEADER_ROUTES, navStateFor } from '../navLinks';
+import { HEADER_ROUTES, hidesAppHeader, navStateFor } from '../navLinks';
 import { toHeaderNotification } from '../notificationView';
 import type { NavProfile } from '../types';
-import { ChallengeToast } from './ChallengeToast';
 
 const DEFAULT_RAPID_RATING = 1200;
 
@@ -47,15 +45,19 @@ const userView = (profile: NavProfile) => {
 
 /**
  * Wires the presentational AppHeader to the real data: profile/session (ProfileProvider),
- * online count (PresenceProvider), notifications (API), incoming challenges (socket) and sign out.
+ * online count (PresenceProvider), notifications (API) and sign out. Incoming challenges are
+ * ChallengeListener's. Not shown on the live game screen (Game.dc.html has no header).
  */
 export default function AppHeaderContainer() {
     const pathname = usePathname();
+    return hidesAppHeader(pathname) ? null : <ConnectedAppHeader pathname={pathname} />;
+}
+
+function ConnectedAppHeader({ pathname }: { pathname: string }) {
     const router = useRouter();
     const { profile, loading } = useProfile();
     const { onlineCount } = usePresence();
     const notifications = useHeaderNotifications(profile?.id);
-    const challenge = useChallengeBanner(profile);
 
     const signOut = async () => {
         await createClient().auth.signOut();
@@ -68,16 +70,5 @@ export default function AppHeaderContainer() {
     else if (profile)
         session = { status: 'signed-in', user: userView(profile), notifications, onSignOut: () => void signOut() };
 
-    return (
-        <>
-            {challenge.challengeBanner && (
-                <ChallengeToast
-                    challenge={challenge.challengeBanner}
-                    onAccept={challenge.accept}
-                    onDecline={challenge.decline}
-                />
-            )}
-            <AppHeader nav={navStateFor(pathname)} routes={HEADER_ROUTES} session={session} onlineCount={onlineCount} />
-        </>
-    );
+    return <AppHeader nav={navStateFor(pathname)} routes={HEADER_ROUTES} session={session} onlineCount={onlineCount} />;
 }

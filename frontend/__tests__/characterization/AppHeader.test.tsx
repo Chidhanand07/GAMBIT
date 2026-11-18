@@ -33,7 +33,16 @@ jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ online
 const toast = jest.fn()
 jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
-import AppHeader from '@/features/navigation/components/AppHeaderContainer'
+import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
+import ChallengeListener from '@/features/navigation/components/ChallengeListener'
+
+/** What the root layout mounts: the header and, beside it, the challenge listener [REDESIGN-GAME]. */
+const AppHeader = () => (
+    <>
+        <AppHeaderContainer />
+        <ChallengeListener />
+    </>
+)
 
 const ME = { id: 'me', username: 'me1', display_name: 'Me Display', avatar_url: null, rating_rapid: 1501.6 }
 const CHALLENGE = { from_user_id: 'u-opp', to_user_id: 'me', from_username: 'opp1', time_control: '5+0', is_rated: true, color: 'white' }
@@ -297,6 +306,26 @@ describe('account menu and sign out', () => {
         click(screen.getByRole('button', { name: 'Menu' }))
         expect(screen.queryByRole('menu', { name: 'Account' })).toBeNull()
         expect(screen.getByRole('menu', { name: 'Site' })).toBeInTheDocument()
+    })
+})
+
+describe('the live game screen has no header (Game.dc.html) [REDESIGN-GAME]', () => {
+    test('/game/<id>: no header, but an incoming challenge still shows and can be accepted', () => {
+        pathname = '/game/g1'
+        render(<AppHeader />)
+        expect(screen.queryByRole('banner')).toBeNull()
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(socket.listenedEvents()).toEqual(['challenge_declined', 'challenge_ready', 'challenge_request'])
+        act(() => socket.serverSends('challenge_request', CHALLENGE))
+        expect(screen.getByText('challenges you')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Accept' }))
+        expect(socket.emitted('challenge_accept')).toEqual([{ from_user_id: 'u-opp' }])
+    })
+
+    test('the result page keeps the header', () => {
+        pathname = '/game/g1/result'
+        render(<AppHeader />)
+        expect(screen.getByRole('banner')).toBeInTheDocument()
     })
 })
 

@@ -1,4 +1,4 @@
-import { NAV_LINKS, isActivePath, navStateFor } from '@/features/navigation/navLinks'
+import { NAV_LINKS, hidesAppHeader, isActivePath, navStateFor } from '@/features/navigation/navLinks'
 import { speedLabel, timeAgo, toHeaderNotification } from '@/features/navigation/notificationView'
 import { getNotifications, markNotificationsRead } from '@/lib/api/notifications'
 
@@ -71,4 +71,12 @@ describe('notifications api', () => {
         await markNotificationsRead()
         expect(fetchMock.mock.calls).toEqual([['/api/notifications'], ['/api/notifications/read', { method: 'PUT' }]])
     })
+})
+
+test('hidesAppHeader: only the live game screen, not its result page or other routes [REDESIGN-GAME]', () => {
+    expect(hidesAppHeader('/game/abc')).toBe(true)
+    expect(hidesAppHeader('/game/abc/')).toBe(true)
+    expect(hidesAppHeader('/game/abc/result')).toBe(false)
+    expect(hidesAppHeader('/game')).toBe(false)
+    expect(hidesAppHeader('/lobby')).toBe(false)
 })

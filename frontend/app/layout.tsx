@@ -7,6 +7,7 @@ import PresenceProvider from '@/components/PresenceProvider'
 import { ToastProvider } from '@/components/Toast'
 import PageBackground from '@/components/layout/PageBackground'
 import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
+import ChallengeListener from '@/features/navigation/components/ChallengeListener'
 
 // Redesign typography (design/HANDOFF.md §2): each family is exposed as a CSS variable that
 // app/globals.css and tailwind.config.ts read (font-sans, font-display, font-mono, font-symbols).
@@ -62,6 +63,7 @@ export default function RootLayout({
                                     mounted once here and the hover trail survives navigation. */}
                                 <PageBackground>
                                     <AppHeaderContainer />
+                                    <ChallengeListener />
                                     <main className="flex-1 w-full">
                                         {children}
                                     </main>

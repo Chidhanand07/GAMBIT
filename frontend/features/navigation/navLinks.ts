@@ -30,3 +30,8 @@ export function navStateFor(pathname: string): HeaderNav {
         rest: PILL_HIDDEN_PATHS.includes(pathname) ? 'none' : 'idle',
     };
 }
+
+/** The live game screen (`/game/<id>`, not its result page): Game.dc.html has no app header. */
+const HEADERLESS_PATH = /^\/game\/[^/]+\/?$/;
+
+export const hidesAppHeader = (pathname: string) => HEADERLESS_PATH.test(pathname);
