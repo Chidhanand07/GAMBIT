@@ -84,6 +84,34 @@ export function timeControlLabel(timeControl: string | null): string {
     return `${SPEED_BUCKET_LABELS[classifyTimeControl(timeControl)]} · ${displayTimeControl(timeControl)}`;
 }
 
+export type FriendStatus = 'Online' | 'Away' | 'Offline';
+
+/**
+ * A friend's status in the Overview's Friends card (Profile.dc.html: Online, Away, Offline).
+ * "Away" needs `awayIds`, which presence does not provide yet (data-live track).
+ */
+export function friendStatus(
+    id: string | undefined,
+    onlineIds: ReadonlySet<string>,
+    awayIds?: ReadonlySet<string>,
+): FriendStatus {
+    if (!id) return 'Offline';
+    if (awayIds?.has(id)) return 'Away';
+    return onlineIds.has(id) ? 'Online' : 'Offline';
+}
+
+/**
+ * A Games-tab row's second line, as in Profile.dc.html: "Italian Game · 5 min · 34 moves". Without
+ * an opening the speed bucket takes its place ("Blitz · 5 min"); the move count is left out when
+ * unknown. Never a placeholder.
+ */
+export function gameRowDetail(game: Pick<ProfileGameRow, 'time_control' | 'opening' | 'move_count'>): string {
+    const lead = game.opening || SPEED_BUCKET_LABELS[classifyTimeControl(game.time_control)];
+    const parts = [lead, displayTimeControl(game.time_control)];
+    if (typeof game.move_count === 'number') parts.push(`${game.move_count} moves`);
+    return parts.join(' · ');
+}
+
 export interface ColourRow {
     name: 'White' | 'Black';
     record: string;

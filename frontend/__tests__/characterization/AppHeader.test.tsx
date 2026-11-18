@@ -195,13 +195,16 @@ describe('notifications', () => {
         expect(screen.getByText('chiru · Blitz 3+0 · 2m ago')).toBeInTheDocument()
     })
 
-    test('Mark all read PUTs /api/notifications/read and hides the button', async () => {
+    // was: '… and hides the button' — [F-104] the mockups always show "Mark all read"; with
+    // nothing unread it stays in place, disabled.
+    test('Mark all read PUTs /api/notifications/read, then stays in place disabled', async () => {
         render(<AppHeader />)
         click(bell())
         await screen.findByText('Payload message')
+        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeEnabled()
         await act(async () => { click(screen.getByRole('button', { name: 'Mark all read' })) })
         expect(fetchMock).toHaveBeenLastCalledWith('/api/notifications/read', { method: 'PUT' })
-        expect(screen.queryByRole('button', { name: 'Mark all read' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeDisabled()
         expect(row('Payload message')).toHaveAttribute('data-unread', 'false')
         expect(unreadDot()).toHaveClass('opacity-0')
     })
@@ -213,7 +216,7 @@ describe('notifications', () => {
         click(bell())
         await screen.findByText('Payload message')
         await act(async () => { click(screen.getByRole('button', { name: 'Mark all read' })) })
-        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeEnabled()
         expect(row('Payload message')).toHaveAttribute('data-unread', 'true')
         expect(screen.getByRole('alert')).toHaveTextContent('Could not mark notifications read')
     })
@@ -235,6 +238,8 @@ describe('notifications', () => {
         render(<AppHeader />)
         click(bell())
         await screen.findByText('No notifications')
+        // [F-104] the mockups' heading row is always the same: the button is there, disabled
+        expect(screen.getByRole('button', { name: 'Mark all read' })).toBeDisabled()
     })
 
     // F15 (was: 'empty and failed responses show "No notifications"').

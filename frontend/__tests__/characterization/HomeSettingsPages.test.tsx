@@ -246,6 +246,34 @@ describe('settings page', () => {
         expect(screen.getByRole('status')).toHaveTextContent('Defaults restored.')
     })
 
+    test('[F-104] one "Reset to defaults" for every section, as in Settings.dc.html', () => {
+        localStorage.clear()
+        render(<SettingsProvider><SettingsPage /></SettingsProvider>)
+        // an unsaved profile edit and an unsaved board edit
+        fireEvent.change(screen.getByDisplayValue('Me'), { target: { value: 'Edited' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Walnut' }))
+        // Reset from the profile section: says "Defaults restored." (was: "Changes discarded.")
+        fireEvent.click(screen.getByRole('button', { name: 'Public profile' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+        expect(screen.getByDisplayValue('Me')).toBeInTheDocument()
+        expect(screen.getAllByRole('status')[0]).toHaveTextContent('Defaults restored.')
+        // …and the board draft went back to its defaults too; nothing was stored
+        fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
+        expect(screen.getByRole('button', { name: 'Maple' })).toHaveAttribute('aria-pressed', 'true')
+        expect(localStorage.getItem('gambit-settings')).toBeNull()
+    })
+
+    test('[F-104] the live preview marks the selected piece and its moves in green (Settings.dc.html)', () => {
+        render(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
+        const preview = screen.getByRole('img', { name: 'Board preview' })
+        expect(preview.querySelector('[data-mark="selected"]')).toHaveClass('bg-mark-preview-hint')
+        const dots = preview.querySelectorAll('[data-dot]')
+        expect(dots).toHaveLength(2)
+        for (const dot of dots) expect(dot).toHaveClass('bg-mark-preview-dot', 'h-[34%]', 'left-[33%]')
+    })
+
     test('Gameplay: auto-queen and resign confirmation drive the preview demo', () => {
         render(<SettingsPage />)
         fireEvent.click(screen.getByRole('button', { name: 'Gameplay' }))

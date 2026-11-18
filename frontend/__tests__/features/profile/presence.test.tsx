@@ -103,14 +103,19 @@ describe('useProfilePresence (F11)', () => {
         expect(supabase.channel).toHaveBeenCalledTimes(1);
     });
 
-    test('a signed-out viewer has no presence data, so the badge stays hidden', () => {
+    // was: 'a signed-out viewer has no presence data, so the badge stays hidden' — [F-104] a guest
+    // listens to the shared set (without joining it), so the badge is real for guests too.
+    test('a signed-out viewer listens without joining; the badge follows the shared set', () => {
         viewer = null;
         render(
             <PresenceProvider>
                 <Badge id="u-bob" />
             </PresenceProvider>,
         );
-        expect(supabase.channel).not.toHaveBeenCalled();
+        expect(supabase.channel.mock.calls.map((c) => c[0])).toEqual([ONLINE_TOPIC]);
         expect(screen.getByTestId('badge')).toHaveTextContent('Offline');
+        syncTopic(ONLINE_TOPIC, { 'u-bob': [{}] });
+        expect(screen.getByTestId('badge')).toHaveTextContent('Online');
+        expect(openChannels.get(ONLINE_TOPIC)!.track).not.toHaveBeenCalled();
     });
 });

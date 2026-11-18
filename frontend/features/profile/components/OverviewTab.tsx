@@ -7,7 +7,7 @@ import type { Friend } from '@/types/friendship';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
 import { profileHref } from '../links';
-import type { Badge, Fact } from '../model';
+import { friendStatus, type Badge, type Fact, type FriendStatus } from '../model';
 import { EMPTY, LINK_BUTTON, LIST_CARD, LIST_ROW, LIST_TITLE, PANEL, PANEL_TITLE } from './styles';
 
 const FRIENDS_SHOWN = 4;
@@ -31,10 +31,17 @@ function AboutCard({ facts }: { facts: Fact[] }) {
 interface FriendsCardProps {
     friends: Friend[];
     onlineIds: ReadonlySet<string>;
+    awayIds?: ReadonlySet<string>;
     onSeeAll: () => void;
 }
 
-function FriendLine({ friend, online }: { friend: Friend; online: boolean }) {
+const STATUS_DOT: Record<FriendStatus, string> = {
+    Online: 'bg-success',
+    Away: 'bg-accent',
+    Offline: 'bg-ink-disabled',
+};
+
+function FriendLine({ friend, status }: { friend: Friend; status: FriendStatus }) {
     const name = friend.display_name || friend.username;
     return (
         <div className="flex items-center gap-3">
@@ -46,19 +53,19 @@ function FriendLine({ friend, online }: { friend: Friend; online: boolean }) {
                 <span
                     className={cn(
                         'absolute -bottom-px -right-px h-[10px] w-[10px] rounded-full border-2 border-surface',
-                        online ? 'bg-success' : 'bg-ink-disabled',
+                        STATUS_DOT[status],
                     )}
                 />
             </span>
             <Link href={profileHref(friend.username)} className="flex-1 font-medium no-underline">
                 {name}
             </Link>
-            <span className="text-[13px] text-ink-muted">{online ? 'Online' : 'Offline'}</span>
+            <span className="text-[13px] text-ink-muted">{status}</span>
         </div>
     );
 }
 
-function FriendsCard({ friends, onlineIds, onSeeAll }: FriendsCardProps) {
+function FriendsCard({ friends, onlineIds, awayIds, onSeeAll }: FriendsCardProps) {
     return (
         <Card className={cn(PANEL, 'flex-[1_1_260px]')}>
             <div className="flex items-center justify-between">
@@ -69,7 +76,11 @@ function FriendsCard({ friends, onlineIds, onSeeAll }: FriendsCardProps) {
             </div>
             {friends.length === 0 && <span className="text-ink-muted">No friends yet.</span>}
             {friends.slice(0, FRIENDS_SHOWN).map((f) => (
-                <FriendLine key={f.friendship_id ?? f.username} friend={f} online={!!f.id && onlineIds.has(f.id)} />
+                <FriendLine
+                    key={f.friendship_id ?? f.username}
+                    friend={f}
+                    status={friendStatus(f.id, onlineIds, awayIds)}
+                />
             ))}
         </Card>
     );
@@ -161,6 +172,8 @@ export interface OverviewTabProps {
     badges: Badge[];
     friends: Friend[];
     onlineIds: ReadonlySet<string>;
+    /** Friends who are away (Profile.dc.html "Away"); optional until presence reports it. */
+    awayIds?: ReadonlySet<string>;
     recentGames: ProfileGameRow[];
     recentLoading: boolean;
     onSeeFriends: () => void;
@@ -173,7 +186,12 @@ export function OverviewTab(props: OverviewTabProps) {
         <>
             <div className="flex flex-wrap gap-3">
                 <AboutCard facts={props.facts} />
-                <FriendsCard friends={props.friends} onlineIds={props.onlineIds} onSeeAll={props.onSeeFriends} />
+                <FriendsCard
+                    friends={props.friends}
+                    onlineIds={props.onlineIds}
+                    awayIds={props.awayIds}
+                    onSeeAll={props.onSeeFriends}
+                />
             </div>
             {props.badges.length > 0 && <AchievementsCard badges={props.badges} />}
             <RecentGamesCard

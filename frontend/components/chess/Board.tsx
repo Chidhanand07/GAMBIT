@@ -120,6 +120,7 @@ function squareView(sq: Square, index: number, { props, theme, frame, showCoordi
         ...fillAndMark(markFor(sq, props, Boolean(piece)), light, theme, frame),
         ink: light ? colors.lightInk : colors.darkInk,
         dot: !piece && Boolean(props.legalDestinations?.includes(sq)),
+        preview: frame === 'preview',
         rankLabel: showCoordinates && col === 0 ? sq[1] : null,
         fileLabel: showCoordinates && row === BOARD_SIZE - 1 ? sq[0] : null,
         label: piece ? `${sq}, ${pieceName(piece.color, piece.type)}` : sq,

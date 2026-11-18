@@ -41,7 +41,7 @@ function PreferenceCard({
                     <SettingRow key={row.key} row={row} settings={draft.draft} onChange={draft.set} />
                 ))}
             </div>
-            <SaveBar onSave={draft.commit} onReset={draft.reset} status={draft.status} />
+            <SaveBar onSave={draft.commit} onReset={state.resetAll} status={draft.status} />
         </SettingsCard>
     );
 }
@@ -55,7 +55,7 @@ function profileViews({ profile, state }: Props): { card: ReactNode; preview: Re
                 <PublicProfileForm profile={profile} form={form} />
                 <SaveBar
                     onSave={state.saveProfile}
-                    onReset={state.resetProfile}
+                    onReset={state.resetAll}
                     saving={form.saving}
                     status={state.profileStatus}
                     error={form.error}

@@ -121,6 +121,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-101](#f-101) | Sign in with "Email or username": server-side lookup, one failure message, one timing class | v2 | A2-2 |
 | [F-102](#f-102) | Game screen = Game.dc.html: sound lives in Settings, no bell in a game, no "You" chip, typed slots for watchers / rating risk / country | v2 | A2-3 |
 | [F-103](#f-103) | Analysis engine readout rebuilt from the design's "Game info" rows; no Reset (the mockup has none) | v2 | A2-4 |
+| [F-104](#f-104) | Remaining chosen deviations follow the mockups: Mark all read, guest presence, Games row, friend status, preview marks, one Reset | v2 | A2-5 |
 
 ---
 
@@ -2507,3 +2508,33 @@ the Dependabot part of F-057).**
   visual of the score.
 - **Reset.** The mockup has no Reset button, so the earlier choice stands: the Import tab's
   "Starting Position" preset is the way back to a fresh board.
+
+## F-104
+
+**The remaining deviations that were choices, not data gaps, now follow the mockups (A2-5).**
+
+- **"Mark all read"** is always in the notifications panel's heading row (every mockup shows it);
+  with nothing unread it is disabled (`disabled:opacity-50`, the design's disabled treatment)
+  instead of disappearing.
+- **Online count for guests.** The signed-out header follows `Signin.dc.html` / `Signup.dc.html`
+  (no online pill; unchanged). Where a guest sees an online figure (the leaderboard's "Online
+  now", a profile's Online badge) it is now real: `PresenceProvider` lets a guest *listen* to the
+  public `gambit-online-users` presence channel without tracking itself, after the session is
+  known. The old fallback "at least 1" (the viewer) applies only to a signed-in viewer; a guest
+  sees the true count, 0 included, and the context default is 0. No new data is exposed: the
+  channel is public to the publishable key already.
+- **Profile Games row** second line follows `Profile.dc.html` ("Italian Game · 5 min · 34 moves")
+  through `gameRowDetail()`, fed by two optional fields on `ProfileGameRow` (`opening`,
+  `move_count`) that the data-profile track fills. Without an opening the speed bucket stands in
+  ("Blitz · 5 min"), without a count the "N moves" part is left out; no placeholder.
+- **Overview friends** show the mockup's three states with its dot colours (Online `success`,
+  Away `accent`, Offline `ink-disabled`). "Away" comes from an optional `awayIds` set; presence
+  has no away state yet (data-live track), so today a friend is Online or Offline.
+- **Settings live preview** marks the selected piece's square and its legal moves in the
+  mockup's green (`mark-preview-hint`, `mark-preview-dot`, 34 % dots), via `Board frame="preview"`.
+  Game, analysis and offline boards keep the gold selection and dark dots of `Game.dc.html`.
+- **"Reset to defaults"** works as in the mockup: one reset for every section. It puts the play
+  preferences back to their defaults and unsaved profile edits back to the saved profile, stores
+  nothing until Save, and says "Defaults restored." (the profile bar said "Changes discarded.").
+- **Data items on the game page** ("3 watching", "about N rating points") have typed optional
+  inputs since F-102.

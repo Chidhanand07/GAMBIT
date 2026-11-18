@@ -13,6 +13,12 @@ export interface ProfileGameRow extends Pick<Game, 'id' | 'time_control' | 'stat
     black_id: string;
     white: ProfileSummary | null;
     black: ProfileSummary | null;
+    /**
+     * Opening name and number of moves (Profile.dc.html "Italian Game · 5 min · 34 moves").
+     * Optional: the games API does not send them yet (data-profile track).
+     */
+    opening?: string | null;
+    move_count?: number | null;
 }
 
 /** GET /api/profile/[username]/games body. */

@@ -5,23 +5,31 @@ import { createClient } from '@/lib/supabase/client';
 import { useProfile } from '@/components/ProfileProvider';
 
 interface PresenceValue {
-    /** Number of signed-in users in the shared presence set (at least 1: the viewer). */
+    /**
+     * Number of signed-in users in the shared presence set. Signed in: at least 1 (the viewer).
+     * A guest watches the set without joining it, so the count is the real number (may be 0).
+     */
     onlineCount: number;
-    /** Presence keys (profile ids) of the users currently online; empty while signed out. */
+    /** Presence keys (profile ids) of the users currently online. */
     onlineUserIds: ReadonlySet<string>;
 }
 
 const NO_ONE_ONLINE: ReadonlySet<string> = new Set();
+const CHANNEL = 'gambit-online-users';
 
-const PresenceContext = createContext<PresenceValue>({ onlineCount: 1, onlineUserIds: NO_ONE_ONLINE });
+const PresenceContext = createContext<PresenceValue>({ onlineCount: 0, onlineUserIds: NO_ONE_ONLINE });
 
 export function usePresence() {
     return useContext(PresenceContext);
 }
 
+/**
+ * The shared presence channel. A signed-in viewer joins it (tracked under their profile id); a
+ * guest only listens, so the "online" figures the mockups show are real for guests too (F-104).
+ */
 export default function PresenceProvider({ children }: { children: React.ReactNode }) {
     const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(NO_ONE_ONLINE);
-    const { profile } = useProfile();
+    const { profile, loading } = useProfile();
 
     const profileId = profile?.id;
     // Read when the channel subscribes; a rename alone must not re-subscribe.
@@ -31,13 +39,14 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
     });
 
     useEffect(() => {
-        if (!profileId) return;
+        // Until the session is known, subscribing as a guest would only be torn down again.
+        if (loading === true) return;
         let mounted = true;
         const supabase = createClient();
 
-        const channel = supabase.channel('gambit-online-users', {
-            config: { presence: { key: profileId } },
-        });
+        const channel = profileId
+            ? supabase.channel(CHANNEL, { config: { presence: { key: profileId } } })
+            : supabase.channel(CHANNEL);
 
         const updateCount = () => {
             if (!mounted) return;
@@ -51,22 +60,25 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
             .on('presence', { event: 'leave' }, updateCount);
 
         channel.subscribe(async (status: string) => {
-            if (status === 'SUBSCRIBED' && mounted) {
+            if (status === 'SUBSCRIBED' && mounted && profileId) {
                 await channel.track({ user_id: profileId, username: usernameRef.current || 'unknown' });
             }
         });
 
         return () => {
             mounted = false;
-            channel.untrack().then(() => supabase.removeChannel(channel)).catch(() => {});
+            setOnlineUserIds(NO_ONE_ONLINE);
+            const leave = profileId ? channel.untrack() : Promise.resolve();
+            leave.then(() => supabase.removeChannel(channel)).catch(() => {});
         };
-    }, [profileId]);
+    }, [profileId, loading]);
 
-    // A signed-out viewer has no subscription, so whatever the last one saw no longer applies.
-    const visibleIds = profileId ? onlineUserIds : NO_ONE_ONLINE;
     const value = useMemo(
-        () => ({ onlineCount: Math.max(1, visibleIds.size), onlineUserIds: visibleIds }),
-        [visibleIds],
+        () => ({
+            onlineCount: profileId ? Math.max(1, onlineUserIds.size) : onlineUserIds.size,
+            onlineUserIds,
+        }),
+        [profileId, onlineUserIds],
     );
 
     return (

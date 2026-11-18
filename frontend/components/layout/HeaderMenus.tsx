@@ -117,21 +117,23 @@ interface NotificationsMenuProps extends MenuShellProps {
     notifications: HeaderNotifications;
 }
 
-/** The bell's panel: heading, "Mark all read" while anything is unread, then the list. */
+/**
+ * The bell's panel: heading and "Mark all read" (always there, as in the mockups; disabled while
+ * nothing is unread), then the list.
+ */
 export function NotificationsMenu({ notifications, ...shell }: NotificationsMenuProps) {
     return (
         <Popover label="Notifications" className="w-[320px] max-w-[calc(100vw-48px)]" {...shell}>
             <div className="flex items-center justify-between gap-3 pb-2 pl-3 pr-1 pt-1">
                 <span className="font-display text-[17px] font-semibold">Notifications</span>
-                {notifications.hasUnread && (
-                    <button
-                        type="button"
-                        onClick={notifications.onMarkAllRead}
-                        className="min-h-[44px] rounded-pill border-0 bg-transparent px-3 text-[14px] font-semibold text-accent"
-                    >
-                        Mark all read
-                    </button>
-                )}
+                <button
+                    type="button"
+                    onClick={notifications.onMarkAllRead}
+                    disabled={!notifications.hasUnread}
+                    className="min-h-[44px] rounded-pill border-0 bg-transparent px-3 text-[14px] font-semibold text-accent disabled:cursor-default disabled:opacity-50"
+                >
+                    Mark all read
+                </button>
             </div>
             <MenuDivider className="mx-1 mb-[6px] mt-0" />
             {notifications.markReadError && (

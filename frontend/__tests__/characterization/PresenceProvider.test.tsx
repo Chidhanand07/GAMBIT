@@ -26,7 +26,8 @@ const supabase = {
 jest.mock('@/lib/supabase/client', () => ({ createClient: () => supabase }))
 
 let profile: any = null
-jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
+let loading = false
+jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile, loading }) }))
 
 import PresenceProvider, { usePresence } from '@/components/PresenceProvider'
 
@@ -39,6 +40,7 @@ beforeEach(() => {
     subscribeCb = null
     channelOps.length = 0
     presence = {}
+    loading = false
 })
 
 describe('PresenceProvider', () => {
@@ -46,11 +48,38 @@ describe('PresenceProvider', () => {
         return <div data-testid="count">{usePresence().onlineCount}</div>
     }
 
-    test('signed out: no channel, count defaults to 1', () => {
+    // was: 'signed out: no channel, count defaults to 1' — [F-104] a guest listens to the channel
+    // without joining it, so the count the mockups show is the real one (0 when nobody is online).
+    test('signed out: listens to the channel without tracking; the count is the real number', async () => {
         profile = null
         render(<PresenceProvider><Count /></PresenceProvider>)
+        expect(screen.getByTestId('count')).toHaveTextContent('0')
+        await act(async () => { await subscribeCb!('SUBSCRIBED') })
+        expect(channelOps).toEqual([
+            ['channel', 'gambit-online-users', undefined],
+            ['on', 'presence', 'sync'],
+            ['on', 'presence', 'join'],
+            ['on', 'presence', 'leave'],
+            ['subscribe'],
+        ])
+        expect(channel.track).not.toHaveBeenCalled()
+        presence = { a: [], b: [] }
+        act(() => presenceHandlers.sync())
+        expect(screen.getByTestId('count')).toHaveTextContent('2')
+    })
+
+    test('[F-104] waits for the session before subscribing; a guest leaves without untrack', async () => {
+        profile = null
+        loading = true
+        const { rerender, unmount } = render(<PresenceProvider><Count /></PresenceProvider>)
         expect(supabase.channel).not.toHaveBeenCalled()
-        expect(screen.getByTestId('count')).toHaveTextContent('1')
+        loading = false
+        rerender(<PresenceProvider><Count /></PresenceProvider>)
+        expect(supabase.channel).toHaveBeenCalledTimes(1)
+        unmount()
+        await flush()
+        expect(channel.untrack).not.toHaveBeenCalled()
+        expect(supabase.removeChannel).toHaveBeenCalledTimes(1)
     })
 
     test('joins the presence channel, tracks on SUBSCRIBED and counts keys (min 1)', async () => {

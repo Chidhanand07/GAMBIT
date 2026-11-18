@@ -6,6 +6,8 @@ import {
     peakRating,
     statFacts,
     timeControlLabel,
+    gameRowDetail,
+    friendStatus,
 } from '@/features/profile/model';
 import type { ProfileGameRow } from '@/types/profilePage';
 
@@ -101,3 +103,24 @@ describe('colourRows and statFacts', () => {
         ]);
     });
 });
+
+describe('gameRowDetail [F-104]', () => {
+    test('with opening and move count: the mockup line "Opening · clock · N moves"', () => {
+        expect(gameRowDetail({ time_control: '5+0', opening: 'Italian Game', move_count: 34 })).toBe('Italian Game · 5 min · 34 moves')
+    })
+    test('without them: bucket · clock, as before (no placeholder)', () => {
+        expect(gameRowDetail({ time_control: '3+2' })).toBe('Blitz · 3+2')
+        expect(gameRowDetail({ time_control: '3+2', opening: null, move_count: null })).toBe('Blitz · 3+2')
+        expect(gameRowDetail({ time_control: '10+0', move_count: 0 })).toBe('Rapid · 10 min · 0 moves')
+    })
+})
+
+describe('friendStatus [F-104]', () => {
+    const online = new Set(['a', 'b'])
+    test('Online / Offline from presence; Away only when an away set says so', () => {
+        expect(friendStatus('a', online)).toBe('Online')
+        expect(friendStatus('z', online)).toBe('Offline')
+        expect(friendStatus(undefined, online)).toBe('Offline')
+        expect(friendStatus('b', online, new Set(['b']))).toBe('Away')
+    })
+})

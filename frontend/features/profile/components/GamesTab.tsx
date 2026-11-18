@@ -8,7 +8,7 @@ import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
 import { gameHref, profileHref } from '../links';
-import { GAME_FILTERS, timeControlLabel, type GameFilter } from '../model';
+import { GAME_FILTERS, gameRowDetail, type GameFilter } from '../model';
 import { EMPTY, LIST_CARD, LIST_ROW } from './styles';
 
 const DEFAULT_RATING = 1200;
@@ -80,7 +80,7 @@ function GameRow({ game, profileId }: { game: ProfileGameRow; profileId: string 
             </span>
             <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-[2px]">
                 <Opponent game={game} isWhite={isWhite} />
-                <span className="text-[14px] text-ink-muted">{timeControlLabel(game.time_control)}</span>
+                <span className="text-[14px] text-ink-muted">{gameRowDetail(game)}</span>
             </span>
             <Accuracy value={isWhite ? game.white_accuracy : game.black_accuracy} bar={s.bar} />
             <span className="flex w-[110px] flex-col items-end">
