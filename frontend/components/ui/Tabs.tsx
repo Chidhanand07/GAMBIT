@@ -5,9 +5,14 @@ export interface TabItem<T extends string> {
     label: string;
 }
 
-/** `cream`: Profile section tabs (44px). `accent`: Settings segmented options (36px). */
+/**
+ * `cream`: Profile section tabs (44px). `creamSm`: Profile game filters (38px).
+ * `creamXs`: Profile rating-mode switch (36px). `accent`: Settings segmented options (36px).
+ */
 const TONES = {
     cream: { on: 'bg-ink text-on-accent', size: 'min-h-[44px] px-5 text-[15px]' },
+    creamSm: { on: 'bg-ink text-on-accent', size: 'min-h-[38px] px-4 text-[14px]' },
+    creamXs: { on: 'bg-ink text-on-accent', size: 'min-h-[36px] px-[14px] text-[14px]' },
     accent: { on: 'bg-accent text-on-accent', size: 'min-h-[36px] px-[14px] text-[14px]' },
 } as const;
 

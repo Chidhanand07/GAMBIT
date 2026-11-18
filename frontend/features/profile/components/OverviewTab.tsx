@@ -1,130 +1,187 @@
-import type { Profile } from '@/types/profile';
-import type { SpeedBucket } from '@/types/timeControl';
-import type { ProfileRecord } from '../format';
-import { RATING_ICONS } from './ratingIcons';
-import { RecentGamesList } from './RecentGamesList';
+import Link from 'next/link';
+import { Card } from '@/components/ui/Card';
+import { cn } from '@/lib/design/cn';
+import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
+import { displayTimeControl } from '@/lib/chess/timeControl';
+import type { Friend } from '@/types/friendship';
+import type { ProfileGameRow } from '@/types/profilePage';
+import { formatDate, gameOutcome } from '../format';
+import { profileHref } from '../links';
+import type { Badge, Fact } from '../model';
+import { EMPTY, LINK_BUTTON, LIST_CARD, LIST_ROW, LIST_TITLE, PANEL, PANEL_TITLE } from './styles';
 
-type RatingField = 'rating_bullet' | 'rating_blitz' | 'rating_rapid' | 'rating_classical';
-type PeakField = 'peak_bullet' | 'peak_blitz' | 'peak_rapid' | 'peak_classical';
-type RatingProfile = Pick<Profile, RatingField | PeakField>;
+const FRIENDS_SHOWN = 4;
 
-const RATING_CARDS: { id: SpeedBucket; label: string; field: RatingField; peakField: PeakField }[] = [
-    { id: 'bullet', label: 'Bullet', field: 'rating_bullet', peakField: 'peak_bullet' },
-    { id: 'blitz', label: 'Blitz', field: 'rating_blitz', peakField: 'peak_blitz' },
-    { id: 'rapid', label: 'Rapid', field: 'rating_rapid', peakField: 'peak_rapid' },
-    { id: 'classical', label: 'Classical', field: 'rating_classical', peakField: 'peak_classical' },
-];
-
-const isRating = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
-
-/**
- * Highest rating reached in a category: the stored peak, never below the current rating
- * (a peak column can lag one game behind). Null when the profile has no peak (F12).
- */
-export function peakRating(rating: number | null | undefined, peak: number | null | undefined): number | null {
-    if (!isRating(peak)) return null;
-    return Math.round(isRating(rating) ? Math.max(peak, rating) : peak);
+function AboutCard({ facts }: { facts: Fact[] }) {
+    return (
+        <Card className={cn(PANEL, 'flex-[1.4_1_340px]')}>
+            <span className={PANEL_TITLE}>About</span>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-[14px]">
+                {facts.map((f) => (
+                    <div key={f.k} className="flex flex-col gap-[2px]">
+                        <span className="text-[13px] text-ink-muted">{f.k}</span>
+                        <span className="font-semibold">{f.v}</span>
+                    </div>
+                ))}
+            </div>
+        </Card>
+    );
 }
 
-function RatingCards({ profile }: { profile: RatingProfile }) {
+interface FriendsCardProps {
+    friends: Friend[];
+    onlineIds: ReadonlySet<string>;
+    onSeeAll: () => void;
+}
+
+function FriendLine({ friend, online }: { friend: Friend; online: boolean }) {
+    const name = friend.display_name || friend.username;
     return (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {RATING_CARDS.map((tc) => {
-                const rating = profile[tc.field];
-                const shown = rating ? Math.round(rating) : '—';
-                const peak = peakRating(rating, profile[tc.peakField]);
-                return (
+        <div className="flex items-center gap-3">
+            <span
+                aria-hidden="true"
+                className="relative box-content flex h-9 w-9 items-center justify-center rounded-full border-1.5 border-line bg-bg-base font-bold text-accent"
+            >
+                {name.charAt(0).toUpperCase()}
+                <span
+                    className={cn(
+                        'absolute -bottom-px -right-px h-[10px] w-[10px] rounded-full border-2 border-surface',
+                        online ? 'bg-success' : 'bg-ink-disabled',
+                    )}
+                />
+            </span>
+            <Link href={profileHref(friend.username)} className="flex-1 font-medium no-underline">
+                {name}
+            </Link>
+            <span className="text-[13px] text-ink-muted">{online ? 'Online' : 'Offline'}</span>
+        </div>
+    );
+}
+
+function FriendsCard({ friends, onlineIds, onSeeAll }: FriendsCardProps) {
+    return (
+        <Card className={cn(PANEL, 'flex-[1_1_260px]')}>
+            <div className="flex items-center justify-between">
+                <span className={PANEL_TITLE}>Friends</span>
+                <button type="button" onClick={onSeeAll} className={LINK_BUTTON}>
+                    See all
+                </button>
+            </div>
+            {friends.length === 0 && <span className="text-ink-muted">No friends yet.</span>}
+            {friends.slice(0, FRIENDS_SHOWN).map((f) => (
+                <FriendLine key={f.friendship_id ?? f.username} friend={f} online={!!f.id && onlineIds.has(f.id)} />
+            ))}
+        </Card>
+    );
+}
+
+function AchievementsCard({ badges }: { badges: Badge[] }) {
+    return (
+        <Card className={PANEL}>
+            <span className={PANEL_TITLE}>Achievements</span>
+            <div className="flex flex-wrap gap-[10px]">
+                {badges.map((b) => (
                     <div
-                        key={tc.id}
-                        className="rounded-xl p-4"
-                        style={{ background: 'var(--bg-surface)', border: '0.5px solid var(--border)' }}
+                        key={b.name}
+                        className="flex flex-[1_1_150px] items-center gap-3 rounded-14 border-1 border-line bg-bg-base px-[14px] py-3"
                     >
-                        <div
-                            className="flex items-center gap-1.5 text-xs uppercase tracking-wider mb-3"
-                            style={{ color: 'var(--text-tertiary)' }}
+                        <span
+                            aria-hidden="true"
+                            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-accent font-symbols text-[22px] leading-none text-on-accent"
                         >
-                            <span className="text-accent">{RATING_ICONS[tc.id]}</span>
-                            {tc.label}
-                        </div>
-                        <div
-                            className="text-[30px] font-semibold leading-none tabular-nums"
-                            style={{ color: 'var(--text-primary)' }}
-                        >
-                            {shown}
-                        </div>
-                        {peak !== null && (
-                            <div className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
-                                Peak {peak}
-                            </div>
-                        )}
+                            {b.glyph}
+                        </span>
+                        <span className="flex flex-col">
+                            <span className="text-[14px] font-semibold">{b.name}</span>
+                            <span className="text-[12px] text-ink-muted">{b.note}</span>
+                        </span>
                     </div>
-                );
-            })}
-        </div>
-    );
-}
-
-function RecordStat({ value, label, valueClass }: { value: string | number; label: string; valueClass: string }) {
-    return (
-        <div className="text-center">
-            <div className={`text-xl font-medium ${valueClass} tabular-nums`}>{value}</div>
-            <div className="text-xs text-text-tertiary mt-1">{label}</div>
-        </div>
-    );
-}
-
-function RecordCard({ record }: { record: ProfileRecord }) {
-    const { gamesPlayed, wins, losses, draws, winRate } = record;
-    return (
-        <div className="bg-surface border border-border rounded-xl p-5">
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xs uppercase tracking-wider text-text-tertiary font-medium">Record</h3>
-                <span className="text-text-tertiary text-sm">{gamesPlayed} games</span>
+                ))}
             </div>
-            <div className="flex items-end gap-6 mb-4">
-                <RecordStat value={wins} label="Wins" valueClass="text-indicator-green" />
-                <RecordStat value={losses} label="Losses" valueClass="text-red-400" />
-                <RecordStat value={draws} label="Draws" valueClass="text-text-secondary" />
-                {gamesPlayed > 0 && (
-                    <div className="text-center ml-auto">
-                        <div className="text-xl font-medium text-text-primary tabular-nums">{winRate}%</div>
-                        <div className="text-xs text-text-tertiary mt-1">Win rate</div>
-                    </div>
+        </Card>
+    );
+}
+
+export const OUTCOME_TEXT: Record<PlayerOutcome, { label: string; className: string }> = {
+    win: { label: 'Win', className: 'text-success' },
+    loss: { label: 'Loss', className: 'text-danger' },
+    draw: { label: 'Draw', className: 'text-ink-muted' },
+    aborted: { label: 'Aborted', className: 'text-ink-disabled' },
+};
+
+function RecentGameRow({ game, profileId }: { game: ProfileGameRow; profileId: string }) {
+    const opp = game.white_id === profileId ? game.black : game.white;
+    const { label, className } = OUTCOME_TEXT[gameOutcome(game, profileId)];
+    return (
+        <div className={LIST_ROW}>
+            <span className={cn('w-[52px] text-[14px] font-bold', className)}>{label}</span>
+            <span className="flex-[1_1_160px] font-medium">
+                {opp?.username ? (
+                    <Link href={profileHref(opp.username)} className="no-underline">
+                        vs {opp.display_name || opp.username}
+                    </Link>
+                ) : (
+                    'vs Unknown'
                 )}
-            </div>
-            {gamesPlayed > 0 && (
-                <div className="flex h-2.5 rounded-full overflow-hidden gap-px">
-                    {wins > 0 && <div style={{ flex: wins }} className="bg-indicator-green" />}
-                    {losses > 0 && <div style={{ flex: losses }} className="bg-red-500" />}
-                    {draws > 0 && <div style={{ flex: draws }} className="bg-[var(--text-tertiary)]" />}
-                </div>
-            )}
+                <span className="ml-[6px] text-[14px] text-ink-muted">{displayTimeControl(game.time_control)}</span>
+            </span>
+            <span className="text-[14px] text-ink-muted">{formatDate(game.created_at)}</span>
         </div>
     );
 }
 
-interface OverviewTabProps {
-    username: string;
-    profile: RatingProfile & Pick<Profile, 'id'>;
-    record: ProfileRecord;
+interface RecentGamesCardProps {
+    games: ProfileGameRow[];
+    loading: boolean;
+    profileId: string;
+    onViewAll: () => void;
+}
+
+function RecentGamesCard({ games, loading, profileId, onViewAll }: RecentGamesCardProps) {
+    return (
+        <Card className={LIST_CARD}>
+            <div className="flex items-center justify-between border-b-1 border-line px-6 py-4">
+                <h2 className={LIST_TITLE}>Recent games</h2>
+                <button type="button" onClick={onViewAll} className={LINK_BUTTON}>
+                    View all
+                </button>
+            </div>
+            {loading && <div className={EMPTY}>Loading games…</div>}
+            {!loading && games.length === 0 && <div className={EMPTY}>No completed games yet.</div>}
+            {games.map((g) => (
+                <RecentGameRow key={g.id} game={g} profileId={profileId} />
+            ))}
+        </Card>
+    );
+}
+
+export interface OverviewTabProps {
+    profileId: string;
+    facts: Fact[];
+    badges: Badge[];
+    friends: Friend[];
+    onlineIds: ReadonlySet<string>;
+    recentGames: ProfileGameRow[];
+    recentLoading: boolean;
+    onSeeFriends: () => void;
     onViewAllGames: () => void;
 }
 
-/** Rating cards, lifetime record and the recent-games preview. */
-export function OverviewTab({ username, profile, record, onViewAllGames }: OverviewTabProps) {
+/** About + Friends, Achievements (when any are earned) and the five most recent games. */
+export function OverviewTab(props: OverviewTabProps) {
     return (
         <>
-            <RatingCards profile={profile} />
-            <RecordCard record={record} />
-            <div className="bg-surface border border-border rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                    <h3 className="text-sm font-medium text-text-primary">Recent Games</h3>
-                    <button onClick={onViewAllGames} className="text-accent text-xs hover:underline">
-                        View all
-                    </button>
-                </div>
-                <RecentGamesList username={username} profileId={profile.id} />
+            <div className="flex flex-wrap gap-3">
+                <AboutCard facts={props.facts} />
+                <FriendsCard friends={props.friends} onlineIds={props.onlineIds} onSeeAll={props.onSeeFriends} />
             </div>
+            {props.badges.length > 0 && <AchievementsCard badges={props.badges} />}
+            <RecentGamesCard
+                games={props.recentGames}
+                loading={props.recentLoading}
+                profileId={props.profileId}
+                onViewAll={props.onViewAllGames}
+            />
         </>
     );
 }

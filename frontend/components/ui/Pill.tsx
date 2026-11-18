@@ -18,12 +18,23 @@ interface PillProps {
     /** `md` is 32px tall (header), `sm` 28px (profile). */
     size?: 'sm' | 'md';
     className?: string;
+    /** Tooltip (e.g. "Online now" on the profile badge). */
+    title?: string;
     children: ReactNode;
 }
 
-export function Pill({ tone = 'success', dot = false, dotTone = 'success', size = 'sm', className, children }: PillProps) {
+export function Pill({
+    tone = 'success',
+    dot = false,
+    dotTone = 'success',
+    size = 'sm',
+    className,
+    title,
+    children,
+}: PillProps) {
     return (
         <span
+            title={title}
             className={cn(
                 'flex items-center gap-2 rounded-pill px-3 text-[13px] font-semibold',
                 size === 'md' ? 'min-h-[32px]' : 'min-h-[28px]',

@@ -2,22 +2,12 @@
 import { playerOutcome, type OutcomeRow, type PlayerOutcome } from '@/lib/chess/gameOutcome';
 import type { Profile } from '@/types/profile';
 
-const ACCURACY_GREAT = 85;
-const ACCURACY_GOOD = 70;
 const PERCENT = 100;
 
 /** "Jan 5, 2024" (en-US); empty string for a missing date. */
 export function formatDate(iso: string): string {
     if (!iso) return '';
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-/** Text colour class for a game accuracy percentage (≥85 green, ≥70 yellow, else red, null tertiary). */
-export function accColor(acc: number | null): string {
-    if (acc == null) return 'text-text-tertiary';
-    if (acc >= ACCURACY_GREAT) return 'text-indicator-green';
-    if (acc >= ACCURACY_GOOD) return 'text-yellow-400';
-    return 'text-red-400';
 }
 
 export interface ProfileRecord {

@@ -17,6 +17,9 @@ const HISTORY_COLUMNS = `
             white:profiles!games_white_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical),
             black:profiles!games_black_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;
+/** Columns the profile Stats tab needs: outcome, speed bucket, colour, accuracy and date. */
+const STATS_COLUMNS =
+    'id, time_control, status, winner_id, result, white_id, black_id, white_accuracy, black_accuracy, created_at';
 const FINISHED_STATUSES = ['completed', 'finished', 'ended'];
 
 /** A deadline that passed more than this long ago means the game timed out while the server was down. */
@@ -147,11 +150,7 @@ export function listFinishedGamesPage(admin: SupabaseClient, profileId: string, 
         .range(offset, offset + limit - 1);
 }
 
-/** Every finished game of a player (columns needed for the per-category stats). */
+/** Every finished game of a player (columns needed for the Stats tab). */
 export function listFinishedGamesForStats(admin: SupabaseClient, profileId: string) {
-    return admin
-        .from('games')
-        .select('id, time_control, winner_id, result, white_id, black_id')
-        .or(participantFilter(profileId))
-        .in('status', FINISHED_STATUSES);
+    return admin.from('games').select(STATS_COLUMNS).or(participantFilter(profileId)).in('status', FINISHED_STATUSES);
 }

@@ -28,6 +28,15 @@ export interface CategoryRecord {
     draws: number;
 }
 
+/** Derived facts of GET /api/profile/[username]/stats. */
+export interface ProfileFacts {
+    /** Mean analysed accuracy (%), null when no game was analysed. */
+    averageAccuracy: number | null;
+    longestWinStreak: number;
+    /** English weekday name (UTC), null without games. */
+    mostActiveDay: string | null;
+}
+
 /** GET /api/profile/[username]/stats. Every field is read defensively by the page. */
 export interface ProfileStats {
     total?: number;
@@ -36,4 +45,6 @@ export interface ProfileStats {
     draws?: number;
     ratings?: Partial<Record<SpeedBucket, number | null>>;
     byCategory?: Partial<Record<SpeedBucket, CategoryRecord>>;
+    byColour?: Partial<Record<'white' | 'black', CategoryRecord>>;
+    facts?: ProfileFacts;
 }

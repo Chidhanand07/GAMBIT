@@ -1,5 +1,5 @@
-import { accColor, avatarInitial, formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
-import { matchesFriendSearch } from '@/features/profile/components/FriendsListCard';
+import { avatarInitial, formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
+import { matchesFriendSearch } from '@/features/profile/model';
 
 describe('formatDate', () => {
     test('formats as "Mon D, YYYY" (en-US)', () => {
@@ -7,20 +7,6 @@ describe('formatDate', () => {
     });
     test('empty input → empty string', () => {
         expect(formatDate('')).toBe('');
-    });
-});
-
-describe('accColor', () => {
-    test.each([
-        [null, 'text-text-tertiary'],
-        [100, 'text-indicator-green'],
-        [85, 'text-indicator-green'],
-        [84.9, 'text-yellow-400'],
-        [70, 'text-yellow-400'],
-        [69, 'text-red-400'],
-        [0, 'text-red-400'],
-    ])('%p → %s', (acc, cls) => {
-        expect(accColor(acc)).toBe(cls);
     });
 });
 

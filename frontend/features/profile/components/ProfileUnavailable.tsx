@@ -1,4 +1,5 @@
-import Link from 'next/link';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import type { ProfileLoadStatus } from '../hooks/useProfileData';
 
 interface ProfileUnavailableProps {
@@ -7,35 +8,40 @@ interface ProfileUnavailableProps {
     onRetry: () => void;
 }
 
-/** What the profile page shows until a profile is loaded: a spinner, "not found", or an error with Retry. */
+const SHELL = 'mx-auto box-border flex max-w-[1040px] flex-col px-8 pb-[72px] pt-9';
+
+/** What the profile page shows until a profile is loaded: loading, "not found", or an error with Retry. */
 export function ProfileUnavailable({ status, username, onRetry }: ProfileUnavailableProps) {
-    if (status === 'not-found') {
+    if (status === 'loading') {
         return (
-            <div className="flex flex-col items-center gap-3 p-20 text-center">
-                <h1 className="text-xl font-medium text-text-primary">Player not found</h1>
-                <p className="text-sm text-text-tertiary">No player is called @{username}.</p>
-                <Link href="/leaderboard" className="text-accent text-sm hover:underline">
-                    Browse the leaderboard
-                </Link>
+            <div className={SHELL}>
+                <div role="status" className="p-20 text-center text-ink-muted">
+                    Loading profile…
+                </div>
             </div>
         );
     }
-    if (status === 'error') {
-        return (
-            <div className="flex flex-col items-center gap-3 p-20 text-center">
-                <p className="text-sm text-text-secondary">Could not load this profile.</p>
-                <button
-                    onClick={onRetry}
-                    className="px-4 py-2 bg-elevated hover:bg-hover border border-border rounded-lg text-sm text-text-primary"
-                >
-                    Retry
-                </button>
-            </div>
-        );
-    }
+    const notFound = status === 'not-found';
     return (
-        <div className="flex justify-center p-20">
-            <div className="w-8 h-8 rounded-full border-2 border-border border-t-accent animate-spin" />
+        <div className={SHELL}>
+            <Card className="flex flex-col items-center gap-3 p-7 text-center">
+                {notFound ? (
+                    <>
+                        <h1 className="m-0 font-display text-[28px] font-bold tracking-[-0.03em]">Player not found</h1>
+                        <p className="m-0 text-ink-muted">No player is called @{username}.</p>
+                        <Button href="/leaderboard" variant="ghost">
+                            Browse the leaderboard
+                        </Button>
+                    </>
+                ) : (
+                    <>
+                        <p className="m-0 text-ink-muted">Could not load this profile.</p>
+                        <Button variant="outline" onClick={onRetry}>
+                            Retry
+                        </Button>
+                    </>
+                )}
+            </Card>
         </div>
     );
 }
