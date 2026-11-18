@@ -4,6 +4,7 @@ import {
     colourRows,
     endingRows,
     filterGames,
+    heroChips,
     openingRateTone,
     statFacts,
     timeControlLabel,
@@ -20,19 +21,45 @@ const record = (gamesPlayed: number, wins: number, losses = 0, draws = 0) => ({
     winRate: gamesPlayed ? Math.round((wins / gamesPlayed) * 100) : 0,
 });
 
-describe('aboutFacts', () => {
-    test('member year, country, games, record and win rate', () => {
-        expect(aboutFacts({ created_at: '2023-05-01T12:00:00Z', country: 'India' }, record(10, 6, 3, 1))).toEqual([
+// F-127 (was: member year, country, games played, record and win rate): the About card is the
+// mockup's six facts, "Not set" when empty, then the website when there is one.
+describe('aboutFacts [F-127]', () => {
+    test("the mockup's facts in order, with labels for the stored choices", () => {
+        const facts = aboutFacts({
+            created_at: '2023-05-01T12:00:00Z',
+            country: 'India',
+            favorite_opening: "King's Gambit",
+            playing_style: 'aggressive',
+            experience: 'club',
+            favorite_player: 'Magnus Carlsen',
+            website: 'https://lichess.org/@/bob/',
+        });
+        expect(facts).toEqual([
             { k: 'Member since', v: '2023' },
             { k: 'Country', v: 'India' },
-            { k: 'Games played', v: '10' },
-            { k: 'Record', v: '6 W · 3 L · 1 D' },
-            { k: 'Win rate', v: '60%' },
+            { k: 'Favorite opening', v: "King's Gambit" },
+            { k: 'Playing style', v: 'Aggressive' },
+            { k: 'Experience', v: 'Club player' },
+            { k: 'Favorite player', v: 'Magnus Carlsen' },
+            { k: 'Website', v: 'lichess.org/@/bob', href: 'https://lichess.org/@/bob/' },
         ]);
     });
-    test('no country and no games: neither Country nor Win rate', () => {
-        const keys = aboutFacts({ created_at: '2024-01-01T00:00:00Z', country: null }, record(0, 0)).map((f) => f.k);
-        expect(keys).toEqual(['Member since', 'Games played', 'Record']);
+    test('empty fields read "Not set"; no website, or a non-https one, adds nothing', () => {
+        const facts = aboutFacts({ created_at: '2024-01-01T00:00:00Z', country: null, website: 'http://x.example' });
+        expect(facts.map((f) => f.v)).toEqual(['2024', 'Not set', 'Not set', 'Not set', 'Not set', 'Not set']);
+        expect(aboutFacts({ created_at: '2024-01-01T00:00:00Z', country: null, playing_style: 'wild' })[3].v).toBe('Not set');
+    });
+});
+
+describe('heroChips [F-127]', () => {
+    test('"Country, City", the favourite opening and the playing style, each only when set', () => {
+        expect(heroChips({ country: 'India', city: 'Bengaluru', favorite_opening: "King's Gambit", playing_style: 'tactical' })).toEqual([
+            'India, Bengaluru',
+            "King's Gambit",
+            'Tactical',
+        ]);
+        expect(heroChips({ country: null, city: 'Pune' })).toEqual(['Pune']);
+        expect(heroChips({ country: null })).toEqual([]);
     });
 });
 

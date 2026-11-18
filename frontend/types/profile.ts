@@ -11,6 +11,14 @@ export interface Profile extends ProfileRatings {
     avatar_url: string | null;
     bio: string | null;
     country: string | null;
+    /** Optional public-profile fields (F-127); absent on rows read before the migration. */
+    city?: string | null;
+    website?: string | null;
+    favorite_opening?: string | null;
+    favorite_player?: string | null;
+    pronouns?: string | null;
+    playing_style?: string | null;
+    experience?: string | null;
     sex?: string | null;
     is_public?: boolean | null;
     /** Glicko-2 deviation and volatility (migration 00005). */

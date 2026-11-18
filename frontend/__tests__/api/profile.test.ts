@@ -104,6 +104,40 @@ describe('PATCH /api/profile/me', () => {
         db.queue('profiles', { data: null, error: { message: 'x' } })
         expect((await patch({ bio: 'x' })).status).toBe(500)
     })
+
+    test('F-127: the public-profile fields are written to their columns, trimmed; null clears one', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('profiles', { data: { id: uid('me') }, error: null })
+        const res = await patch({
+            city: ' Bengaluru ', website: 'https://lichess.org/@/me', favoriteOpening: "King's Gambit",
+            favoritePlayer: null, pronouns: 'he/him', playingStyle: 'aggressive', experience: 'improving',
+        })
+        expect(res.status).toBe(200)
+        expect(db.op(db.callsFor('profiles')[0], 'update')![0]).toEqual({
+            city: 'Bengaluru', website: 'https://lichess.org/@/me', favorite_opening: "King's Gambit",
+            favorite_player: null, pronouns: 'he/him', playing_style: 'aggressive', experience: 'improving',
+        })
+    })
+
+    test.each([
+        ['an http website', { website: 'http://example.com' }],
+        ['a script URL', { website: 'javascript:alert(1)' }],
+        ['a website without a host', { website: 'https://' }],
+        ['a website with spaces', { website: 'https://exa mple.com' }],
+        ['a website over 200 characters', { website: `https://example.com/${'a'.repeat(200)}` }],
+        ['an empty city (send null to clear)', { city: '   ' }],
+        ['a city over 60 characters', { city: 'x'.repeat(61) }],
+        ['a favourite opening over 80 characters', { favoriteOpening: 'x'.repeat(81) }],
+        ['a favourite player over 60 characters', { favoritePlayer: 'x'.repeat(61) }],
+        ['unknown pronouns', { pronouns: 'xe/xem' }],
+        ['an unknown playing style', { playingStyle: 'Aggressive attacker' }],
+        ['an unknown experience', { experience: 'grandmaster' }],
+        ['a number for a text field', { city: 42 }],
+    ])('F-127: %s → 400, nothing written', async (_name, body) => {
+        signInWithCookie(uid('me'))
+        expect((await patch(body)).status).toBe(400)
+        expect(db.callsFor('profiles')).toHaveLength(0)
+    })
 })
 
 describe('GET /api/profile/[username]', () => {
@@ -122,6 +156,16 @@ describe('GET /api/profile/[username]', () => {
         })
         const { body } = await json(await getProfile(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
         expect(body).toEqual({ username: 'bob', rating_rapid: 1500, wins: 3 })
+    })
+
+    test('F-127: the public-profile fields are part of the public profile', async () => {
+        const fields = {
+            city: 'Pune', website: 'https://x.example', favorite_opening: 'Italian Game', favorite_player: 'Hikaru',
+            pronouns: 'they/them', playing_style: 'balanced', experience: 'club',
+        }
+        db.queue('profiles', { data: { username: 'bob', ...fields }, error: null })
+        const { body } = await json(await getProfile(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body).toEqual({ username: 'bob', ...fields })
     })
 
     test('404 when unknown, 500 on database error, 400 without a username', async () => {

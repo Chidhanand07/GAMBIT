@@ -123,6 +123,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-124](#f-124) | `games.end_reason` written by the finalizer; game length from the final FEN | B1 | GAME-ENDINGS |
 | [F-125](#f-125) | "All" = best pool with ≥ 1 rated game; `leaderboard_rank` for any place; friends carry every pool | B1 | RANKINGS |
 | [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
+| [F-127](#f-127) | Public-profile fields (city, website, favourites, pronouns, style, experience): CHECK + zod, owner-only grants | B1 | PROFILE-FIELDS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3064,3 +3065,31 @@ player's rank; friends carry every pool's rating (B1 item 6).**
 - **Why not store a code.** Changing the column to ISO codes would need a data migration of free text
   and a picker in Settings; the derived chip needs neither and the profile keeps showing the full name
   (its hero chip, as before).
+
+## F-127
+
+**The public-profile fields the design shows are real columns, validated twice and writable only by
+their owner (B1 item 8).**
+
+- **Fields.** Profile.dc.html and Settings.dc.html show a city, a website, a favourite opening and
+  player, pronouns, a playing style and an experience level. Migration
+  `20261118100400_profile_extra_fields.sql` adds them as nullable columns with CHECK constraints:
+  city 1–60, website `https://` + host, no whitespace, ≤ 200, favourite opening 1–80, favourite player
+  1–60, pronouns `he/him|she/her|they/them`, playing style `aggressive|positional|tactical|balanced`,
+  experience `beginner|improving|club|tournament` (ids stored, labels in `lib/profile/fields.ts`).
+  An empty string is refused: "not set" is NULL.
+- **Validation at the API.** `schemas.profilePatch` (zod) applies the same limits and lists from
+  `lib/profile/fields.ts`; the website must parse as a URL with the `https:` protocol. A bad value is a
+  400 and nothing is written; the CHECKs back it up for any other writer.
+- **Privileges (F-017/F-086 pattern).** `authenticated` gets UPDATE on exactly these seven columns,
+  limited to its own row by the `profiles_update` policy; `PATCH /api/profile/me` writes them through
+  the caller's session client. `01_profiles_rls` now pins the exact set of eleven user-writable columns.
+- **Display.** Profile hero: "@user · pronouns" and the chips "Country, City", favourite opening,
+  playing style. About card: the mockup's six facts ("Not set" when empty) plus the website as a
+  `rel="nofollow noopener noreferrer ugc"` link, only when it is a valid https URL. The About card no
+  longer repeats games/record/win rate (the hero and the Stats tab show them). Settings: the mockup's
+  text fields, then the bio, then segmented choices for pronouns, playing style and experience; the
+  live preview shows the same chips and pronouns.
+- **Not done.** The design's visibility toggles (show country, rating history, recent games, friends)
+  are privacy settings, not profile fields; they stay out until they are enforced server-side.
+- pgTAP `064_profile_extra_fields.test.sql`.

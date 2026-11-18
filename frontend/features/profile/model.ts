@@ -5,6 +5,7 @@ import type { Friend } from '@/types/friendship';
 import type { Profile } from '@/types/profile';
 import type { CategoryRecord, ProfileGameRow, ProfileStats } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
+import { experienceLabel, isHttpsUrl, playingStyleLabel } from '@/lib/profile/fields';
 import { gameOutcome, type ProfileRecord } from './format';
 
 const PERCENT = 100;
@@ -12,17 +13,43 @@ const PERCENT = 100;
 export interface Fact {
     k: string;
     v: string;
+    /** A link for the value (the website), opened in a new tab. */
+    href?: string;
 }
 
-/** The About card: only facts the profile row really carries. */
-export function aboutFacts(profile: Pick<Profile, 'created_at' | 'country'>, record: ProfileRecord): Fact[] {
-    const facts: Fact[] = [];
-    if (profile.created_at) facts.push({ k: 'Member since', v: String(new Date(profile.created_at).getFullYear()) });
-    if (profile.country) facts.push({ k: 'Country', v: profile.country });
-    facts.push({ k: 'Games played', v: String(record.gamesPlayed) });
-    facts.push({ k: 'Record', v: `${record.wins} W · ${record.losses} L · ${record.draws} D` });
-    if (record.gamesPlayed > 0) facts.push({ k: 'Win rate', v: `${record.winRate}%` });
+const NOT_SET = 'Not set';
+
+type AboutProfile = Pick<Profile, 'created_at' | 'country'> &
+    Partial<Pick<Profile, 'favorite_opening' | 'playing_style' | 'experience' | 'favorite_player' | 'website'>>;
+
+/** "lichess.org/@/bob" for "https://lichess.org/@/bob/": the link without its scheme and trailing slash. */
+export const websiteLabel = (url: string): string => url.replace(/^https:\/\//, '').replace(/\/$/, '');
+
+/**
+ * The About card of Profile.dc.html: member since, country, favourite opening, playing style,
+ * experience and favourite player ("Not set" when empty), then the website when there is one (F-127).
+ */
+export function aboutFacts(profile: AboutProfile): Fact[] {
+    const facts: Fact[] = [
+        { k: 'Member since', v: profile.created_at ? String(new Date(profile.created_at).getFullYear()) : NOT_SET },
+        { k: 'Country', v: profile.country || NOT_SET },
+        { k: 'Favorite opening', v: profile.favorite_opening || NOT_SET },
+        { k: 'Playing style', v: playingStyleLabel(profile.playing_style) ?? NOT_SET },
+        { k: 'Experience', v: experienceLabel(profile.experience) ?? NOT_SET },
+        { k: 'Favorite player', v: profile.favorite_player || NOT_SET },
+    ];
+    if (profile.website && isHttpsUrl(profile.website)) {
+        facts.push({ k: 'Website', v: websiteLabel(profile.website), href: profile.website });
+    }
     return facts;
+}
+
+type ChipProfile = Pick<Profile, 'country'> & Partial<Pick<Profile, 'city' | 'favorite_opening' | 'playing_style'>>;
+
+/** The hero's chips (Profile.dc.html): "Country, City", the favourite opening and the playing style. */
+export function heroChips(profile: ChipProfile): string[] {
+    const place = [profile.country, profile.city].filter(Boolean).join(', ');
+    return [place, profile.favorite_opening ?? '', playingStyleLabel(profile.playing_style) ?? ''].filter(Boolean);
 }
 
 export interface Badge {

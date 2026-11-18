@@ -196,7 +196,9 @@ describe('header and overview tab', () => {
         expect(screen.getAllByText('India')).toHaveLength(2) // hero chip + About "Country"
         // Redesign: "Joined 2023 · 10 games" in the hero; the count is also the About "Games played"
         expect(screen.getByText('Joined 2023 · 10 games')).toBeInTheDocument()
-        expect(screen.getByText('Games played').nextSibling).toHaveTextContent('10')
+        // F-127 (was: About "Games played" = 10): the About card holds the mockup's profile facts.
+        expect(screen.getByText('Member since').nextSibling).toHaveTextContent('2023')
+        expect(screen.getByText('Favorite player').nextSibling).toHaveTextContent('Not set')
         expect(screen.getByText('B')).toBeInTheDocument()
     })
 
@@ -246,11 +248,24 @@ describe('header and overview tab', () => {
         expect(screen.getByText(/No bullet rating history yet/)).toBeInTheDocument()
     })
 
-    // Redesign: the Record card became About facts ("Record", "Win rate").
-    test('record shows wins / losses / draws and rounded win rate', async () => {
+    // F-127 (was: 'record shows wins / losses / draws and rounded win rate' in the About card): About
+    // is the mockup's list (the record is on the Stats tab), and the new public-profile fields show.
+    test('About, hero chips and handle show the public-profile fields', async () => {
+        routes['/api/profile/bob'] = {
+            ...BOB, city: 'Bengaluru', website: 'https://lichess.org/@/bob', favorite_opening: "King's Gambit",
+            favorite_player: 'Magnus Carlsen', pronouns: 'he/him', playing_style: 'aggressive', experience: 'improving',
+        }
         await renderProfile()
-        expect(screen.getByText('6 W · 3 L · 1 D')).toBeInTheDocument()
-        expect(screen.getByText('Win rate').nextSibling).toHaveTextContent('60%')
+        expect(screen.getByText('@bob · he/him')).toBeInTheDocument()
+        expect(screen.getByText('India, Bengaluru')).toBeInTheDocument()
+        expect(screen.getAllByText("King's Gambit")).toHaveLength(2) // hero chip + About
+        expect(screen.getAllByText('Aggressive')).toHaveLength(2)
+        expect(screen.getByText('Experience').nextSibling).toHaveTextContent('Improving')
+        expect(screen.getByText('Favorite player').nextSibling).toHaveTextContent('Magnus Carlsen')
+        const link = screen.getByText('lichess.org/@/bob')
+        expect(link).toHaveAttribute('href', 'https://lichess.org/@/bob')
+        expect(link).toHaveAttribute('rel', 'nofollow noopener noreferrer ugc')
+        expect(screen.queryByText('6 W · 3 L · 1 D')).not.toBeInTheDocument()
     })
 
     test('recent games list: result from winner_id/result, opponent link, time control and date', async () => {

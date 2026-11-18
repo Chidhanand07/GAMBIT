@@ -34,22 +34,61 @@ async function uploadAvatarFile(
     return { publicUrl };
 }
 
+/** The editable public-profile text and choices; "" is "not set" (F-127). */
+export interface ProfileFieldValues {
+    displayName: string;
+    bio: string;
+    country: string;
+    city: string;
+    website: string;
+    favoriteOpening: string;
+    favoritePlayer: string;
+    pronouns: string;
+    playingStyle: string;
+    experience: string;
+}
+
+export type ProfileFieldKey = keyof ProfileFieldValues;
+
+/** A stored text column as a form value ("" when empty or missing). */
+const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+function valuesOf(p: SettingsProfile): ProfileFieldValues {
+    return {
+        displayName: text(p.display_name),
+        bio: text(p.bio),
+        country: text(p.country),
+        city: text(p.city),
+        website: text(p.website),
+        favoriteOpening: text(p.favorite_opening),
+        favoritePlayer: text(p.favorite_player),
+        pronouns: text(p.pronouns),
+        playingStyle: text(p.playing_style),
+        experience: text(p.experience),
+    };
+}
+
+const EMPTY_VALUES = valuesOf({} as SettingsProfile);
+
+/** The PATCH body: every field trimmed, an empty one sent as null (it clears the column). */
+export function patchBody(values: ProfileFieldValues): Record<ProfileFieldKey, string | null> {
+    const body = {} as Record<ProfileFieldKey, string | null>;
+    for (const key of Object.keys(values) as ProfileFieldKey[]) body[key] = values[key].trim() || null;
+    return body;
+}
+
 /**
  * Editable fields, prefilled when a (different) profile loads. Keyed on the profile id, so a
  * refetch of the same profile does not wipe unsaved edits. The prefill is a state adjustment
  * during render (React's pattern for "reset state when a prop changes"), not an effect.
  */
 function useProfileFields(profile: SettingsProfile | null) {
-    const [displayName, setDisplayName] = useState('');
-    const [bio, setBio] = useState('');
-    const [country, setCountry] = useState('');
+    const [values, setValues] = useState<ProfileFieldValues>(EMPTY_VALUES);
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
     const [prefilledFor, setPrefilledFor] = useState<string | undefined>(undefined);
 
     const fillFrom = (p: SettingsProfile) => {
-        setDisplayName(p.display_name || '');
-        setBio(p.bio || '');
-        setCountry(p.country || '');
+        setValues(valuesOf(p));
         setAvatarUrl(p.avatar_url || null);
     };
 
@@ -62,8 +101,9 @@ function useProfileFields(profile: SettingsProfile | null) {
     const resetFields = () => {
         if (profile) fillFrom(profile);
     };
+    const setField = (key: ProfileFieldKey, value: string) => setValues((v) => ({ ...v, [key]: value }));
 
-    return { displayName, setDisplayName, bio, setBio, country, setCountry, avatarUrl, setAvatarUrl, resetFields };
+    return { values, setField, avatarUrl, setAvatarUrl, resetFields };
 }
 
 /** Form state and save/upload handlers of the "Public Profile" settings section. */
@@ -99,11 +139,7 @@ export function useProfileSettings(profile: SettingsProfile | null, refetch: () 
         setSaving(true);
         setError('');
         try {
-            const res = await patchMyProfile({
-                displayName: fields.displayName.trim() || null,
-                bio: fields.bio.trim() || null,
-                country: fields.country.trim() || null,
-            });
+            const res = await patchMyProfile(patchBody(fields.values));
             if (!res.ok) {
                 const d = await res.json();
                 setError(d.error || 'Failed to save');

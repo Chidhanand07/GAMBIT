@@ -68,6 +68,13 @@ export interface ProfilePatch {
     bio?: string | null;
     country?: string | null;
     avatarUrl?: string | null;
+    city?: string | null;
+    website?: string | null;
+    favoriteOpening?: string | null;
+    favoritePlayer?: string | null;
+    pronouns?: string | null;
+    playingStyle?: string | null;
+    experience?: string | null;
 }
 
 const PATCH_COLUMNS: Readonly<Record<keyof ProfilePatch, string>> = {
@@ -75,6 +82,13 @@ const PATCH_COLUMNS: Readonly<Record<keyof ProfilePatch, string>> = {
     bio: 'bio',
     country: 'country',
     avatarUrl: 'avatar_url',
+    city: 'city',
+    website: 'website',
+    favoriteOpening: 'favorite_opening',
+    favoritePlayer: 'favorite_player',
+    pronouns: 'pronouns',
+    playingStyle: 'playing_style',
+    experience: 'experience',
 };
 
 /**
@@ -93,7 +107,8 @@ export function profileUpdateFromPatch(patch: ProfilePatch): Record<string, stri
 /**
  * Updates the caller's own profile and returns the updated row. `userClient` is the caller's
  * session client (createUserClient): the `profiles_update` policy and the column grants
- * (display_name, bio, country, avatar_url) decide what may change, not the service role.
+ * (display_name, bio, country, avatar_url and the F-127 public-profile fields) decide what may
+ * change, not the service role.
  */
 export function updateProfile(userClient: SupabaseClient, id: string, fields: Record<string, unknown>) {
     return userClient.from('profiles').update(fields).eq('id', id).select().single();

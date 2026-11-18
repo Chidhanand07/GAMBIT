@@ -62,15 +62,7 @@ function profileViews({ profile, state }: Props): { card: ReactNode; preview: Re
                 />
             </SettingsCard>
         ),
-        preview: (
-            <ProfilePreview
-                username={profile.username}
-                displayName={form.displayName}
-                bio={form.bio}
-                country={form.country}
-                avatarUrl={form.avatarUrl}
-            />
-        ),
+        preview: <ProfilePreview username={profile.username} values={form.values} avatarUrl={form.avatarUrl} />,
     };
 }
 

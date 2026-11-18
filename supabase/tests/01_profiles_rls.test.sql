@@ -188,17 +188,23 @@ select is_empty(
   'no profiles policy is WITH CHECK (true)'
 );
 
--- Column privileges, stated as data: exactly four columns are updatable by a user.
+-- Column privileges, stated as data: exactly these columns are updatable by a user.
 -- (has_*_privilege asks the server directly; it does not depend on which grants the
 --  current role is allowed to see in information_schema.)
+-- F-127 (was: exactly the four display fields): plus the seven public-profile fields of
+-- 20261118100400_profile_extra_fields, and still nothing else.
 select is(
-  (select count(*) filter (where a.attname in ('avatar_url', 'bio', 'country', 'display_name')) = 4
-      and count(*) filter (where a.attname not in ('avatar_url', 'bio', 'country', 'display_name')) = 0
+  (select count(*) filter (where a.attname in ('avatar_url', 'bio', 'country', 'display_name', 'city', 'website',
+                                               'favorite_opening', 'favorite_player', 'pronouns', 'playing_style',
+                                               'experience')) = 11
+      and count(*) filter (where a.attname not in ('avatar_url', 'bio', 'country', 'display_name', 'city', 'website',
+                                                   'favorite_opening', 'favorite_player', 'pronouns', 'playing_style',
+                                                   'experience')) = 0
    from pg_catalog.pg_attribute a
    where a.attrelid = 'public.profiles'::regclass and a.attnum > 0 and not a.attisdropped
      and has_column_privilege('authenticated', 'public.profiles', a.attname, 'UPDATE')),
   true,
-  'authenticated may UPDATE exactly: avatar_url, bio, country, display_name'
+  'authenticated may UPDATE exactly: the display and public-profile fields'
 );
 select is_empty(
   $$ select r.rolname, p.priv

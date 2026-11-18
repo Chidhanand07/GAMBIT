@@ -83,7 +83,7 @@ function ActiveTab({ s, profile }: { s: ProfilePageState; profile: Profile }) {
             return (
                 <OverviewTab
                     profileId={profile.id}
-                    facts={aboutFacts(profile, record)}
+                    facts={aboutFacts(profile)}
                     badges={achievements(record)}
                     friends={s.friends.friends}
                     onlineIds={s.onlineIds}

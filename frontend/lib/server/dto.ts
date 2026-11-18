@@ -55,6 +55,13 @@ const PLAYER_KEYS = [
 const PUBLIC_PROFILE_KEYS = [
     ...PLAYER_KEYS,
     'bio',
+    'city',
+    'website',
+    'favorite_opening',
+    'favorite_player',
+    'pronouns',
+    'playing_style',
+    'experience',
     'games_played',
     'wins',
     'losses',
