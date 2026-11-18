@@ -136,6 +136,7 @@ const config: Config = {
                     'trail-hot',
                     'trail-trace',
                     'splash-particle',
+                    'best-move',
                 ]),
             },
             dropShadow: {

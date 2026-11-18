@@ -1,3 +1,5 @@
+import { Card } from '@/components/ui/Card';
+import { cn } from '@/lib/design/cn';
 import { CLASS_META, CLASS_ORDER, estRating, type ClassificationCounts } from '../review';
 
 interface PlayerCardProps {
@@ -8,54 +10,56 @@ interface PlayerCardProps {
     counts: ClassificationCounts;
 }
 
+/** One player's accuracy and move-classification counts, on the game screen's card surface. */
 export function PlayerCard({ name, color, accuracy, rating, counts }: PlayerCardProps) {
     const acc = typeof accuracy === 'number' ? accuracy : null;
+    const est = estRating(acc);
     return (
-        <div className="bg-surface border border-border rounded-xl p-5 h-fit">
-            <div className="flex items-center gap-2 mb-4">
+        <Card as="article" aria-label={`${color}: ${name}`} className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
                 <span
-                    className="text-2xl"
-                    style={{
-                        color: color === 'White' ? '#fff' : '#111',
-                        WebkitTextStroke: color === 'White' ? '1px #000' : undefined,
-                    }}
-                >
-                    {color === 'White' ? '♔' : '♚'}
-                </span>
-                <div>
-                    <div className="font-medium text-text-primary">{name}</div>
-                    <div className="text-xs text-text-tertiary">
+                    aria-hidden="true"
+                    className={cn(
+                        'box-content h-3 w-3 rounded-3 border-1 border-line-muted',
+                        color === 'White' ? 'bg-ink' : 'bg-on-accent',
+                    )}
+                />
+                <div className="flex flex-col">
+                    <span className="text-[18px] font-bold">{name}</span>
+                    <span className="text-[13px] text-ink-muted">
                         {color}
                         {rating ? ` · ${Math.round(rating)}` : ''}
-                    </div>
+                    </span>
                 </div>
             </div>
-            <div className="text-center mb-4">
-                <div className="text-4xl font-bold text-accent tabular-nums">
+            <div className="flex flex-col items-center rounded-14 border-1 border-line-subtle bg-bg-base px-[14px] py-3">
+                <span className="font-mono text-[34px] font-bold text-accent">
                     {acc != null ? acc.toFixed(1) : '—'}
-                    <span className="text-lg">%</span>
-                </div>
-                <div className="text-xs text-text-tertiary uppercase tracking-wide mt-1">Accuracy</div>
-                {estRating(acc) != null && (
-                    <div className="text-xs text-text-secondary mt-1">Est. performance ~{estRating(acc)}</div>
-                )}
+                    <span className="text-[18px]">%</span>
+                </span>
+                <span className="text-[13px] text-ink-faint">Accuracy</span>
+                {est != null && <span className="text-[13px] text-ink-muted">Est. performance ~{est}</span>}
             </div>
-            <div className="space-y-1.5">
+            <div className="flex flex-col">
                 {CLASS_ORDER.filter((c) => counts[c]).map((c) => (
-                    <div key={c} className="flex items-center justify-between text-sm">
+                    <div
+                        key={c}
+                        className="flex items-center justify-between border-t-1 border-line-subtle py-[9px] text-[14px]"
+                    >
                         <span className="flex items-center gap-2">
                             <span
-                                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                                aria-hidden="true"
+                                className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-ink-bright"
                                 style={{ background: CLASS_META[c].color }}
                             >
                                 {CLASS_META[c].sym}
                             </span>
-                            <span className="text-text-secondary">{CLASS_META[c].label}</span>
+                            <span className="text-ink-muted">{CLASS_META[c].label}</span>
                         </span>
-                        <span className="text-text-primary tabular-nums">{counts[c]}</span>
+                        <span className="font-mono font-bold">{counts[c]}</span>
                     </div>
                 ))}
             </div>
-        </div>
+        </Card>
     );
 }

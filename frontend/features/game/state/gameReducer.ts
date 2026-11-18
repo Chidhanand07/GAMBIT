@@ -17,10 +17,13 @@ export interface GameOverInfo {
 export interface ChatLine {
     from: string;
     text: string;
+    /** The sender's id as verified by the server (absent on older payloads). */
+    fromUserId?: string;
 }
 
-export type SidebarTab = 'Moves' | 'Engine' | 'Chat';
 export type RematchState = 'idle' | 'sent' | 'received' | 'declined';
+/** The open confirmation dialog (Game.dc.html Draw / Resign), if any. */
+export type ConfirmDialog = 'draw' | 'resign' | null;
 
 export interface GameState {
     fen: string;
@@ -35,21 +38,21 @@ export interface GameState {
     viewIndex: number | null;
     flipped: boolean;
     soundOn: boolean;
-    activeTab: SidebarTab;
     chatMsg: string;
     chatLog: ChatLine[];
     connected: boolean;
     pendingPromotion: MovePair | null;
     whiteRatingChange: number | null;
     blackRatingChange: number | null;
-    showGameOverModal: boolean;
     /** Seconds. */
     whiteTime: number;
     blackTime: number;
     gameOver: GameOverInfo | null;
     rematchState: RematchState;
     rematchFromUser: string;
-    resignConfirm: boolean;
+    confirm: ConfirmDialog;
+    /** Focus mode: the board centred, the side panels hidden (Game.dc.html). */
+    focus: boolean;
     /** Set by the server after the first move; the display clock only ticks while true. */
     clockActive: boolean;
 }
@@ -58,7 +61,6 @@ const DEFAULT_CLOCK_SECONDS = 600;
 const MS_PER_SECOND = 1000;
 /** clock_sync overrides the local clock only when it has drifted further than this from the server. */
 export const CLOCK_SYNC_TOLERANCE_MS = 500;
-const WELCOME_LINE: ChatLine = { from: 'System', text: 'Game started. Good luck!' };
 
 export function createInitialGameState(): GameState {
     return {
@@ -73,20 +75,19 @@ export function createInitialGameState(): GameState {
         viewIndex: null,
         flipped: false,
         soundOn: true,
-        activeTab: 'Moves',
         chatMsg: '',
-        chatLog: [WELCOME_LINE],
+        chatLog: [],
         connected: true,
         pendingPromotion: null,
         whiteRatingChange: null,
         blackRatingChange: null,
-        showGameOverModal: false,
         whiteTime: DEFAULT_CLOCK_SECONDS,
         blackTime: DEFAULT_CLOCK_SECONDS,
         gameOver: null,
         rematchState: 'idle',
         rematchFromUser: '',
-        resignConfirm: false,
+        confirm: null,
+        focus: false,
         clockActive: false,
     };
 }
@@ -115,7 +116,6 @@ export type GameAction =
     | { type: 'clockSynced'; whiteMs: number; blackMs: number }
     | { type: 'clockTicked'; side: string }
     | { type: 'gameEnded'; info: GameOverInfo }
-    | { type: 'gameOverModalShown'; visible: boolean }
     | { type: 'ratingChanged'; side: PlayerColor; change: number }
     | { type: 'chatReceived'; line: ChatLine }
     | { type: 'chatDraftChanged'; text: string }
@@ -123,8 +123,8 @@ export type GameAction =
     | { type: 'rematchReceived'; fromUsername: string }
     | { type: 'rematchExpired' }
     | { type: 'rematchStateSet'; value: RematchState }
-    | { type: 'resignConfirmSet'; value: boolean }
-    | { type: 'tabSelected'; tab: SidebarTab }
+    | { type: 'confirmSet'; value: ConfirmDialog }
+    | { type: 'focusToggled' }
     | { type: 'soundToggled' }
     | { type: 'flipToggled' };
 
@@ -196,8 +196,8 @@ const handlers: Handlers = {
         a.side === 'w'
             ? { ...s, whiteTime: Math.max(0, s.whiteTime - 1) }
             : { ...s, blackTime: Math.max(0, s.blackTime - 1) },
-    gameEnded: (s, a) => ({ ...s, gameOver: { result: a.info.result, reason: a.info.reason } }),
-    gameOverModalShown: (s, a) => ({ ...s, showGameOverModal: a.visible }),
+    // A confirmation still open when the game ends no longer applies.
+    gameEnded: (s, a) => ({ ...s, confirm: null, gameOver: { result: a.info.result, reason: a.info.reason } }),
     ratingChanged: (s, a) =>
         a.side === 'white' ? { ...s, whiteRatingChange: a.change } : { ...s, blackRatingChange: a.change },
     chatReceived: (s, a) => ({ ...s, chatLog: [...s.chatLog, a.line] }),
@@ -206,8 +206,8 @@ const handlers: Handlers = {
     rematchReceived: (s, a) => ({ ...s, rematchFromUser: a.fromUsername, rematchState: 'received' }),
     rematchExpired: (s) => (s.rematchState === 'received' ? { ...s, rematchState: 'idle' } : s),
     rematchStateSet: (s, a) => ({ ...s, rematchState: a.value }),
-    resignConfirmSet: (s, a) => ({ ...s, resignConfirm: a.value }),
-    tabSelected: (s, a) => ({ ...s, activeTab: a.tab }),
+    confirmSet: (s, a) => ({ ...s, confirm: a.value }),
+    focusToggled: (s) => ({ ...s, focus: !s.focus }),
     soundToggled: (s) => ({ ...s, soundOn: !s.soundOn }),
     flipToggled: (s) => ({ ...s, flipped: !s.flipped }),
 };

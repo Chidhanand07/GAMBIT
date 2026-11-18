@@ -3,18 +3,17 @@
 import { Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { parseComputerSetup } from '@/features/offline/setupParams';
+import { Board } from '@/components/chess/Board';
+import { MoveList } from '@/components/chess/MoveList';
+import { GameLayout } from '@/features/game/components/GameLayout';
+import { checkedKingSquare } from '@/lib/chess/board';
 import { useComputerGame } from '@/features/offline/hooks/useComputerGame';
-import { resultText } from '@/features/offline/game';
+import { statusOf } from '@/features/offline/game';
 import { SetupScreen } from '@/features/offline/components/SetupScreen';
-import { ComputerBoard } from '@/features/offline/components/ComputerBoard';
-import {
-    EngineErrorBanner,
-    GameActions,
-    GameOverOverlay,
-    MaverickHeader,
-    MoveLog,
-    PlayerFooter,
-} from '@/features/offline/components/GamePanels';
+import { EngineErrorBanner, OfflineBar, OfflineControls } from '@/features/offline/components/GamePanels';
+import type { Square } from 'chess.js';
+
+const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard' } as const;
 
 /** /offline, or /offline?difficulty=&side= from the lobby (starts the game directly). */
 export default function ComputerPage() {
@@ -32,7 +31,6 @@ function ComputerGame() {
         useComputerGame(preset);
     const { game, playerColor, moveHistory, thinking, gameOver, engineError } = board;
 
-    // ── SETUP SCREEN ──────────────────────────────────────────────────────────
     if (phase === 'setup') {
         return (
             <SetupScreen
@@ -45,33 +43,16 @@ function ComputerGame() {
         );
     }
 
-    // ── GAME SCREEN ───────────────────────────────────────────────────────────
+    const bars = { game, playerColor, difficulty, gameOver };
+    const status = statusOf(game, playerColor, { resigned: board.resigned, gameOver, thinking });
     return (
-        <div className="max-w-6xl mx-auto px-4 py-6 text-text-primary mb-12">
-            <div className="flex flex-col lg:flex-row gap-6">
-                <div className="flex-1 max-w-[600px] mx-auto w-full">
-                    <MaverickHeader difficulty={difficulty} thinking={thinking} />
-
-                    <div className="w-full relative shadow-[-10px_10px_30px_rgba(0,0,0,0.5)] border-[12px] border-[#2E2B25] rounded-sm">
-                        <ComputerBoard
-                            game={game}
-                            playerColor={playerColor}
-                            selectedSquare={board.selectedSquare}
-                            legalMoves={board.legalMoves}
-                            lastMove={board.lastMove}
-                            onSquareClick={board.handleSquareClick}
-                        />
-                        {gameOver && (
-                            <GameOverOverlay
-                                resultText={resultText(game, playerColor, board.resigned)}
-                                onRematch={startGame}
-                                onNewSetup={backToSetup}
-                            />
-                        )}
-                    </div>
-
-                    <PlayerFooter playerColor={playerColor} yourMove={game.turn() === playerColor && !gameOver} />
-
+        <GameLayout
+            focus={false}
+            title="Game vs MAVERICK"
+            subtitle={`Computer · ${DIFFICULTY_LABEL[difficulty]} · you play ${playerColor === 'w' ? 'White' : 'Black'}`}
+            pills={['Unrated', 'Computer']}
+            board={
+                <>
                     {engineError && (
                         <EngineErrorBanner
                             error={engineError}
@@ -79,18 +60,34 @@ function ComputerGame() {
                             onRetry={board.retryEngine}
                         />
                     )}
-
-                    <GameActions
-                        undoDisabled={!board.canTakeBack || gameOver}
+                    <OfflineBar {...bars} position="top" />
+                    <Board
+                        fen={game.fen()}
+                        orientation={playerColor === 'w' ? 'white' : 'black'}
+                        selectedSquare={board.selectedSquare as Square | null}
+                        legalDestinations={board.legalMoves as Square[]}
+                        lastMove={board.lastMove as { from: Square; to: Square } | null}
+                        checkSquare={checkedKingSquare(game)}
+                        onSquareClick={board.handleSquareClick}
+                        showCoordinates
+                    />
+                    <OfflineBar {...bars} position="bottom" />
+                </>
+            }
+            aside={
+                <>
+                    <OfflineControls
+                        status={status}
                         gameOver={gameOver}
+                        undoDisabled={!board.canTakeBack || gameOver}
                         onUndo={board.undoMove}
                         onResign={board.resign}
                         onNewGame={backToSetup}
+                        onRematch={startGame}
                     />
-                </div>
-
-                <MoveLog moveHistory={moveHistory} />
-            </div>
-        </div>
+                    <MoveList moves={moveHistory} className="flex-1" />
+                </>
+            }
+        />
     );
 }

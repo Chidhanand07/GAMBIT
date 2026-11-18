@@ -4,6 +4,10 @@
  * Pins the GET /api/games/:id fetch, the 3 s polling while analysis runs
  * (max 20 tries; an error stops it until "Try again" — F16), loading/error/analysing
  * states, the review board, player cards, eval graph, caption and move list.
+ *
+ * [REDESIGN-GAME] Re-pointed at the restyled page (the shared game board and cards): squares by
+ * data-square, pieces by data-piece, the last move by data-mark, the best-move ring by data-best,
+ * the badge by data-classification, controls by their accessible names.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
@@ -54,13 +58,19 @@ async function renderPage(id = 'g1') {
     return utils
 }
 const click = (el: Element) => fireEvent.click(el)
-const squares = (c: HTMLElement) => Array.from(c.querySelectorAll('.grid-cols-8.grid-rows-8 > div')) as HTMLElement[]
-function square(c: HTMLElement, sq: string, flipped = false) {
+const square = (c: HTMLElement, sq: string) => c.querySelector(`[data-square="${sq}"]`) as HTMLElement
+/** The piece drawn on `sq` (pieces are positioned over the grid by percentage). */
+function pieceOn(c: HTMLElement, sq: string, flipped = false): string | null {
     const file = sq.charCodeAt(0) - 97
     const rank = Number(sq[1]) - 1
-    return squares(c)[flipped ? rank * 8 + (7 - file) : (7 - rank) * 8 + file]
+    const [col, row] = flipped ? [7 - file, rank] : [file, 7 - rank]
+    const slot = Array.from(c.querySelectorAll<HTMLElement>('.g-piece-slot')).find(
+        (el) => el.style.left === `${col * 12.5}%` && el.style.top === `${row * 12.5}%`,
+    )
+    return slot?.querySelector('svg')?.getAttribute('data-piece') ?? null
 }
-const ctrls = (c: HTMLElement) => Array.from(c.querySelectorAll('button.w-9.h-9')) as HTMLElement[]
+const ctrls = () =>
+    ['First move', 'Previous move', 'Next move', 'Last move', 'Flip board'].map((name) => screen.getByRole('button', { name }))
 
 describe('states and fetching', () => {
     test('shows loading first, then fetches /api/games/:id with no options', async () => {
@@ -159,10 +169,10 @@ describe('review screen', () => {
         expect(screen.getByText('88.3')).toBeInTheDocument()
         expect(screen.getByText('Est. performance ~2383')).toBeInTheDocument()
         expect(screen.getByText('Est. performance ~200')).toBeInTheDocument()
-        const whiteCard = screen.getByText('White Disp').closest('.bg-surface') as HTMLElement
+        const whiteCard = screen.getByText('White Disp').closest('article') as HTMLElement
         expect(within(whiteCard).getByText('Inaccuracy')).toBeInTheDocument()
         expect(within(whiteCard).getByText('Best')).toBeInTheDocument()
-        const blackCard = screen.getByText('blackuser').closest('.bg-surface') as HTMLElement
+        const blackCard = screen.getByText('blackuser').closest('article') as HTMLElement
         expect(within(blackCard).getByText('Mistake').parentElement!.nextSibling!.textContent).toBe('2')
     })
 
@@ -170,24 +180,24 @@ describe('review screen', () => {
         const { container } = await renderPage()
         expect(screen.getByText('Starting position')).toBeInTheDocument()
         expect(screen.getByText('0 / 5')).toBeInTheDocument()
-        expect(within(square(container, 'e2')).getByRole('img')).toHaveAttribute('alt', 'wp')
+        expect(pieceOn(container, 'e2')).toBe('wp')
         expect(container.querySelector('polyline')!.getAttribute('points')).toBe('0.0,30.8 120.0,31.0 240.0,30.4 360.0,28.0 480.0,64.0')
         expect(container.querySelectorAll('svg.cursor-pointer line')).toHaveLength(1)
     })
 
     test('controls step through plies; caption shows classification and best-move SAN', async () => {
         const { container } = await renderPage()
-        const [first, prev, next, last, flip] = ctrls(container)
+        const [first, prev, next, last, flip] = ctrls()
         click(next)
         expect(screen.getByText('1 / 5')).toBeInTheDocument()
         expect(screen.getByText(/e4 — Book/)).toBeInTheDocument()
-        expect(square(container, 'e4').querySelector('.bg-yellow-400\\/35')).not.toBeNull()
+        expect(square(container, 'e4').querySelector('[data-mark="last"]')).not.toBeNull()
         click(last)
         expect(screen.getByText('5 / 5')).toBeInTheDocument()
         expect(screen.getByText(/Bc4 — Inaccuracy/)).toBeInTheDocument()
         expect(screen.getByText('· best was Bb5', { exact: false })).toBeInTheDocument()
-        expect(square(container, 'b5').querySelector('.ring-4')).not.toBeNull()
-        expect(container.querySelector('.absolute.-top-3.-right-3')!.textContent).toBe('?!')
+        expect(container.querySelector('[data-best="b5"]')).not.toBeNull()
+        expect(container.querySelector('[data-classification]')!.textContent).toBe('?!')
         click(next)
         expect(screen.getByText('5 / 5')).toBeInTheDocument()
         click(prev)
@@ -196,14 +206,14 @@ describe('review screen', () => {
         click(prev)
         expect(screen.getByText('0 / 5')).toBeInTheDocument()
         click(flip)
-        expect(within(square(container, 'e1', true)).getByRole('img')).toHaveAttribute('alt', 'wk')
+        expect(pieceOn(container, 'e1', true)).toBe('wk')
     })
 
     test('move list pills seek to their ply', async () => {
         await renderPage()
         click(screen.getByRole('button', { name: /^Nf3/ }))
         expect(screen.getByText('3 / 5')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /^Nf3/ })).toHaveClass('bg-hover')
+        expect(screen.getByRole('button', { name: /^Nf3/ })).toHaveAttribute('aria-current', 'step')
         expect(screen.getByText('Nf3 — Best')).toBeInTheDocument()
     })
 
@@ -219,7 +229,7 @@ describe('review screen', () => {
     test('flips the board when the viewer is black', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({ ...GAME, myColor: 'black' }))
         const { container } = await renderPage()
-        expect(within(square(container, 'e1', true)).getByRole('img')).toHaveAttribute('alt', 'wk')
+        expect(pieceOn(container, 'e1', true)).toBe('wk')
     })
 
     test('missing names fall back to White/Black and accuracy to an em dash', async () => {

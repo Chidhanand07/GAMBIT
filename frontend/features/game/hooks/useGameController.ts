@@ -13,7 +13,7 @@ import { bindGameCommands } from './gameCommands';
 import { useChessBoard } from './useChessBoard';
 import { useGameClock } from './useGameClock';
 import { useGameData } from './useGameData';
-import { useGameOverModalDelay, useMoveListAutoScroll } from './useGameEffects';
+import { useMoveListAutoScroll } from './useGameEffects';
 import { useGameSocket } from './useGameSocket';
 import { useMoveHistory } from './useMoveHistory';
 import { useOpponentDisconnect } from './useOpponentDisconnect';
@@ -45,7 +45,6 @@ export function useGameController(gameId: string) {
     useMoveHistory({ gameId, state, chessRef, dispatch });
     useGameData({ gameId, myProfile, gameData, soundOn, router, refs, dispatch });
     useMoveListAutoScroll(moveListRef, state.moveList, board.isLive);
-    useGameOverModalDelay(gameOver, dispatch);
     useGameSocket({
         ...{ socket, myProfile, gameId, myColor, soundOn, router, dispatch },
         ...{ chessRef, clockSyncedRef, lastProcessedFenRef, markDisconnected, markReconnected },

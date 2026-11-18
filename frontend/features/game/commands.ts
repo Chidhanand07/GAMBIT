@@ -1,4 +1,5 @@
 // Player commands that emit to the realtime server: chat, resign, rematch request/accept/decline.
+// There is no draw command yet: the server has no draw-offer flow (design/DRAW-OFFER-PROPOSAL.md).
 // The server knows who is acting from the socket handshake, so payloads only name the *other*
 // player. A rematch accept/decline names the requester; the server answers the request it stored.
 import type { Dispatch } from 'react';
@@ -32,11 +33,19 @@ function send(ctx: CommandContext, event: string, payload: unknown, then?: () =>
     });
 }
 
+/** Sends `text` (trimmed; blank is ignored). Not added locally: the server broadcasts it back to the room. */
+export function sendChatText(ctx: CommandContext, text: string): void {
+    const { socket, myProfile, gameId } = ctx;
+    const trimmed = text.trim();
+    if (!trimmed || !myProfile || !socket) return;
+    send(ctx, 'send_message', { game_id: gameId, from: myProfile.username, text: trimmed });
+}
+
+/** Sends the chat draft and clears the input. */
 export function sendChat(ctx: CommandContext): void {
-    const { socket, myProfile, gameId, state, dispatch } = ctx;
+    const { socket, myProfile, state, dispatch } = ctx;
     if (!state.chatMsg.trim() || !myProfile || !socket) return;
-    send(ctx, 'send_message', { game_id: gameId, from: myProfile.username, text: state.chatMsg.trim() });
-    // Not added locally: the server broadcasts back to the whole room including the sender.
+    sendChatText(ctx, state.chatMsg);
     dispatch({ type: 'chatDraftChanged', text: '' });
 }
 
@@ -47,7 +56,7 @@ export function sendChat(ctx: CommandContext): void {
 export function resign(ctx: CommandContext): void {
     const { socket, myProfile, gameId, state, dispatch } = ctx;
     if (!socket || !myProfile || state.gameOver) return;
-    dispatch({ type: 'resignConfirmSet', value: false });
+    dispatch({ type: 'confirmSet', value: null });
     send(ctx, 'resign', { game_id: gameId });
 }
 

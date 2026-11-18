@@ -10,12 +10,13 @@ describe('initial state', () => {
         const s = createInitialGameState()
         expect(s).toMatchObject({
             fen: START_FEN, gameData: null, myColor: 'spectator', selectedSq: null, legalDests: [], lastMove: null,
-            moveList: [], fenSnapshots: [], viewIndex: null, flipped: false, soundOn: true, activeTab: 'Moves',
+            moveList: [], fenSnapshots: [], viewIndex: null, flipped: false, soundOn: true,
             chatMsg: '', connected: true, pendingPromotion: null, whiteRatingChange: null, blackRatingChange: null,
-            showGameOverModal: false, whiteTime: 600, blackTime: 600, gameOver: null, rematchState: 'idle',
-            rematchFromUser: '', resignConfirm: false, clockActive: false,
+            whiteTime: 600, blackTime: 600, gameOver: null, rematchState: 'idle',
+            rematchFromUser: '', confirm: null, focus: false, clockActive: false,
         })
-        expect(s.chatLog).toEqual([{ from: 'System', text: 'Game started. Good luck!' }])
+        // Was: a 'System' welcome line; the redesign shows the chat card's empty state instead.
+        expect(s.chatLog).toEqual([])
     })
 })
 
@@ -146,13 +147,19 @@ describe('server sync', () => {
 })
 
 describe('ui toggles', () => {
-    test('sound, flip, tab, chat, connection, resign confirm, modal', () => {
+    test('sound, flip, focus, chat, connection, confirmation dialog', () => {
         const s = run([
-            { type: 'soundToggled' }, { type: 'flipToggled' }, { type: 'tabSelected', tab: 'Chat' },
-            { type: 'chatReceived', line: { from: 'bob', text: 'hi' } }, { type: 'connectionChanged', connected: false },
-            { type: 'resignConfirmSet', value: true }, { type: 'gameOverModalShown', visible: true },
+            { type: 'soundToggled' }, { type: 'flipToggled' }, { type: 'focusToggled' },
+            { type: 'chatReceived', line: { from: 'bob', text: 'hi', fromUserId: 'opp' } },
+            { type: 'connectionChanged', connected: false }, { type: 'confirmSet', value: 'resign' },
         ])
-        expect(s).toMatchObject({ soundOn: false, flipped: true, activeTab: 'Chat', connected: false, resignConfirm: true, showGameOverModal: true })
-        expect(s.chatLog).toHaveLength(2)
+        expect(s).toMatchObject({ soundOn: false, flipped: true, focus: true, connected: false, confirm: 'resign' })
+        expect(s.chatLog).toEqual([{ from: 'bob', text: 'hi', fromUserId: 'opp' }])
+        expect(gameReducer(s, { type: 'confirmSet', value: null }).confirm).toBeNull()
+    })
+
+    test('the game ending closes an open Draw / Resign confirmation [REDESIGN-GAME]', () => {
+        const s = run([{ type: 'confirmSet', value: 'draw' }, { type: 'gameEnded', info: { result: 'Draw', reason: 'Stalemate' } }])
+        expect(s).toMatchObject({ confirm: null, gameOver: { result: 'Draw', reason: 'Stalemate' } })
     })
 })

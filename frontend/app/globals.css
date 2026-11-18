@@ -120,6 +120,7 @@
     --shadow-trail-hot:      inset 0 0 0 1px rgba(239,191,91,0.5), 0 0 32px rgba(239,191,91,0.35);
     --shadow-trail-trace:    inset 0 0 0 1px rgba(239,191,91,0.4), 0 0 28px rgba(239,191,91,0.28);
     --shadow-splash-particle: 0 0 8px rgba(239,191,91,.8);
+    --shadow-best-move:      inset 0 0 0 4px rgba(116,155,79,0.7); /* review board: engine's best move */
     --drop-shadow-piece:     0 1px 1px rgba(0,0,0,0.35);
     --drop-shadow-splash-knight: 0 0 28px rgba(239,191,91,0.35);
 

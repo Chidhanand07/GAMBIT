@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import { cn } from '@/lib/design/cn';
 
 interface MoveListProps {
@@ -9,6 +10,8 @@ interface MoveListProps {
     onSelectPly?: (ply: number) => void;
     title?: string;
     className?: string;
+    /** The scrolling list, e.g. to keep the latest move in view. */
+    scrollRef?: Ref<HTMLDivElement>;
 }
 
 function MoveCell({
@@ -38,7 +41,14 @@ function MoveCell({
 }
 
 /** The "Moves" card (Game.dc.html): numbered white/black pairs in JetBrains Mono. */
-export function MoveList({ moves, currentPly = null, onSelectPly, title = 'Moves', className }: MoveListProps) {
+export function MoveList({
+    moves,
+    currentPly = null,
+    onSelectPly,
+    title = 'Moves',
+    className,
+    scrollRef,
+}: MoveListProps) {
     const rows = Array.from({ length: Math.ceil(moves.length / 2) }, (_, i) => i * 2);
     return (
         <section
@@ -51,7 +61,7 @@ export function MoveList({ moves, currentPly = null, onSelectPly, title = 'Moves
             <div className="border-b-1 border-line-subtle px-5 py-[14px] font-display text-[17px] font-semibold">
                 {title}
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
                 {moves.length === 0 && <div className="px-5 py-[14px] text-[14px] text-ink-muted">No moves yet.</div>}
                 {rows.map((ply) => (
                     <div key={ply} className="grid grid-cols-[36px_1fr_1fr] gap-2 px-5 py-2 font-mono text-[14px]">

@@ -1,9 +1,14 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { Avatar } from '@/components/ui/Avatar';
 import { cn } from '@/lib/design/cn';
 
 interface PlayerBarProps {
     name: string;
+    /** Links the name (e.g. to the player's profile). */
+    nameHref?: string | null;
+    /** A chip after the rating, e.g. "You" on the viewer's own bar. */
+    badge?: string | null;
     rating?: string | null;
     /** Short country code chip, e.g. "IN". */
     country?: string | null;
@@ -24,9 +29,19 @@ interface PlayerBarProps {
 
 const chip = 'rounded-pill px-2 py-[2px] font-mono font-bold text-ink-muted';
 
+function PlayerName({ name, href }: { name: string; href?: string | null }) {
+    if (!href) return <span className="text-[18px] font-bold">{name}</span>;
+    return (
+        <Link href={href} className="text-[18px] font-bold no-underline">
+            {name}
+        </Link>
+    );
+}
+
 /** A player row above or below the board (Game.dc.html). */
 export function PlayerBar(props: PlayerBarProps) {
-    const { name, rating, country, side, avatarUrl, online = true, active, captures, timePercent, low, clock } = props;
+    const { name, nameHref, badge, rating, country, side, avatarUrl, online = true, active } = props;
+    const { captures, timePercent, low, clock } = props;
     const ring = active ? 'border-accent' : 'border-line-subtle';
     return (
         <div
@@ -46,9 +61,10 @@ export function PlayerBar(props: PlayerBarProps) {
             />
             <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
                 <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-[18px] font-bold">{name}</span>
+                    <PlayerName name={name} href={nameHref} />
                     {rating && <span className={cn(chip, 'bg-surface text-[12px]')}>{rating}</span>}
                     {country && <span className={cn(chip, 'border-1 border-line text-[11px]')}>{country}</span>}
+                    {badge && <span className={cn(chip, 'border-1 border-line text-[11px]')}>{badge}</span>}
                     <span
                         aria-hidden="true"
                         className={cn(

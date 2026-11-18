@@ -1,5 +1,5 @@
 // Board coordinate helpers. Files/ranks are 0-based: a1 = [0, 0], h8 = [7, 7].
-import type { Square } from 'chess.js';
+import type { Chess, Square } from 'chess.js';
 
 const CHAR_CODE_A = 97;
 
@@ -17,4 +17,16 @@ export function sqToCoords(sq: string): [number, number] {
 /** (4, 3) → "e4". */
 export function coordsToSq(file: number, rank: number): Square {
     return `${String.fromCharCode(CHAR_CODE_A + file)}${rank + 1}` as Square;
+}
+
+/** The square of the king in check (side to move), or null when nobody is in check. */
+export function checkedKingSquare(chess: Pick<Chess, 'inCheck' | 'turn' | 'board'>): Square | null {
+    if (!chess.inCheck()) return null;
+    const turn = chess.turn();
+    for (const row of chess.board()) {
+        for (const cell of row) {
+            if (cell?.type === 'k' && cell.color === turn) return cell.square;
+        }
+    }
+    return null;
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState, use } from 'react';
-import Link from 'next/link';
 import { Chess } from 'chess.js';
 import { useGameReview } from '@/features/game-result/hooks/useGameReview';
 import { mergeClassifications, playerName, replayPositions, tallyClassifications } from '@/features/game-result/review';
@@ -10,6 +9,8 @@ import { ReviewBoard } from '@/features/game-result/components/ReviewBoard';
 import { EvalGraph } from '@/features/game-result/components/EvalGraph';
 import { MoveCaption, ReviewControls, ReviewMoveList } from '@/features/game-result/components/ReviewMoves';
 import { ReviewStatusScreen } from '@/features/game-result/components/ReviewChrome';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 
 export default function GameResultPage(props: { params: Promise<{ id: string }> }) {
     const params = use(props.params);
@@ -34,42 +35,40 @@ export default function GameResultPage(props: { params: Promise<{ id: string }> 
     const bName = playerName(game.black, 'Black');
 
     return (
-        <div className="max-w-7xl mx-auto px-4 py-8">
-            <h1 className="text-2xl font-semibold text-text-primary mb-6">Game Review</h1>
-            <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr_300px] gap-6">
-                <PlayerCard
-                    name={wName}
-                    color="White"
-                    accuracy={game.white_accuracy}
-                    rating={game.white?.rating_rapid}
-                    counts={counts.white}
-                />
-
-                {/* Center: board + eval graph + controls */}
-                <div className="flex flex-col items-center">
-                    <div className="w-full max-w-[480px]">
-                        <ReviewBoard fen={curFen} flipped={flipped} curMove={curMove} />
-                        <EvalGraph moves={moves} ply={ply} onSeek={setPly} />
-                        <MoveCaption curMove={curMove} prevFen={positions[ply - 1]} />
-                        <ReviewControls ply={ply} total={moves.length} setPly={setPly} setFlipped={setFlipped} />
-                    </div>
-                </div>
-
-                <PlayerCard
-                    name={bName}
-                    color="Black"
-                    accuracy={game.black_accuracy}
-                    rating={game.black?.rating_rapid}
-                    counts={counts.black}
-                />
+        <div className="mx-auto box-border flex max-w-[1400px] flex-col gap-5 px-8 pb-16 pt-8">
+            <div className="flex flex-col">
+                <h1 className="m-0 font-display text-[30px] font-bold leading-[1.5] tracking-[-0.02em]">Game Review</h1>
+                <span className="text-[14px] text-ink-muted">
+                    {wName} vs {bName}
+                </span>
             </div>
-
-            <ReviewMoveList moves={moves} ply={ply} onSeek={setPly} />
-
-            <div className="mt-6 text-center">
-                <Link href="/lobby" className="text-accent hover:underline">
-                    Back to lobby
-                </Link>
+            <div className="flex flex-wrap items-start gap-6">
+                <Card className="flex min-w-0 max-w-[720px] flex-[1_1_480px] flex-col gap-3">
+                    <ReviewBoard fen={curFen} flipped={flipped} curMove={curMove} />
+                    <EvalGraph moves={moves} ply={ply} onSeek={setPly} />
+                    <MoveCaption curMove={curMove} prevFen={positions[ply - 1]} />
+                    <ReviewControls ply={ply} total={moves.length} setPly={setPly} setFlipped={setFlipped} />
+                </Card>
+                <aside className="flex min-w-0 flex-[1_1_340px] flex-col gap-4">
+                    <PlayerCard
+                        name={wName}
+                        color="White"
+                        accuracy={game.white_accuracy}
+                        rating={game.white?.rating_rapid}
+                        counts={counts.white}
+                    />
+                    <PlayerCard
+                        name={bName}
+                        color="Black"
+                        accuracy={game.black_accuracy}
+                        rating={game.black?.rating_rapid}
+                        counts={counts.black}
+                    />
+                    <ReviewMoveList moves={moves} ply={ply} onSeek={setPly} />
+                    <Button href="/lobby" variant="outline">
+                        Back to lobby
+                    </Button>
+                </aside>
             </div>
         </div>
     );

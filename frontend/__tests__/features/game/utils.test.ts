@@ -5,6 +5,11 @@ import { isPromotionMove, playMoveSoundFor } from '@/features/game/utils/moveEff
 import { historyStorageKey, saveHistory, stepBackIndex, stepForwardIndex } from '@/features/game/utils/history'
 import { seatFor } from '@/features/game/utils/seat'
 import { deriveGameView } from '@/features/game/utils/gameView'
+import { getFormatRating } from '@/features/game/utils/seatView'
+import { outcomeFlags } from '@/features/game/utils/outcome'
+import { gameStatus, type StatusInput } from '@/features/game/utils/gameStatus'
+import { captureCount, capturesText, materialBalance } from '@/features/game/utils/material'
+import { checkedKingSquare } from '@/lib/chess/board'
 import * as payloads from '@/features/game/payloads'
 import { rematchTerms } from '@/features/game/payloads'
 import { createInitialGameState } from '@/features/game/state/gameReducer'
@@ -86,40 +91,148 @@ describe('payloads', () => {
 })
 
 describe('deriveGameView', () => {
-    const state = () => ({
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    const state = (over: object = {}) => ({
         ...createInitialGameState(),
-        gameData: { white: { username: 'alice', display_name: 'Alice' }, black: { username: 'bob' } } as never,
-        whiteTime: 10, blackTime: 20, whiteRatingChange: 5,
+        gameData: {
+            white_id: 'w-id', black_id: 'b-id', time_control: '5', is_rated: true,
+            white: { username: 'alice', display_name: 'Alice', rating_blitz: 1512.4 }, black: { username: 'bob' },
+        } as never,
+        whiteTime: 10, blackTime: 200, whiteRatingChange: 5,
+        ...over,
+    })
+    const view = (over: object = {}, opts: { turn?: 'w' | 'b'; mine?: boolean; inCheck?: boolean; online?: string[]; away?: boolean; fen?: string } = {}) =>
+        deriveGameView({
+            state: state(over),
+            liveChess: { turn: () => opts.turn ?? 'w', inCheck: () => opts.inCheck ?? false },
+            displayFen: opts.fen ?? START,
+            isMyTurn: opts.mine ?? false,
+            onlineUserIds: new Set(opts.online ?? []),
+            opponentDisconnected: opts.away ?? false,
+        })
+
+    test('unflipped: black on top; the side to move is active; ratings by time control with the change', () => {
+        const v = view()
+        expect(v.top).toMatchObject({ side: 'black', name: 'bob', seconds: 200, active: false, rating: '1200', href: '/profile/bob' })
+        expect(v.bottom).toMatchObject({ side: 'white', name: 'Alice', seconds: 10, active: true, rating: '1512 +5' })
+        expect(v.status).toEqual({ text: 'Alice is thinking...', tone: 'wait' })
     })
 
-    test('unflipped: black on top; the side to move is active', () => {
-        const v = deriveGameView(state(), { turn: () => 'w' }, false)
-        expect(v.top).toMatchObject({ time: 20, isActive: false, ratingChange: null })
-        expect(v.bottom).toMatchObject({ time: 10, isActive: true, ratingChange: 5 })
-        expect(v.turnIndicator).toEqual({ isWhiteToMove: true, label: "Alice's turn" })
+    test('time bar and low clock: percentage of the base time; low under 30 s, never after the game', () => {
+        expect(view().bottom).toMatchObject({ timePercent: 3, low: true })
+        expect(view().top).toMatchObject({ timePercent: 67, low: false })
+        expect(view({ gameOver: { result: 'Draw', reason: 'Stalemate' } }).bottom).toMatchObject({ low: false, active: false })
     })
 
-    test('flipped puts white on top; game over clears active clocks and the indicator', () => {
-        const v = deriveGameView({ ...state(), flipped: true, gameOver: { result: 'Draw', reason: 'x' } }, { turn: () => 'w' }, true)
-        expect(v.top).toMatchObject({ time: 10, isActive: false })
-        expect(v.bottom.isActive).toBe(false)
-        expect(v.turnIndicator).toBeNull()
+    test('flipped puts white on top; game over clears both active rings', () => {
+        const v = view({ flipped: true, gameOver: { result: 'Draw', reason: 'Stalemate' } })
+        expect(v.top).toMatchObject({ side: 'white', active: false })
+        expect(v.bottom.active).toBe(false)
+        expect(v.status).toEqual({ text: 'Stalemate. The game is a draw.', tone: 'over' })
     })
 
-    test('isMe marks only the strip of my own colour; a spectator has none [F4]', () => {
-        const strips = (over: object) => {
-            const v = deriveGameView({ ...state(), ...over }, { turn: () => 'w' }, false)
-            return [v.top.isMe, v.bottom.isMe]
-        }
-        expect(strips({ myColor: 'spectator' })).toEqual([false, false])
-        expect(strips({ myColor: 'white' })).toEqual([false, true])
-        expect(strips({ myColor: 'black', flipped: true })).toEqual([false, true])
-        expect(strips({ myColor: 'white', flipped: true })).toEqual([true, false])
+    test('isMe marks only the bar of my own colour; a spectator has none [F4]', () => {
+        const bars = (over: object) => [view(over).top.isMe, view(over).bottom.isMe]
+        expect(bars({ myColor: 'spectator' })).toEqual([false, false])
+        expect(bars({ myColor: 'white' })).toEqual([false, true])
+        expect(bars({ myColor: 'black', flipped: true })).toEqual([false, true])
+        expect(bars({ myColor: 'white', flipped: true })).toEqual([true, false])
     })
 
-    test('label falls back to username then colour; my turn wins', () => {
-        expect(deriveGameView(state(), { turn: () => 'b' }, false).turnIndicator?.label).toBe("bob's turn")
-        expect(deriveGameView(createInitialGameState(), { turn: () => 'b' }, false).turnIndicator?.label).toBe("Black's turn")
-        expect(deriveGameView(state(), { turn: () => 'b' }, true).turnIndicator?.label).toBe('Your turn')
+    test('online: me by my connection; the opponent by presence, not while reported away', () => {
+        expect(view({ myColor: 'white' }, { online: ['b-id'] }).top.online).toBe(true)
+        expect(view({ myColor: 'white' }, { online: ['b-id'], away: true }).top.online).toBe(false)
+        expect(view({ myColor: 'white' }, { online: [] }).top.online).toBe(false)
+        expect(view({ myColor: 'white', connected: false }).bottom.online).toBe(false)
     })
+
+    test('title, subtitle and pills for a player and a spectator', () => {
+        expect(view({ myColor: 'white' }).header).toEqual({
+            title: 'Game vs bob', subtitle: 'Blitz · 5 min · you play White', timeControl: 'Blitz 5 min', pills: ['Rated', 'Blitz 5 min'],
+        })
+        expect(view({ myColor: 'spectator' }).header).toMatchObject({ title: 'Alice vs bob', subtitle: 'Blitz · 5 min · spectating', pills: ['Rated', 'Blitz 5 min', 'Spectating'] })
+    })
+
+    test('game info: move number, captures, material from my side, my clock', () => {
+        const fen = 'rnb1kbnr/pppp1ppp/8/8/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 4' // black lost the queen and a pawn, white a pawn
+        const v = view({ myColor: 'white', moveList: ['e4', 'e5', 'Qh5', 'Qxh5'] }, { fen })
+        expect(v.info).toEqual({ move: '3', captures: '1', material: 'You +9', myClock: '0:10' })
+        expect(v.bottom.captures).toBe('\u265B\u265F +9')
+        expect(v.top.captures).toBe('\u265F')
+        expect(view({ myColor: 'black' }, { fen }).info.material).toBe('Alice +9')
+        expect(view({ myColor: 'spectator' }).info).toMatchObject({ material: 'Even', myClock: null })
+    })
+
+    test('names fall back to username then colour; my turn reads "Your move"', () => {
+        expect(view({}, { turn: 'b' }).status.text).toBe('bob is thinking...')
+        expect(deriveGameView({
+            state: createInitialGameState(), liveChess: { turn: () => 'b', inCheck: () => false }, displayFen: START,
+            isMyTurn: false, onlineUserIds: new Set(), opponentDisconnected: false,
+        }).status.text).toBe('Black is thinking...')
+        expect(view({}, { turn: 'b', mine: true }).status).toEqual({ text: 'Your move', tone: 'move' })
+        expect(view({}, { mine: true, inCheck: true }).status.text).toBe('Your move. You are in check')
+    })
+})
+
+describe('gameStatus after the game (server verdicts only)', () => {
+    const input = (result: string, reason: string, myColor: StatusInput['myColor'] = 'white'): StatusInput => ({
+        gameOver: { result, reason }, myColor, isMyTurn: false, inCheck: false, turn: 'white',
+        names: { white: 'Alice', black: 'Bob' },
+    })
+    test.each([
+        ['White wins', 'Checkmate', 'white', 'Checkmate. You win!'],
+        ['Black wins', 'Checkmate', 'white', 'Checkmate. Bob wins.'],
+        ['Black wins', 'Resignation', 'white', 'You resigned. Bob wins.'],
+        ['White wins', 'Resignation', 'white', 'Bob resigned. You win!'],
+        ['White wins', 'Resignation', 'spectator', 'Bob resigned. Alice wins.'],
+        ['White wins', 'Time', 'black', 'Out of time. Alice wins.'],
+        ['Draw', 'Threefold repetition', 'white', 'Threefold repetition. The game is a draw.'],
+        ['Aborted', 'Aborted', 'white', 'Game aborted. Not rated.'],
+    ] as const)('%s by %s, seen by %s → "%s"', (result, reason, seat, text) => {
+        expect(gameStatus(input(result, reason, seat))).toEqual({ text, tone: 'over' })
+    })
+})
+
+test('outcomeFlags: spectators never win or lose but can see a draw; an abort is nobody\'s loss', () => {
+    const none = { isAborted: false }
+    expect(outcomeFlags('White wins', 'white')).toEqual({ isSpectator: false, isWin: true, isDraw: false, isLoss: false, ...none })
+    expect(outcomeFlags('White wins', 'black')).toEqual({ isSpectator: false, isWin: false, isDraw: false, isLoss: true, ...none })
+    expect(outcomeFlags('Draw', 'spectator')).toEqual({ isSpectator: true, isWin: false, isDraw: true, isLoss: false, ...none })
+    expect(outcomeFlags('Aborted', 'black')).toEqual({ isSpectator: false, isWin: false, isDraw: false, isLoss: false, isAborted: true })
+})
+
+describe('getFormatRating (the shared categories: ≤2 bullet, ≤5 blitz, ≤29 rapid, ≥30 classical) [F7]', () => {
+    const p = { username: 'u', rating_bullet: 1001.6, rating_blitz: 1100, rating_rapid: 1200.4, rating_classical: 1300 }
+    test.each([
+        ['1', 1002], ['2+1', 1002], ['3', 1100], ['5', 1100], ['6', 1200], ['9', 1200], ['10', 1200], ['29', 1200], ['30', 1300], ['abc', 1200], [undefined, 1200], ['', 1200],
+    ])('%s → %s', (tc, expected) => expect(getFormatRating(p, tc as string | undefined)).toBe(expected))
+
+    test('no player → 1200; missing bucket → 1200', () => {
+        expect(getFormatRating(null, '1')).toBe(1200)
+        expect(getFormatRating({ username: 'u' }, '1')).toBe(1200)
+    })
+})
+
+describe('material', () => {
+    test('start position: nothing captured, even', () => {
+        expect(materialBalance('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')).toEqual({
+            capturedBy: { w: [], b: [] }, advantage: 0,
+        })
+    })
+    test('a promotion counts the new queen, not a missing pawn as a capture by the opponent', () => {
+        const b = materialBalance('Q6k/8/8/8/8/8/1PPPPPPP/RNBQKBNR w - - 0 1')
+        expect(b.capturedBy.b).toEqual([])
+        expect(b.advantage).toBe(18 + 10 + 6 + 6 + 7) // two queens, rooks, bishops, knights, seven pawns vs a lone king
+    })
+    test('captures text lists the most valuable first, with the lead only when ahead', () => {
+        expect(capturesText(['q', 'n', 'p'], 3)).toBe('\u265B\u265E\u265F +3')
+        expect(capturesText(['p'], -2)).toBe('\u265F')
+        expect(captureCount(['e4', 'd5', 'exd5', 'Qxd5'])).toBe(2)
+    })
+})
+
+test('checkedKingSquare: the king of the side to move, only when in check', () => {
+    const { Chess: C } = jest.requireActual('chess.js')
+    expect(checkedKingSquare(new C())).toBeNull()
+    expect(checkedKingSquare(new C('rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3'))).toBe('e1')
 })
