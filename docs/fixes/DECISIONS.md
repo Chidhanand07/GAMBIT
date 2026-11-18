@@ -115,6 +115,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-096](#f-096) | Visual parity harness: Playwright + pixelmatch, five widths, shared masks, PARITY.md | V2-A1 | PARITY-HARNESS |
 | [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
 | [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
+| [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2875,4 +2876,24 @@ mockup at 375, 768, 1024, 1440 and 1920 px, diffed with pixelmatch; target at mo
   the mockup and are reported as "pending". One worker: the seeded accounts play one game at a time.
 - **Tests.** Jest: `__tests__/e2e/parityCanvas.test.ts` (padding, percentages, worst regions),
   `parityReport.test.ts` (PARITY.md), `parityPages.test.ts` (page list, tabs, roles, masks).
+
+## F-099
+
+**`Parity (visual)` runs in CI only on demand (`workflow_dispatch`, or a PR labelled `parity`) and is
+not a required check.**
+
+- **Context.** A full run starts next dev, the game server and Redis, migrates and seeds the TEST
+  project and takes ~100 screenshot pairs: minutes of runner time, and it writes to a shared TEST
+  database. Visual parity is also a moving target while the redesign tracks land.
+- **Decision.** `.github/workflows/parity.yml`, job `Parity (visual)`: one run at a time
+  (`concurrency: parity`, the accounts play one game at a time); writes `frontend/.env.test.local` and
+  `server/.env.test` from secrets with `umask 077`; installs Chromium, Redis and Supabase CLI 3.2.0;
+  runs `test-db:migrate`, `test-db:seed` and `test:parity` with `PARITY_OUT_DIR=parity-report`; uploads
+  `PARITY.md`, the PNGs and the per-case JSON as the `parity-report` artifact (14 days) even on failure.
+  Not added to branch protection.
+- **Secrets.** `TEST_SUPABASE_URL`, `TEST_SUPABASE_PUBLISHABLE_KEY`, `TEST_SUPABASE_SECRET_KEY`,
+  `TEST_SUPABASE_DB_URL` (the TEST project), `PRODUCTION_SUPABASE_URL` (so the guard of F-097 can refuse
+  production; it fails closed without it) and `PARITY_MOCKUPS_URL` (a `.tar.gz` whose single top folder
+  holds `design/design`, because `design/` is not in the repository). Pull requests from forks get no
+  secrets, so the job cannot run there.
 

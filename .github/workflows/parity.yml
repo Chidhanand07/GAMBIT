@@ -1,0 +1,102 @@
+name: Parity
+
+# Opt-in visual parity check (ADR F-099): run it by hand, or add the `parity` label to a PR.
+# Not a required check. It writes to the owner's TEST Supabase project only (ADR F-097).
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, opened, synchronize, reopened]
+
+concurrency:
+  # One run at a time: the seeded accounts play one live game at a time.
+  group: parity
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: Parity (visual)
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'parity')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The guard compares the TEST project against this; without it the guard refuses (fail closed).
+      PRODUCTION_SUPABASE_URL: ${{ secrets.PRODUCTION_SUPABASE_URL }}
+      PARITY_OUT_DIR: ${{ github.workspace }}/parity-report
+      PARITY_MOCKUP_DIR: ${{ github.workspace }}/design/design
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            server/package-lock.json
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+      - name: Redis for the local game server
+        run: sudo apt-get update -q && sudo apt-get install -y -q redis-server
+      - name: Install dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix server
+      - name: Browsers (Chromium)
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      # design/ is not in the repository; the mockups come from an archive the owner hosts.
+      - name: Mockups
+        env:
+          PARITY_MOCKUPS_URL: ${{ secrets.PARITY_MOCKUPS_URL }}
+        run: |
+          if [ ! -f "$PARITY_MOCKUP_DIR/support.js" ]; then
+            if [ -z "$PARITY_MOCKUPS_URL" ]; then
+              echo "::error::No mockups: set the PARITY_MOCKUPS_URL secret to a .tar.gz of design/design"
+              exit 1
+            fi
+            mkdir -p "$PARITY_MOCKUP_DIR"
+            curl -fsSL "$PARITY_MOCKUPS_URL" | tar -xz -C "$PARITY_MOCKUP_DIR" --strip-components=1
+          fi
+          ls "$PARITY_MOCKUP_DIR"
+      - name: TEST project env files (git-ignored, never uploaded)
+        env:
+          TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+          TEST_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.TEST_SUPABASE_PUBLISHABLE_KEY }}
+          TEST_SUPABASE_SECRET_KEY: ${{ secrets.TEST_SUPABASE_SECRET_KEY }}
+          TEST_SUPABASE_DB_URL: ${{ secrets.TEST_SUPABASE_DB_URL }}
+        run: |
+          umask 077
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$TEST_SUPABASE_URL"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$TEST_SUPABASE_PUBLISHABLE_KEY"
+            echo "SUPABASE_SECRET_KEY=$TEST_SUPABASE_SECRET_KEY"
+          } > frontend/.env.test.local
+          {
+            echo "SUPABASE_URL=$TEST_SUPABASE_URL"
+            echo "SUPABASE_SECRET_KEY=$TEST_SUPABASE_SECRET_KEY"
+            echo "SUPABASE_TEST_DB_URL=$TEST_SUPABASE_DB_URL"
+          } > server/.env.test
+      - name: Migrate the TEST project
+        working-directory: frontend
+        run: npm run test-db:migrate
+      - name: Seed the TEST project
+        working-directory: frontend
+        run: npm run test-db:seed
+      - name: Visual parity (all pages, five widths)
+        working-directory: frontend
+        run: npm run test:parity
+      - name: Upload the parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: |
+            parity-report/PARITY.md
+            parity-report/parity/*.png
+            parity-report/parity/results/
+          if-no-files-found: warn
+          retention-days: 14
