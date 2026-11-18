@@ -425,7 +425,8 @@
   }
 
   /* ── Board (components/chess/Board.tsx) ─────────────────────────────────────────────── */
-  .g-piece-slot { transition: left var(--duration-420) var(--ease-piece), top var(--duration-420) var(--ease-piece); }
+  /* --piece-slide-duration: the "Piece animation" setting (features/settings); 420ms by default. */
+  .g-piece-slot { transition: left var(--piece-slide-duration, var(--duration-420)) var(--ease-piece), top var(--piece-slide-duration, var(--duration-420)) var(--ease-piece); }
   .g-piece-slot.g-instant { transition: none; }
   @media (prefers-reduced-motion: reduce) {
     .g-piece-slot { transition: none !important; }

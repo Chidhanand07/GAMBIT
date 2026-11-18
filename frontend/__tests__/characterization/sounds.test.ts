@@ -54,4 +54,26 @@ describe('lib/sounds', () => {
         mode = 'throw'
         expect(() => sounds.playMoveSound()).not.toThrow()
     })
+    test('setSoundsEnabled(false) silences every helper except the settings preview click', () => {
+        const created: { src: string; currentTime: number; play: jest.Mock }[] = []
+        const OriginalAudio = (global as any).Audio
+        ;(global as any).Audio = jest.fn((src: string) => {
+            const a = { src, preload: '', currentTime: 0, play: jest.fn(() => Promise.resolve()) }
+            created.push(a)
+            return a
+        })
+        let sounds: any
+        jest.isolateModules(() => { sounds = require('@/lib/sounds') })
+        ;(global as any).Audio = OriginalAudio
+        const played = () => created.filter(a => a.play.mock.calls.length).map(a => a.src)
+        sounds.setSoundsEnabled(false)
+        sounds.playMoveSound()
+        sounds.playGameEndSound(true)
+        expect(played()).toEqual([])
+        sounds.playPreviewMoveSound()
+        expect(played()).toEqual(['/audio/move-self.mp3'])
+        sounds.setSoundsEnabled(true)
+        sounds.playCaptureSound()
+        expect(played()).toEqual(['/audio/move-self.mp3', '/audio/capture.mp3'])
+    })
 })

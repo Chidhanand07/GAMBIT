@@ -16,7 +16,16 @@ const SFX = {
     promote:    makeAudio('/audio/promote.mp3'),
 };
 
-function play(key: keyof typeof SFX) {
+/** The "Move sounds" setting (features/settings/SettingsProvider); on until it says otherwise. */
+let soundsEnabled = true;
+
+/** Turns every game sound on or off app-wide. */
+export function setSoundsEnabled(enabled: boolean) {
+    soundsEnabled = enabled;
+}
+
+function play(key: keyof typeof SFX, force = false) {
+    if (!soundsEnabled && !force) return;
     try {
         const sfx = SFX[key];
         if (!sfx) return;
@@ -26,6 +35,8 @@ function play(key: keyof typeof SFX) {
 }
 
 export function playMoveSound()       { play('move'); }
+/** The Settings live preview's move click: follows the unsaved draft, not the saved setting. */
+export function playPreviewMoveSound() { play('move', true); }
 export function playCaptureSound()    { play('capture'); }
 export function playCastleSound()     { play('castle'); }
 export function playCheckSound()      { play('check'); }

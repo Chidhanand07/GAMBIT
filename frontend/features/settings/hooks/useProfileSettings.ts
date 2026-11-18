@@ -46,15 +46,24 @@ function useProfileFields(profile: SettingsProfile | null) {
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
     const [prefilledFor, setPrefilledFor] = useState<string | undefined>(undefined);
 
+    const fillFrom = (p: SettingsProfile) => {
+        setDisplayName(p.display_name || '');
+        setBio(p.bio || '');
+        setCountry(p.country || '');
+        setAvatarUrl(p.avatar_url || null);
+    };
+
     if (profile && profile.id !== prefilledFor) {
         setPrefilledFor(profile.id);
-        setDisplayName(profile.display_name || '');
-        setBio(profile.bio || '');
-        setCountry(profile.country || '');
-        setAvatarUrl(profile.avatar_url || null);
+        fillFrom(profile);
     }
 
-    return { displayName, setDisplayName, bio, setBio, country, setCountry, avatarUrl, setAvatarUrl };
+    /** Discards unsaved edits: the fields show the saved profile again. */
+    const resetFields = () => {
+        if (profile) fillFrom(profile);
+    };
+
+    return { displayName, setDisplayName, bio, setBio, country, setCountry, avatarUrl, setAvatarUrl, resetFields };
 }
 
 /** Form state and save/upload handlers of the "Public Profile" settings section. */

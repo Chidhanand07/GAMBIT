@@ -11,8 +11,8 @@ jest.mock('next/navigation', () => ({ useRouter: () => router }))
 jest.mock('next/dynamic', () => () => (props: any) => <div data-testid="dynamic" data-mode={props.mode} />)
 jest.mock('next/link', () => ({
     __esModule: true,
-    default: ({ children, href, onMouseEnter, onMouseLeave, style, className }: any) => (
-        <a href={href} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={style} className={className}>{children}</a>
+    default: ({ children, href, onMouseEnter, onMouseLeave, style, className, 'aria-label': ariaLabel }: any) => (
+        <a href={href} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={style} className={className} aria-label={ariaLabel}>{children}</a>
     ),
 }))
 
@@ -29,6 +29,7 @@ jest.mock('@/lib/supabase/client', () => ({
 
 import Home from '@/app/page'
 import SettingsPage from '@/app/settings/page'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 
 const flush = async () => {
     for (let i = 0; i < 6; i++) await act(async () => {})
@@ -111,10 +112,11 @@ describe('settings page', () => {
         ;(global as any).fetch = fetchMock
     })
 
-    test('loading shows a spinner; signed-out pushes /login and renders nothing', () => {
+    // Redesign: the spinner became a "Loading settings…" status line.
+    test('loading shows a loading status; signed-out pushes /login and renders nothing', () => {
         profileState = { profile: null, loading: true, refetch: jest.fn() }
         const { container, rerender } = render(<SettingsPage />)
-        expect(container.querySelector('.animate-spin')).not.toBeNull()
+        expect(screen.getByRole('status')).toHaveTextContent('Loading settings…')
         profileState = { profile: null, loading: false, refetch: jest.fn() }
         rerender(<SettingsPage />)
         expect(container.innerHTML).toBe('')
@@ -147,10 +149,11 @@ describe('settings page', () => {
         expect(screen.getByDisplayValue('hi')).toBeInTheDocument()
         expect(screen.getByDisplayValue('India')).toBeInTheDocument()
         expect(screen.getByText('2/160')).toBeInTheDocument()
-        expect(screen.getByText('Member since 2024')).toBeInTheDocument()
+        // Redesign (was 'Member since 2024'): the card header shows the handle, as in Settings.dc.html
+        expect(screen.getAllByText('@me1').length).toBeGreaterThan(0)
         fireEvent.change(screen.getByDisplayValue('Me'), { target: { value: '  New Name ' } })
         fireEvent.change(screen.getByDisplayValue('hi'), { target: { value: '   ' } })
-        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
         await flush()
         expect(fetchMock.mock.calls).toEqual([['/api/profile/me', {
             method: 'PATCH',
@@ -158,23 +161,24 @@ describe('settings page', () => {
             body: JSON.stringify({ displayName: 'New Name', bio: null, country: 'India' }),
         }]])
         expect(profileState.refetch).toHaveBeenCalledTimes(1)
-        expect(screen.getByRole('button', { name: 'Saved!' })).toBeInTheDocument()
+        // Redesign: "Saved!" on the button became the "Changes saved." status line
+        expect(screen.getAllByRole('status')[0]).toHaveTextContent('Changes saved.')
         act(() => { jest.advanceTimersByTime(2500) })
-        expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument()
+        expect(screen.getAllByRole('status')[0]).toHaveTextContent('')
     })
 
     test('save errors: API error text, fallback text, network error', async () => {
         render(<SettingsPage />)
         fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'Too long' }, false))
-        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
         await flush()
         expect(screen.getByText('Too long')).toBeInTheDocument()
         fetchMock.mockResolvedValueOnce(jsonResponse({}, false))
-        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
         await flush()
         expect(screen.getByText('Failed to save')).toBeInTheDocument()
         fetchMock.mockRejectedValueOnce(new Error('x'))
-        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
         await flush()
         expect(screen.getByText('Network error — try again')).toBeInTheDocument()
     })
@@ -194,7 +198,7 @@ describe('settings page', () => {
         storage.upload.mockResolvedValue({ error: null })
         storage.getPublicUrl.mockReturnValue({ data: { publicUrl: 'https://cdn/u-1/avatar.png' } })
         const { container } = render(<SettingsPage />)
-        expect(screen.getByText('M')).toBeInTheDocument()
+        expect(screen.getAllByText('M')).toHaveLength(2) // card avatar + live preview
         const file = new File(['x'], 'me.photo.png', { type: 'image/png' })
         fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } })
         await flush()
@@ -217,14 +221,50 @@ describe('settings page', () => {
         expect(fetchMock).not.toHaveBeenCalled()
     })
 
+    test('Board & pieces: rows edit the live preview; Save stores them, Reset restores the defaults', () => {
+        localStorage.clear()
+        render(<SettingsProvider><SettingsPage /></SettingsProvider>)
+        fireEvent.click(screen.getByRole('button', { name: 'Board & pieces' }))
+        const coords = screen.getByRole('switch', { name: 'Show coordinates' })
+        expect(coords).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(coords)
+        expect(coords).toHaveAttribute('aria-checked', 'false')
+        fireEvent.click(screen.getByRole('button', { name: 'Walnut' }))
+        expect(screen.getByRole('button', { name: 'Walnut' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('img', { name: 'Board preview' }).querySelector('.bg-board-walnut-light')).not.toBeNull()
+        expect(localStorage.getItem('gambit-settings')).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        expect(JSON.parse(localStorage.getItem('gambit-settings')!)).toMatchObject({ boardTheme: 'walnut', showCoordinates: false })
+        expect(screen.getByRole('status')).toHaveTextContent('Changes saved.')
+        fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+        expect(screen.getByRole('button', { name: 'Maple' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('status')).toHaveTextContent('Defaults restored.')
+    })
+
+    test('Gameplay: auto-queen and resign confirmation drive the preview demo', () => {
+        render(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: 'Gameplay' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Promote pawn' }))
+        expect(screen.getByText('Promoted to a queen automatically.')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('switch', { name: 'Auto-queen' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Promote pawn' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Knight' }))
+        expect(screen.getByText('You chose a knight.')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Resign game' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Yes' }))
+        expect(screen.getByText('You resigned. Game over.')).toBeInTheDocument()
+    })
+
     test('account tab shows read-only username and rounded ratings (1200 fallback)', () => {
         render(<SettingsPage />)
         fireEvent.click(screen.getByRole('button', { name: 'Account' }))
-        expect(screen.queryByText('Public Profile', { selector: 'h2' })).not.toBeInTheDocument()
-        expect(screen.getByDisplayValue('me1')).toBeDisabled()
-        const ratings = [...document.querySelectorAll('.grid.grid-cols-2 > div')].map(d => d.textContent)
+        expect(screen.queryByText('Public profile', { selector: 'h2' })).not.toBeInTheDocument()
+        // Redesign: read-only (Settings.dc.html) instead of disabled
+        expect(screen.getByDisplayValue('me1')).toHaveAttribute('readonly')
+        const ratings = ['Bullet', 'Blitz', 'Rapid', 'Classical'].map(r => screen.getByText(r).parentElement!.textContent)
         expect(ratings).toEqual(['Bullet1100', 'Blitz1201', 'Rapid1200', 'Classical1400'])
-        fireEvent.click(screen.getAllByRole('button')[0])
-        expect(back).toHaveBeenCalledTimes(1)
+        // Redesign: the back button is a "Back to profile" link (was router.back())
+        expect(screen.getByRole('link', { name: 'Back to profile' })).toHaveAttribute('href', '/profile/me1')
+        expect(back).not.toHaveBeenCalled()
     })
 })

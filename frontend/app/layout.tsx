@@ -5,6 +5,7 @@ import SocketProvider from '@/components/SocketProvider'
 import ProfileProvider from '@/components/ProfileProvider'
 import PresenceProvider from '@/components/PresenceProvider'
 import { ToastProvider } from '@/components/Toast'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 import PageBackground from '@/components/layout/PageBackground'
 import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
 import ChallengeListener from '@/features/navigation/components/ChallengeListener'
@@ -56,21 +57,23 @@ export default function RootLayout({
         <html lang="en" className={fontVariables}>
             <body>
                 <ToastProvider>
-                    <ProfileProvider>
-                        <PresenceProvider>
-                            <SocketProvider>
-                                {/* Every mockup (signed in or not) sits on the same root, so it is
-                                    mounted once here and the hover trail survives navigation. */}
-                                <PageBackground>
-                                    <AppHeaderContainer />
-                                    <ChallengeListener />
-                                    <main className="flex-1 w-full">
-                                        {children}
-                                    </main>
-                                </PageBackground>
-                            </SocketProvider>
-                        </PresenceProvider>
-                    </ProfileProvider>
+                    <SettingsProvider>
+                        <ProfileProvider>
+                            <PresenceProvider>
+                                <SocketProvider>
+                                    {/* Every mockup (signed in or not) sits on the same root, so it is
+                                        mounted once here and the hover trail survives navigation. */}
+                                    <PageBackground>
+                                        <AppHeaderContainer />
+                                        <ChallengeListener />
+                                        <main className="flex-1 w-full">
+                                            {children}
+                                        </main>
+                                    </PageBackground>
+                                </SocketProvider>
+                            </PresenceProvider>
+                        </ProfileProvider>
+                    </SettingsProvider>
                 </ToastProvider>
             </body>
         </html>
