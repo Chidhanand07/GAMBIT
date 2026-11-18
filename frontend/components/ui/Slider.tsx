@@ -34,7 +34,7 @@ export function Slider({ label, ariaLabel, valueText, min, max, value, step, onC
                 onChange={handle}
                 aria-label={ariaLabel ?? label}
                 aria-valuetext={valueText}
-                className="w-full accent-accent"
+                className="my-[2px] w-full accent-accent"
             />
             <span className="flex justify-between text-[12px] text-ink-faint">
                 <span>{min}</span>

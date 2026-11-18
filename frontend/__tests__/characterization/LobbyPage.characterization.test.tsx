@@ -6,7 +6,7 @@
  * payloads and the less-travelled branches: custom time control, reconnect
  * re-queue, search timer, active-game banner, private-game options and errors.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
 const push = jest.fn()
@@ -21,7 +21,7 @@ let profile: any = null
 let onlineCount = 42
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount, onlineUserIds: new Set<string>() }) }))
 const toast = jest.fn()
 jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
@@ -43,6 +43,7 @@ beforeEach(() => {
     privateCreate = async () => jsonResponse({ token: 'tok_FAKE_0001', game_id: 'g-priv' })
     fetchMock = jest.fn(async (url: string) => {
         if (url === '/api/games/active') return jsonResponse(activeGame)
+        if (url === '/api/games/live') return jsonResponse([])
         if (url === '/api/games/private/create') return privateCreate()
         return jsonResponse({}, false)
     })
@@ -64,9 +65,10 @@ const click = (el: Element) => fireEvent.click(el)
 const playOnline = () => click(screen.getByRole('button', { name: /Play Online/ }))
 
 describe('mount & static content', () => {
-    test('fetches /api/games/active exactly once, with no options', async () => {
+    test('fetches /api/games/active exactly once, with no options (and the live games list)', async () => {
         await renderLobby()
-        expect(fetchMock.mock.calls).toEqual([['/api/games/active']])
+        // Redesign: the "Live games" card now reads GET /api/games/live too.
+        expect(fetchMock.mock.calls).toEqual([['/api/games/active'], ['/api/games/live']])
     })
 
     test('subscribes to match_found, match_failed, game_start and connect (no queue_joined / queue_status handling)', async () => {
@@ -75,43 +77,49 @@ describe('mount & static content', () => {
         expect(socket.emit).not.toHaveBeenCalled()
     })
 
-    test('welcome bar shows display name, online count and rounded blitz rating; quick stats show rapid rating', async () => {
+    // Redesign: the online count moved to the app header ("N online" pill, AppHeader tests).
+    test('welcome shows the display name; the rating card shows the rounded rating of the selected category', async () => {
         await renderLobby()
         expect(screen.getByText('Welcome back, Me Display')).toBeInTheDocument()
-        expect(screen.getByText('42 players online')).toBeInTheDocument()
         expect(screen.getByText('1434')).toBeInTheDocument()
         expect(screen.getByText('Blitz rating')).toBeInTheDocument()
+        click(screen.getByText('Rapid'))
         expect(screen.getByText('1501')).toBeInTheDocument()
-        expect(screen.getByText('Your rating')).toBeInTheDocument()
-        expect(screen.getByText('No live games')).toBeInTheDocument()
+        expect(screen.getByText('Rapid rating')).toBeInTheDocument()
+        expect(screen.getByText('No live games right now.')).toBeInTheDocument()
     })
 
-    test('singular "player" when exactly one is online; signed-out welcome; rating defaults to 1200', async () => {
-        onlineCount = 1
+    test('signed-out welcome; no rating card; a missing category rating defaults to 1200', async () => {
         profile = null
-        await renderLobby()
-        expect(screen.getByText('1 player online')).toBeInTheDocument()
+        const first = await renderLobby()
         expect(screen.getByText('Welcome to Gambit')).toBeInTheDocument()
         expect(screen.queryByText('Blitz rating')).not.toBeInTheDocument()
+        first.unmount()
+        profile = { id: 'me', username: 'me1' }
+        await renderLobby()
+        expect(screen.getByText('Welcome back, me1')).toBeInTheDocument()
         expect(screen.getByText('1200')).toBeInTheDocument()
     })
 
     test('time-control cards list the six options with their labels', async () => {
         await renderLobby()
+        // Redesign: the clock tiles show the minutes as a big number over "min".
         for (const [label, time] of [
-            ['Bullet', '1 min'], ['Blitz', '3 min'], ['Rapid', '10 min'],
-            ['Classical', '30 min'], ['Custom', 'Configure'], ['Daily', '1 day/move'],
+            ['Bullet', '1'], ['Blitz', '3'], ['Rapid', '10'],
+            ['Classical', '30'], ['Custom', 'Configure'], ['Daily', '1 day/move'],
         ]) {
             expect(screen.getByText(label)).toBeInTheDocument()
             expect(screen.getByText(time)).toBeInTheDocument()
         }
+        expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(1)
+        expect(screen.getByText('Blitz · 3 min')).toBeInTheDocument()
         expect(screen.getByText('Popular')).toBeInTheDocument()
     })
 
-    test('the "Play Offline" bar opens /offline', async () => {
+    test('the "Play Offline" card links to /offline', async () => {
         await renderLobby()
-        click(screen.getByText('Play Offline'))
-        expect(push).toHaveBeenCalledWith('/offline')
+        expect(screen.getByText('Play Offline')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /Open board/ })).toHaveAttribute('href', '/offline')
     })
 })
 
@@ -138,23 +146,23 @@ describe('Play Online', () => {
         playOnline()
         socket.serverSends('match_found', { game_id: 'gm-2', white_id: 'me', black_id: 'x' })
         expect(push).toHaveBeenCalledWith('/game/gm-2')
-        expect(screen.queryByText('Finding opponent…')).not.toBeInTheDocument()
+        expect(screen.queryByText('Finding an opponent...')).not.toBeInTheDocument()
     })
 
-    test('the search timer counts mm:ss while searching and resets after cancel', async () => {
+    test('the search timer counts m:ss while searching and resets after cancel', async () => {
         jest.useFakeTimers()
         await renderLobby()
         playOnline()
-        expect(screen.getByText('00:00')).toBeInTheDocument()
+        expect(screen.getByText('0:00')).toBeInTheDocument()
         // The server accepts the join (since F-065 an unanswered join gives up after one retry).
         const ack = socket.emit.mock.calls.find(([e]) => e === 'join_queue')![2]
         act(() => { ack({ ok: true }) })
         act(() => { jest.advanceTimersByTime(65_000) })
-        expect(screen.getByText('01:05')).toBeInTheDocument()
-        click(screen.getByRole('button', { name: 'Cancel search' }))
+        expect(screen.getByText('1:05')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Cancel' }))
         expect(socket.emitted('leave_queue')).toEqual(['me'])
         playOnline()
-        expect(screen.getByText('00:00')).toBeInTheDocument()
+        expect(screen.getByText('0:00')).toBeInTheDocument()
     })
 
     test('a server that never answers join_queue: retried once, then the search stops with a message [ACKS]', async () => {
@@ -164,7 +172,7 @@ describe('Play Online', () => {
         act(() => { jest.advanceTimersByTime(8_000) })
         expect(socket.emitted('join_queue')).toHaveLength(2)
         act(() => { jest.advanceTimersByTime(8_000) })
-        expect(screen.queryByRole('button', { name: 'Cancel search' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
         expect(toast).toHaveBeenCalledWith('The server did not answer. Check your connection and try again.', 'error')
     })
 
@@ -193,7 +201,7 @@ describe('Play Online', () => {
         socket.emit.mockImplementationOnce((_e: string, _p: unknown, ack?: (res: unknown) => void) =>
             ack?.({ ok: false, error: 'invalid_time_control' }))
         socket.serverSends('connect')
-        expect(screen.queryByText('Finding opponent…')).not.toBeInTheDocument()
+        expect(screen.queryByText('Finding an opponent...')).not.toBeInTheDocument()
         expect(toast).toHaveBeenCalledWith('That time control is not available.', 'error')
     })
 
@@ -202,7 +210,7 @@ describe('Play Online', () => {
         socket.serverSends('match_found', { id: 'stale', white_id: 'me', black_id: 'x' })
         expect(push).not.toHaveBeenCalled()
         playOnline()
-        click(screen.getByRole('button', { name: 'Cancel search' }))
+        click(screen.getByRole('button', { name: 'Cancel' }))
         socket.serverSends('match_found', { id: 'stale-2', white_id: 'me', black_id: 'x' })
         expect(push).not.toHaveBeenCalled()
     })
@@ -230,22 +238,23 @@ describe('Play Online', () => {
     })
 })
 
-describe('custom time control modal', () => {
-    test('clicking Custom opens the modal without selecting it; backdrop closes it', async () => {
+describe('custom time control', () => {
+    // Redesign: Custom is a tile like the others; selecting it opens the inline panel (was a modal).
+    test('selecting Custom shows the sliders and the preview (5+0 by default); another tile hides them', async () => {
         await renderLobby()
         click(screen.getByText('Custom'))
-        expect(screen.getByText('Custom Time Control')).toBeInTheDocument()
+        expect(screen.getByText('Custom time control')).toBeInTheDocument()
         expect(screen.getByText('5 min')).toBeInTheDocument()
         expect(screen.getByText('0s')).toBeInTheDocument()
         expect(screen.getByText('5+0')).toBeInTheDocument()
-        const backdrop = screen.getByText('Custom Time Control').parentElement!.previousElementSibling!
-        click(backdrop)
-        expect(screen.queryByText('Custom Time Control')).not.toBeInTheDocument()
+        expect(screen.getByText('Custom · 5+0')).toBeInTheDocument()
+        click(screen.getByText('Blitz'))
+        expect(screen.queryByText('Custom time control')).not.toBeInTheDocument()
         playOnline()
         expect(socket.emitted('join_queue')[0].time_control).toBe('3+0')
     })
 
-    test('sliders set minutes/increment; confirming queues with "M+I" and increment I', async () => {
+    test('sliders set minutes/increment; "Play with this time control" queues "M+I" with increment I', async () => {
         await renderLobby()
         click(screen.getByText('Custom'))
         const [minutes, increment] = screen.getAllByRole('slider')
@@ -257,12 +266,9 @@ describe('custom time control modal', () => {
         fireEvent.change(increment, { target: { value: '5' } })
         expect(screen.getByText('12 min')).toBeInTheDocument()
         expect(screen.getByText('5s')).toBeInTheDocument()
+        // the "You're playing" bar shows the chosen control
+        expect(screen.getByText('Custom · 12+5')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Play with this time control' }))
-        expect(screen.queryByText('Custom Time Control')).not.toBeInTheDocument()
-        // the Custom card now shows the chosen control instead of "Configure"
-        expect(screen.getByText('12+5')).toBeInTheDocument()
-        expect(screen.queryByText('Configure')).not.toBeInTheDocument()
-        playOnline()
         expect(socket.emitted('join_queue')).toEqual([{ user: { id: 'me' }, time_control: '12+5', increment: 5, is_rated: true }])
     })
 
@@ -272,7 +278,6 @@ describe('custom time control modal', () => {
         const [minutes, increment] = screen.getAllByRole('slider')
         fireEvent.change(minutes, { target: { value: '12' } })
         fireEvent.change(increment, { target: { value: '5' } })
-        click(screen.getByRole('button', { name: 'Play with this time control' }))
         playOnline()
         socket.emit.mockClear()
         socket.serverSends('connect')
@@ -317,13 +322,17 @@ describe('active game', () => {
 })
 
 describe('private game modal', () => {
-    const openFriendModal = () => click(screen.getByRole('button', { name: 'Friend' }))
-    const ratedToggle = () => screen.getByText('Rated game').parentElement!.parentElement!.querySelector('button')!
+    // Redesign: Friend opens the "Play a friend" panel; its "Invite with a link" opens this dialog.
+    const openFriendModal = () => {
+        click(screen.getByRole('button', { name: 'Friend' }))
+        click(screen.getByRole('button', { name: 'Invite with a link' }))
+    }
+    const ratedToggle = () => screen.getByRole('switch', { name: 'Rated game' })
 
     test('shows six time controls, three colours and the rated toggle', async () => {
         await renderLobby()
         openFriendModal()
-        expect(screen.getByText('Play a Friend')).toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: 'Invite with a link' })).toBeInTheDocument()
         for (const tc of ['bullet', 'blitz', 'rapid', 'classical', 'custom', 'daily']) {
             expect(screen.getByRole('button', { name: tc })).toBeInTheDocument()
         }
@@ -432,10 +441,9 @@ describe('private game modal', () => {
         openFriendModal()
         click(screen.getByRole('button', { name: 'Generate Invite Link' }))
         await screen.findByText('Share this link')
-        const header = screen.getByText('Play a Friend')
-        click(header.parentElement!.querySelector('button')!)
-        expect(screen.queryByText('Play a Friend')).not.toBeInTheDocument()
-        openFriendModal()
+        click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Invite with a link' }))
         expect(screen.getByRole('button', { name: 'Generate Invite Link' })).toBeInTheDocument()
     })
 })

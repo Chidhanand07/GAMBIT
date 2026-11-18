@@ -1,5 +1,8 @@
 'use client';
 
+import { Suspense, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { parseComputerSetup } from '@/features/offline/setupParams';
 import { useComputerGame } from '@/features/offline/hooks/useComputerGame';
 import { resultText } from '@/features/offline/game';
 import { SetupScreen } from '@/features/offline/components/SetupScreen';
@@ -13,9 +16,20 @@ import {
     PlayerFooter,
 } from '@/features/offline/components/GamePanels';
 
+/** /offline, or /offline?difficulty=&side= from the lobby (starts the game directly). */
 export default function ComputerPage() {
+    return (
+        <Suspense>
+            <ComputerGame />
+        </Suspense>
+    );
+}
+
+function ComputerGame() {
+    const searchParams = useSearchParams();
+    const preset = useMemo(() => parseComputerSetup(searchParams), [searchParams]);
     const { phase, difficulty, setDifficulty, colorChoice, setColorChoice, startGame, backToSetup, board } =
-        useComputerGame();
+        useComputerGame(preset);
     const { game, playerColor, moveHistory, thinking, gameOver, engineError } = board;
 
     // ── SETUP SCREEN ──────────────────────────────────────────────────────────

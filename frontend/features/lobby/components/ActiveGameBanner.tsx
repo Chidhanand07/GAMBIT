@@ -1,22 +1,15 @@
-import Link from 'next/link';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import type { ActiveGame } from '@/types/lobby';
 
+/** A game of yours is still running: a link back to it. */
 export function ActiveGameBanner({ activeGame }: { activeGame: ActiveGame }) {
     return (
-        <div
-            className="mb-4 px-5 py-3 rounded-xl flex items-center justify-between"
-            style={{ background: 'var(--accent-dim)', border: '1px solid var(--border-accent)' }}
-        >
-            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                You have an active game in progress
-            </span>
-            <Link
-                href={`/game/${activeGame.id}`}
-                className="px-4 py-1.5 rounded-lg text-sm font-medium btn-press"
-                style={{ background: 'var(--accent)', color: '#0F0D0B' }}
-            >
+        <Card as="div" tone="raised" className="flex flex-wrap items-center justify-between gap-4 border-accent py-4">
+            <span className="font-semibold">You have an active game in progress</span>
+            <Button href={`/game/${activeGame.id}`} className="flex">
                 Resume →
-            </Link>
-        </div>
+            </Button>
+        </Card>
     );
 }
