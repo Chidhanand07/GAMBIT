@@ -157,6 +157,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-130](#f-130) | Spectator counts in Redis with a heartbeat; the lobby reads them over its socket | B2 | LIVE-1 |
 | [F-131](#f-131) | Friend "Away": each tab reports idleness in its presence payload | B2 | LIVE-2 |
 | [F-132](#f-132) | The lobby's rating range is the matchmaker's own window, pushed when it widens | B2 | LIVE-3 |
+| [F-133](#f-133) | The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service | B2 | LIVE-4 |
 
 ---
 
@@ -3212,4 +3213,28 @@ their owner (B1 item 8).**
 - **Proof.** `domain/pairing.test.js` (every radius step, floor, provisional, agreement with
   `isRatingCompatible`), `services/matchmakingService.test.js` (sent once per step, to the right socket,
   stops after leaving), lobby hook and page tests. `queue_joined` expectations gained the field.
+
+## F-133
+
+**The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service (LIVE-4).**
+
+- **Context.** Game.dc.html's resign dialog says "You will lose this game and about 7 rating points." The
+  redesign said only "and rating points" because no figure was computed anywhere.
+- **Decision.** A socket event `rating_estimate { game_id }`, acked `{ ok, rated: false }` or
+  `{ ok, rated: true, points }`. The game server reads the live game from Redis, refuses anyone who is not
+  a player of an active game (`playerRejection`: `not_a_player`, `game_not_active`, `game_not_found`), and
+  for a rated game runs `ratingService.estimate`: the same `findPair` + `computeRatings` (Glicko-2, ±50
+  cap, floor 100) that `processGameEnd` applies, from the profiles as stored, with the opponent winning.
+  Nothing is written. Missing profiles answer `estimate_unavailable`, never a guess. The asking player is
+  the connection's verified user; a user id in the payload is stripped by the schema.
+- **Why a socket ack, not an HTTP route.** The game state (who plays, whether it is rated, the time
+  control) lives in the game server's Redis; the web app would have to re-derive it from the database row.
+- **Client.** `useResignEstimate` asks each time the dialog opens for a player. Text: the figure when it
+  has arrived ("about 1 rating point" in the singular); "and rating points" while it is on its way or if
+  the server could not say; "You will lose this game." for an unrated game (by the game row, or by the
+  server's `rated: false`). The mockup has no separate unrated wording; this keeps the redesign's.
+- **Rate limit.** The general `socketEvent` rule (60 per 10 s); one ask per dialog opening.
+- **Proof.** `services/ratingService.test.js` (estimate equals what `processGameEnd` then applies, nothing
+  written), `services/ratingEstimateService.test.js` (players only, unrated, missing profiles, colour),
+  schema and handler tests, `useResignEstimate.test.ts`, `ConfirmDialogs` and game page tests.
 

@@ -391,3 +391,12 @@ describe('spectator events [F-130]', () => {
         expect(d.matchmaking.leaveQueueBySocket).toHaveBeenCalledWith('sock-1');
     });
 });
+
+test('rating_estimate asks for the connection\'s own user, never one in the payload [F-133]', async () => {
+    const d = { ...deps(), ratingEstimates: { lossIfResigned: jest.fn(async () => ({ ok: true, rated: true, points: 7 })) } };
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.rating_estimate({ game_id: 'g', user_id: 'victim' }, ack);
+    expect(d.ratingEstimates.lossIfResigned).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(ack).toHaveBeenCalledWith({ ok: true, rated: true, points: 7 });
+});

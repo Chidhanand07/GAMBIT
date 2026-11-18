@@ -818,6 +818,20 @@ describe('resign', () => {
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
 
+    test('opening the dialog asks the server what a loss costs and shows "about N rating points" [F-133]', async () => {
+        await renderGame()
+        socket.emit.mockImplementation((event: string, _payload: unknown, ack?: (a: unknown) => void) => {
+            if (event === 'rating_estimate') ack?.({ ok: true, rated: true, points: 7 })
+        })
+        click(resignButton())
+        expect(socket.emitted('rating_estimate')).toEqual([{ game_id: 'g1' }])
+        const dialog = await screen.findByRole('alertdialog', { name: 'Resign this game?' })
+        await waitFor(() =>
+            expect(dialog).toHaveTextContent("You will lose this game and about 7 rating points. This can't be undone."),
+        )
+        socket.emit.mockReset()
+    })
+
     test('Escape closes the confirmation without emitting', async () => {
         await renderGame()
         click(resignButton())

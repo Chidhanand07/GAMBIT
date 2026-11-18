@@ -40,6 +40,7 @@ const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
 const { createSpectatorService } = require('./services/spectatorService');
+const { createRatingEstimateService } = require('./services/ratingEstimateService');
 const { createSpectatorsRepository } = require('./repositories/spectatorsRepository');
 const { SPECTATOR_TTL_MS } = require('./domain/spectators');
 const { createProfileService } = require('./services/profileService');
@@ -179,6 +180,7 @@ registerSocketHandlers(io, {
     chatService,
     socialService,
     spectatorService,
+    ratingEstimates: createRatingEstimateService({ gameStore, ratingService }),
     verifyToken: tokenVerifier.verify,
     tokenDeadline: tokenVerifier.deadline,
     rateLimit: createSocketRateLimit({ limiter: rateLimiter }),

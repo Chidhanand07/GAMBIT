@@ -14,6 +14,7 @@ const { registerGameHandlers } = require('./handlers/game');
 const { registerChatHandlers } = require('./handlers/chat');
 const { registerSocialHandlers } = require('./handlers/social');
 const { registerSpectatorHandlers } = require('./handlers/spectators');
+const { registerRatingHandlers } = require('./handlers/rating');
 const { log } = require('../observability/log');
 
 /** NODE-14: a client that comes back within this window gets its rooms and missed events back. */
@@ -77,6 +78,7 @@ function clientOf(socket) {
  * @property {Parameters<typeof registerChatHandlers>[1]['chatService']} chatService
  * @property {import('./handlers/social').SocialHandlerService} socialService
  * @property {import('./handlers/spectators').SpectatorHandlerService} [spectatorService] live counts (F-130)
+ * @property {import('./handlers/rating').RatingEstimateHandlerService} [ratingEstimates] resign cost (F-133)
  * @property {(token: string) => Promise<string | null>} verifyToken access token → user id (null when invalid)
  * @property {(token: string) => number} tokenDeadline when a socket opened with the token must be closed
  * @property {(userId: string, gameId: string) => Promise<number>} [countPlayerSockets]
@@ -117,6 +119,8 @@ function registerSocketHandlers(io, depsIn) {
         if (deps.spectatorService) {
             registerSpectatorHandlers(socket, { spectatorService: deps.spectatorService, log: socketLog });
         }
+        if (deps.ratingEstimates)
+            registerRatingHandlers(socket, { ratingEstimates: deps.ratingEstimates, log: socketLog });
     });
 }
 

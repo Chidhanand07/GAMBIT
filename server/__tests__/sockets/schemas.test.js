@@ -16,6 +16,7 @@ test('there is a schema for every client → server event (and none for `authent
             'spectator_counts',
             'make_move',
             'resign',
+            'rating_estimate',
             'send_message',
             'rematch_request',
             'rematch_accept',
@@ -186,4 +187,10 @@ describe('spectator events [F-130]', () => {
         expect(ok('spectator_counts', { game_ids: ['a,b'] })).toBe(false);
         expect(ok('spectator_counts', {})).toBe(false);
     });
+});
+
+test('rating_estimate takes a game id only [F-133]', () => {
+    expect(ok('rating_estimate', { game_id: 'g1' })).toBe(true);
+    expect(ok('rating_estimate', { game_id: 'a,b' })).toBe(false);
+    expect(schemas.rating_estimate.parse({ game_id: 'g1', user_id: 'victim' })).toEqual({ game_id: 'g1' });
 });
