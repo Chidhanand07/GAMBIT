@@ -6,7 +6,8 @@ import { cn } from '@/lib/design/cn';
 import { SPEED_BUCKET_LABELS } from '@/lib/chess/timeControl';
 import type { ProfileStats } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
-import { colourRows, statFacts, type ColourRow } from '../model';
+import { colourRows, endingRows, statFacts, type ColourRow } from '../model';
+import { EndingsCard } from './EndingsCard';
 import { OpeningsCard } from './OpeningsCard';
 import { EMPTY, PANEL, PANEL_TITLE } from './styles';
 
@@ -75,18 +76,24 @@ function ModeCard({ mode, stats }: { mode: SpeedBucket; stats: ProfileStats }) {
 
 function StatsBody({ stats, rating }: { stats: ProfileStats; rating: ReactNode }) {
     const colours = colourRows(stats);
+    const endings = endingRows(stats);
     const facts = statFacts(stats);
     return (
         <>
             <Totals stats={stats} />
             {rating}
-            {colours.length > 0 && (
-                <Card className={PANEL}>
-                    <span className={PANEL_TITLE}>Results by colour</span>
-                    {colours.map((row) => (
-                        <ColourBar key={row.name} row={row} />
-                    ))}
-                </Card>
+            {(colours.length > 0 || endings.length > 0) && (
+                <div className="flex flex-wrap gap-3">
+                    {colours.length > 0 && (
+                        <Card className={`${PANEL} flex-[1_1_300px]`}>
+                            <span className={PANEL_TITLE}>Results by colour</span>
+                            {colours.map((row) => (
+                                <ColourBar key={row.name} row={row} />
+                            ))}
+                        </Card>
+                    )}
+                    {endings.length > 0 && <EndingsCard rows={endings} />}
+                </div>
             )}
             {stats.openings && stats.openings.length > 0 && <OpeningsCard openings={stats.openings} />}
             {facts.length > 0 && (

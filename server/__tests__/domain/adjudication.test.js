@@ -3,7 +3,7 @@
  * (NODE-16, TEST-03). Pure: a chess.js position in, a verdict out.
  */
 const { Chess } = require('chess.js');
-const { adjudicate, REASON } = require('../../src/domain/adjudication');
+const { adjudicate, END_REASON_CODE, REASON, endReasonCode } = require('../../src/domain/adjudication');
 
 const at = (fen) => new Chess(fen);
 
@@ -98,5 +98,40 @@ test('the reason strings are the ones shown to players', () => {
         TIME: 'Time',
         ABANDONMENT: 'Abandonment',
         ABORTED: 'Aborted',
+    });
+});
+
+describe('endReasonCode: the stored games.end_reason [F-124]', () => {
+    test.each([
+        [REASON.CHECKMATE, 'checkmate'],
+        [REASON.STALEMATE, 'stalemate'],
+        [REASON.INSUFFICIENT_MATERIAL, 'insufficient_material'],
+        [REASON.THREEFOLD_REPETITION, 'threefold_repetition'],
+        [REASON.FIFTY_MOVE_RULE, 'fifty_move_rule'],
+        [REASON.RESIGNATION, 'resignation'],
+        [REASON.TIME, 'timeout'],
+        [REASON.ABANDONMENT, 'abandonment'],
+        [REASON.ABORTED, 'aborted'],
+    ])('%s → %s', (reason, code) => {
+        expect(endReasonCode(reason)).toBe(code);
+    });
+
+    test('every reason has a code, and the codes are the ones the database CHECK accepts', () => {
+        expect(Object.keys(END_REASON_CODE).sort()).toEqual(Object.values(REASON).sort());
+        expect(Object.values(END_REASON_CODE).sort()).toEqual([
+            'abandonment',
+            'aborted',
+            'checkmate',
+            'fifty_move_rule',
+            'insufficient_material',
+            'resignation',
+            'stalemate',
+            'threefold_repetition',
+            'timeout',
+        ]);
+    });
+
+    test.each([undefined, null, 'Game over', 'toString', '__proto__', 42])('%p → null', (reason) => {
+        expect(endReasonCode(reason)).toBeNull();
     });
 });

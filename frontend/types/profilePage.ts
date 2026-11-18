@@ -61,6 +61,10 @@ export interface ProfileFacts {
     /** Mean analysed accuracy (%), null when no game was analysed. */
     averageAccuracy: number | null;
     longestWinStreak: number;
+    /** Mean moves per played game (F-124); null without a readable final position. */
+    averageGameLength?: number | null;
+    /** Fewest moves in a won game (F-124); null without one. */
+    fastestWin?: number | null;
     /** Highest opponent rating (at the time) the player beat, over every pool; null without one (F-122). */
     bestWin?: number | null;
     /** English weekday name (UTC), null without games. */
@@ -81,6 +85,8 @@ export interface ProfileStats {
      * oldest first (F-121). Empty for a pool without recorded games (games rated before F-120 have none).
      */
     ratingHistory?: Partial<Record<SpeedBucket, number[]>>;
+    /** How played games ended, in the mockup's rows; "Not recorded" for games before F-124. */
+    endings?: { name: string; count: number }[];
     /** Most played openings, then "Other" (F-123); null when the moves could not be read. */
     openings?: OpeningStat[] | null;
     /** Per pool, the highest opponent rating (at the time) the player beat; null without one (F-122). */

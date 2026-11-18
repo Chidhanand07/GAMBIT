@@ -120,6 +120,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-121](#f-121) | Rating chart, Peak and Low from the stored snapshots (supersedes F-082) | B1 | RATING-HISTORY |
 | [F-122](#f-122) | Best win = highest opponent rating at the time, per pool, from the snapshots | B1 | BEST-WIN |
 | [F-123](#f-123) | Openings from stored moves via a built-in ECO table; `moves` index and browser writes revoked | B1 | OPENINGS |
+| [F-124](#f-124) | `games.end_reason` written by the finalizer; game length from the final FEN | B1 | GAME-ENDINGS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2989,3 +2990,28 @@ an index and loses its browser write privileges (B1 item 4).**
   pgTAP `061_moves_book_index.test.sql`.
 - **Limits.** Families are coarse by design (the mockup groups by family). Transpositions reach the
   line they end in only if the move order matches a row.
+
+## F-124
+
+**How a game ended is stored as a code with the result; game length is read from the final FEN
+(B1 item 5).**
+
+- **End reason.** Migration `20261118100200_game_end_reason.sql` adds `games.end_reason` with a CHECK
+  on the server's verdict codes (`checkmate`, `stalemate`, `insufficient_material`,
+  `threefold_repetition`, `fifty_move_rule`, `resignation`, `timeout`, `abandonment`, `aborted`).
+  `server/src/domain/adjudication.js` maps each `REASON` to its code (`endReasonCode`, null for
+  anything else, never free text) and the finalizer writes it in the same guarded `finishIfActive`
+  update as the result, so the outbox re-drive (F-066) replays it too. The web app's
+  stale-game cleanup writes `abandonment`. `service_role` gets column INSERT/UPDATE on it (F-120 made
+  `games` writes column by column); the browser roles get nothing.
+- **Old games.** Backfilled only where certain (`status = 'aborted'` → `aborted`, `result =
+  'abandoned'` → `abandonment`); the rest stay NULL and the "How games end" card shows them as
+  "Not recorded" (a row that appears only when there are any). Aborted games are not counted, like
+  everywhere else on the profile (F12).
+- **Rows.** The card groups codes as the mockup does: Checkmate, Resignation, On time, Stalemate or
+  draw (stalemate, insufficient material, threefold, fifty-move), Abandoned.
+- **Game length.** No new column: the number of moves is read from `final_fen` (or `fen` for rows
+  written before `final_fen`), counted like a score sheet (`lib/chess/fen.ts`). The stats route adds
+  "Average game length" and "Fastest win"; the games route returns `move_count` per game instead of the
+  positions.
+- **Rollout.** Migration, then the game server and web app. pgTAP `062_game_end_reason.test.sql`.

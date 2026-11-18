@@ -2,6 +2,7 @@ import {
     aboutFacts,
     achievements,
     colourRows,
+    endingRows,
     filterGames,
     openingRateTone,
     statFacts,
@@ -132,5 +133,45 @@ describe('openingRateTone [F-123]', () => {
         [0, 'poor'],
     ])('%p%% → %s', (rate, tone) => {
         expect(openingRateTone(rate)).toBe(tone);
+    });
+});
+
+describe('statFacts order and game length [F-124]', () => {
+    test("the mockup's six tiles in order", () => {
+        const facts = {
+            averageAccuracy: 78,
+            averageGameLength: 34,
+            longestWinStreak: 4,
+            bestWin: 1250,
+            fastestWin: 1,
+            mostActiveDay: 'Tuesday',
+        };
+        expect(statFacts({ facts })).toEqual([
+            { k: 'Average accuracy', v: '78%' },
+            { k: 'Average game length', v: '34 moves' },
+            { k: 'Longest win streak', v: '4 games' },
+            { k: 'Best win', v: 'vs 1250' },
+            { k: 'Fastest win', v: '1 move' },
+            { k: 'Most active day', v: 'Tuesday' },
+        ]);
+    });
+});
+
+describe('endingRows [F-124]', () => {
+    test('each row with its share of the games counted', () => {
+        const endings = [
+            { name: 'Checkmate', count: 11 },
+            { name: 'Resignation', count: 9 },
+            { name: 'Abandoned', count: 0 },
+        ];
+        expect(endingRows({ endings })).toEqual([
+            { name: 'Checkmate', n: 11, pct: '55%' },
+            { name: 'Resignation', n: 9, pct: '45%' },
+            { name: 'Abandoned', n: 0, pct: '0%' },
+        ]);
+    });
+    test('nothing to show without games', () => {
+        expect(endingRows({})).toEqual([]);
+        expect(endingRows({ endings: [{ name: 'Checkmate', count: 0 }] })).toEqual([]);
     });
 });

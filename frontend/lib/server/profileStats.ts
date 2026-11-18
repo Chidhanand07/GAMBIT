@@ -1,11 +1,11 @@
 import 'server-only';
-import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
+import { playerOutcome } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
 import type { Opening } from '@/lib/chess/eco';
-import { bestWins, overallBestWin } from './gameFacts';
+import { averageGameLength, bestWins, endings, fastestWin, overallBestWin, type FactGameRow } from './gameFacts';
 import { openingStats } from './openings';
-import { ratingHistory, type SnapshotGameRow } from './ratingHistory';
+import { ratingHistory } from './ratingHistory';
 
 /** Rating reported for a bucket whose column is null. */
 const DEFAULT_RATING = 1200;
@@ -24,13 +24,13 @@ interface StatsProfileRow {
     rating_classical: number | null;
 }
 
-interface StatsGameRow extends OutcomeRow, SnapshotGameRow {
+type StatsGameRow = FactGameRow & {
     id: string;
     time_control: string | null;
     white_accuracy?: number | null;
     black_accuracy?: number | null;
     created_at?: string | null;
-}
+};
 
 const emptyCategory = (): CategoryStats => ({ played: 0, wins: 0, losses: 0, draws: 0 });
 
@@ -143,10 +143,13 @@ export function buildProfileStats(
         ratingHistory: ratingHistory(games, profile.id),
         bestWins: wins,
         openings: openings ? openingStats(games, openings, profile.id) : null,
+        endings: endings(games, profile.id),
         facts: {
             averageAccuracy: averageAccuracy(games, profile.id),
+            averageGameLength: averageGameLength(games, profile.id),
             longestWinStreak: longestWinStreak(games, profile.id),
             bestWin: overallBestWin(wins),
+            fastestWin: fastestWin(games, profile.id),
             mostActiveDay: mostActiveDay(games, profile.id),
         },
     };

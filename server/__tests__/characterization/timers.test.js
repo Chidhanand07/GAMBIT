@@ -39,8 +39,11 @@ async function patchGame(id, patch) {
 
 const reviewCalls = () => ctx.fetch.mock.calls.filter(([url]) => String(url).endsWith('/analyse-game'));
 
-/** The one finished-game update, identical for every kind of ending [G3]. */
-function finalizeOps(game, outcome, winnerId) {
+/**
+ * The one finished-game update, identical for every kind of ending [G3], with how it ended as the
+ * stored code (F-124; was: the same row without end_reason).
+ */
+function finalizeOps(game, outcome, winnerId, endReason) {
     return [
         [
             'update',
@@ -52,6 +55,7 @@ function finalizeOps(game, outcome, winnerId) {
                 final_fen: game.fen,
                 white_clock_ms: game.whiteClockMs,
                 black_clock_ms: game.blackClockMs,
+                end_reason: endReason,
             },
         ],
         ['eq', 'id', game.id],
@@ -203,7 +207,7 @@ describe('global clock ticker', () => {
         expect(events.find(([e]) => e === 'rating_updated')[1]).toEqual(CHANGES);
         expect(await getGame(game.id)).toEqual({ ...before, status: 'completed', result: outcome, reason: 'Abandonment' });
         expect(await getActiveGameIds()).toEqual([]);
-        expect(opsFor('games')).toEqual([finalizeOps(before, outcome, winnerId)]);
+        expect(opsFor('games')).toEqual([finalizeOps(before, outcome, winnerId, 'abandonment')]);
         expect(rating.processGameEnd.mock.calls).toEqual([[game.id, 'white-user', 'black-user', outcome, '10', true]]);
         // An abandoned game is reviewed like any other finished game [G3].
         expect(reviewCalls()).toHaveLength(1);
@@ -265,7 +269,7 @@ describe('global clock ticker', () => {
         expect(await getGame(game.id)).toEqual({ ...final, status: 'completed', result: outcome, reason: 'Time' });
         expect(await getActiveGameIds()).toEqual([]);
         // The same finished row as any ending: result and clock columns included [G3].
-        expect(opsFor('games')).toEqual([finalizeOps(final, outcome, winnerId)]);
+        expect(opsFor('games')).toEqual([finalizeOps(final, outcome, winnerId, 'timeout')]);
         expect(rating.processGameEnd.mock.calls).toEqual([[game.id, 'white-user', 'black-user', outcome, '10', true]]);
         expect(reviewCalls()).toHaveLength(1);
     });

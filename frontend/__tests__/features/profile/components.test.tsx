@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { GamesTab } from '@/features/profile/components/GamesTab';
+import { EndingsCard } from '@/features/profile/components/EndingsCard';
 import { OpeningsCard } from '@/features/profile/components/OpeningsCard';
 import type { ProfileGameRow } from '@/types/profilePage';
 
@@ -77,5 +78,27 @@ describe('OpeningsCard [F-123]', () => {
         expect(screen.getByText('0%')).toHaveClass('text-danger');
         expect(screen.getByText('—')).toBeInTheDocument();
         expect(screen.getByText('65%')).toBeInTheDocument();
+    });
+});
+
+describe('game length and endings [F-124]', () => {
+    test('a Games-tab row ends its details line with the number of moves', () => {
+        renderGames([game({ opening: 'Italian Game', move_count: 24 })]);
+        expect(screen.getByText('Italian Game · 3 min · 24 moves')).toBeInTheDocument();
+    });
+
+    test('How games end: name, count and a bar as wide as the share', () => {
+        const { container } = render(
+            <EndingsCard
+                rows={[
+                    { name: 'Checkmate', n: 11, pct: '34%' },
+                    { name: 'Not recorded', n: 3, pct: '9%' },
+                ]}
+            />,
+        );
+        expect(screen.getByText('How games end')).toBeInTheDocument();
+        expect(screen.getByText('Checkmate').nextSibling).toHaveTextContent('11');
+        expect(screen.getByText('Not recorded')).toBeInTheDocument();
+        expect(container.querySelector('[style="width: 34%;"]')).not.toBeNull();
     });
 });

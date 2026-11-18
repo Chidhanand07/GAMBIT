@@ -213,7 +213,9 @@ describe('GET /api/profile/[username]/stats', () => {
             white: { played: 3, wins: 2, losses: 1, draws: 0 },
             black: { played: 1, wins: 1, losses: 0, draws: 0 },
         })
-        expect(body.facts).toEqual({ averageAccuracy: 80, longestWinStreak: 2, bestWin: null, mostActiveDay: 'Tuesday' })
+        expect(body.facts).toEqual({
+            averageAccuracy: 80, averageGameLength: null, longestWinStreak: 2, bestWin: null, fastestWin: null, mostActiveDay: 'Tuesday',
+        })
     })
 
     test('best win per pool and overall: the highest opponent rating at the time among wins [F-122]', async () => {
@@ -265,6 +267,37 @@ describe('GET /api/profile/[username]/stats', () => {
         expect(body.openings).toBeNull()
     })
 
+    test('how games end, average game length and fastest win [F-124]', async () => {
+        const p = uid('p')
+        const x = uid('x')
+        db.queue('profiles', { data: { id: p, games_played: 4, wins: 2, losses: 1, draws: 1 }, error: null })
+        db.queue('games', {
+            data: [
+                // 17 moves, a win by mate
+                { time_control: '3', white_id: p, black_id: x, winner_id: p, end_reason: 'checkmate', final_fen: '8/8/8/8/8/8/8/8 b - - 0 17' },
+                // 31 moves, a win on time
+                { time_control: '3', white_id: x, black_id: p, winner_id: p, end_reason: 'timeout', final_fen: '8/8/8/8/8/8/8/8 w - - 0 32' },
+                // older row: no final_fen, the live fen is read; no reason stored
+                { time_control: '3', white_id: p, black_id: x, winner_id: x, fen: '8/8/8/8/8/8/8/8 b - - 0 40' },
+                { time_control: '3', white_id: p, black_id: x, result: 'draw', end_reason: 'threefold_repetition', final_fen: 'bad' },
+                { time_control: '3', white_id: p, black_id: x, status: 'aborted', end_reason: 'aborted' },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.endings).toEqual([
+            { name: 'Checkmate', count: 1 },
+            { name: 'Resignation', count: 0 },
+            { name: 'On time', count: 1 },
+            { name: 'Stalemate or draw', count: 1 },
+            { name: 'Abandoned', count: 0 },
+            { name: 'Not recorded', count: 1 },
+        ])
+        expect(body.facts).toMatchObject({ averageGameLength: 29, fastestWin: 17 })
+        const columns = String(db.op(db.callsFor('games')[0], 'select')![0])
+        for (const column of ['end_reason', 'final_fen', 'fen']) expect(columns).toContain(column)
+    })
+
     test('404 for an unknown user', async () => {
         expect((await getStats(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
     })
@@ -312,6 +345,20 @@ describe('GET /api/profile/[username]/games', () => {
             { id: uid('g2'), opening: 'Other' },
             { id: uid('g3') },
         ])
+    })
+
+    test('each game carries its number of moves instead of the positions it is read from [F-124]', async () => {
+        db.queue('profiles', { data: { id: uid('p') }, error: null })
+        db.queue('games', {
+            data: [
+                { id: uid('g1'), final_fen: '8/8/8/8/8/8/8/8 w - - 0 25', fen: '8/8/8/8/8/8/8/8 w - - 0 25' },
+                { id: uid('g2'), final_fen: null, fen: '8/8/8/8/8/8/8/8 b - - 0 3' },
+                { id: uid('g3'), final_fen: null, fen: null },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getGames(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.games).toEqual([{ id: uid('g1'), move_count: 24 }, { id: uid('g2'), move_count: 3 }, { id: uid('g3') }])
     })
 
     test('limit is capped at 50 and defaults to 15', async () => {

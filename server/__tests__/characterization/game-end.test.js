@@ -107,6 +107,8 @@ describe('checkmate', () => {
                         final_fen: AFTER_MATE,
                         white_clock_ms: 123457,
                         black_clock_ms: 98765,
+                        // F-124 (was: not stored): how the game ended.
+                        end_reason: 'checkmate',
                     },
                 ],
                 ['eq', 'id', game.id],

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listFinishedGamesPage } from '@/lib/server/games';
+import { gameMoves } from '@/lib/server/gameFacts';
 import { requireUser } from '@/lib/server/identity';
 import { OTHER_OPENING, openingsOfGames } from '@/lib/server/openings';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
@@ -46,9 +47,15 @@ export async function GET(request: NextRequest, props: { params: Promise<{ usern
         admin,
         rows.map((g) => g.id),
     );
-    const withOpenings = rows.map((g) =>
-        openings?.has(g.id) ? { ...g, opening: openings.get(g.id)?.family ?? OTHER_OPENING } : g,
-    );
+    const listed = rows.map(({ final_fen, fen, ...game }) => {
+        // The number of moves (F-124) instead of the positions it is read from.
+        const moves = gameMoves({ final_fen, fen });
+        return {
+            ...game,
+            ...(moves === null ? {} : { move_count: moves }),
+            ...(openings?.has(game.id) ? { opening: openings.get(game.id)?.family ?? OTHER_OPENING } : {}),
+        };
+    });
 
-    return NextResponse.json({ games: withOpenings, profileId: profile.id });
+    return NextResponse.json({ games: listed, profileId: profile.id });
 }

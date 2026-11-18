@@ -70,6 +70,8 @@ test('flag fall goes through the one finalizer: same payload, DB row, rating and
         white_clock_ms: 600000,
         // The side that ran out is recorded with no time left [G11].
         black_clock_ms: 0,
+        // F-124 (was: not stored): how the game ended.
+        end_reason: 'timeout',
     });
     expect(rating.processGameEnd).toHaveBeenCalledWith('game-1', 'white-user', 'black-user', 'white', '10', true);
     expect(emitter.named('rating_updated')).toHaveLength(1);

@@ -131,16 +131,38 @@ export function colourRows(stats: ProfileStats): ColourRow[] {
     return rows;
 }
 
-/** Stats-tab fact tiles, only for facts the API could compute. */
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const isNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+const movesText = (n: number | null | undefined) => (isNumber(n) ? plural(n, 'move', 'moves') : null);
+
+/** Stats-tab fact tiles in the mockup's order, only for facts the API could compute. */
 export function statFacts(stats: ProfileStats): Fact[] {
     const f = stats.facts;
     if (!f) return [];
-    const facts: Fact[] = [];
-    if (f.averageAccuracy !== null) facts.push({ k: 'Average accuracy', v: `${f.averageAccuracy}%` });
-    facts.push({ k: 'Longest win streak', v: `${f.longestWinStreak} ${f.longestWinStreak === 1 ? 'game' : 'games'}` });
-    if (typeof f.bestWin === 'number') facts.push({ k: 'Best win', v: `vs ${f.bestWin}` });
-    if (f.mostActiveDay) facts.push({ k: 'Most active day', v: f.mostActiveDay });
-    return facts;
+    const facts: [string, string | null][] = [
+        ['Average accuracy', isNumber(f.averageAccuracy) ? `${f.averageAccuracy}%` : null],
+        ['Average game length', movesText(f.averageGameLength)],
+        ['Longest win streak', plural(f.longestWinStreak, 'game', 'games')],
+        ['Best win', isNumber(f.bestWin) ? `vs ${f.bestWin}` : null],
+        ['Fastest win', movesText(f.fastestWin)],
+        ['Most active day', f.mostActiveDay || null],
+    ];
+    return facts.filter((x): x is [string, string] => x[1] !== null).map(([k, v]) => ({ k, v }));
+}
+
+export interface EndingRow {
+    name: string;
+    n: number;
+    /** Share of the games counted, as a CSS width ("34%"). */
+    pct: string;
+}
+
+/** "How games end" bars: each row's share of all the games counted. Empty without games. */
+export function endingRows(stats: ProfileStats): EndingRow[] {
+    const rows = stats.endings ?? [];
+    const total = rows.reduce((sum, r) => sum + r.count, 0);
+    if (total === 0) return [];
+    return rows.map((r) => ({ name: r.name, n: r.count, pct: `${pct(r.count, total)}%` }));
 }
 
 /** Win rates from this percentage up read as good (green), below EVEN_RATE as poor (red). */
