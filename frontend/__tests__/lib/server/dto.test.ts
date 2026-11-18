@@ -58,6 +58,11 @@ describe('toGameDto', () => {
         })
     })
 
+    test('an embedded player carries their country for the board chip [F-126]', () => {
+        const dto = toGameDto({ ...gameRow, white: { ...gameRow.white, country: 'India' } })
+        expect(dto.white).toMatchObject({ username: 'alice', country: 'India' })
+    })
+
     test('carries the rating snapshot of a rated game [F-120]', () => {
         const snapshot = {
             rating_category: 'blitz',

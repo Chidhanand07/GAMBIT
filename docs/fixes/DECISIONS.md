@@ -122,6 +122,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-123](#f-123) | Openings from stored moves via a built-in ECO table; `moves` index and browser writes revoked | B1 | OPENINGS |
 | [F-124](#f-124) | `games.end_reason` written by the finalizer; game length from the final FEN | B1 | GAME-ENDINGS |
 | [F-125](#f-125) | "All" = best pool with ≥ 1 rated game; `leaderboard_rank` for any place; friends carry every pool | B1 | RANKINGS |
+| [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3048,3 +3049,18 @@ player's rank; friends carry every pool's rating (B1 item 6).**
   lobby's friend list shows the one of the selected time control's pool.
 - **Database.** Migration `20261118100300_leaderboard_ranking.sql`, pgTAP
   `063_leaderboard_ranking.test.sql`. Rollout: migration, then the web app.
+
+## F-126
+
+**The board's country chip is a two-letter code derived from `profiles.country` (B1 item 7).**
+
+- **Context.** Game.dc.html shows a mono "IN" chip next to each player's rating; the game API did not
+  return the country, and `profiles.country` is free text ("India"), edited in Settings.
+- **Decision.** `GET /api/games/[id]` embeds `country` for both players (allow-listed in the player
+  DTO), and `lib/chess/countryCode` turns it into the chip: a two-letter value is upper-cased, a few
+  common aliases are mapped (USA, UK, …), and an English country name is looked up in a table built
+  once from `Intl.DisplayNames` (current ISO codes only: DD/UK/YU-style replaced codes are skipped,
+  so "Germany" is DE and "United Kingdom" GB). Unknown text gives no chip rather than a guess.
+- **Why not store a code.** Changing the column to ISO codes would need a data migration of free text
+  and a picker in Settings; the derived chip needs neither and the profile keeps showing the full name
+  (its hero chip, as before).

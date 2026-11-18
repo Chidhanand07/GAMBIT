@@ -7,8 +7,8 @@ const ACTIVE_GAME_COLUMNS = 'id, white_id, black_id, time_control, status, start
 // Whitespace kept byte-for-byte from the original handlers' select strings.
 const GAME_WITH_PLAYERS_COLUMNS = `
             *,
-            white:profiles!games_white_id_fkey(id, username, display_name, avatar_url, rating_rapid, rating_blitz, rating_bullet, rating_classical),
-            black:profiles!games_black_id_fkey(id, username, display_name, avatar_url, rating_rapid, rating_blitz, rating_bullet, rating_classical)
+            white:profiles!games_white_id_fkey(id, username, display_name, avatar_url, country, rating_rapid, rating_blitz, rating_bullet, rating_classical),
+            black:profiles!games_black_id_fkey(id, username, display_name, avatar_url, country, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;
 const HISTORY_COLUMNS = `
             id, time_control, status, result, winner_id,

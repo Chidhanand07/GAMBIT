@@ -44,6 +44,7 @@ const PLAYER_KEYS = [
     'username',
     'display_name',
     'avatar_url',
+    'country',
     'rating_rapid',
     'rating_blitz',
     'rating_bullet',
@@ -54,7 +55,6 @@ const PLAYER_KEYS = [
 const PUBLIC_PROFILE_KEYS = [
     ...PLAYER_KEYS,
     'bio',
-    'country',
     'games_played',
     'wins',
     'losses',
