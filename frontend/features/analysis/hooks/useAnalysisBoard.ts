@@ -1,14 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Chess, type Move } from 'chess.js';
+import { useCallback, useState } from 'react';
+import { Chess, type Move, type Square } from 'chess.js';
 import { gameFromFen, gameFromPgn, replayTo, resolveSquareClick } from '../board';
 import { useArrowKeyNavigation, type NavigationStep } from './useArrowKeyNavigation';
 
 /** The selected square and its legal targets. */
 function useSelection() {
-    const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
-    const [legalTargets, setLegalTargets] = useState<string[]>([]);
+    const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+    const [legalTargets, setLegalTargets] = useState<Square[]>([]);
     const clearSelection = useCallback(() => {
         setSelectedSquare(null);
         setLegalTargets([]);
@@ -21,14 +21,10 @@ function useSelection() {
  * a new move from an earlier position truncates it), selection and navigation.
  */
 export function useAnalysisBoard() {
-    const [game, setGame] = useState<Chess | null>(null);
+    const [game, setGame] = useState<Chess>(() => new Chess());
     const [moveHistory, setMoveHistory] = useState<Move[]>([]);
     const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
     const { selectedSquare, legalTargets, setSelectedSquare, setLegalTargets, clearSelection } = useSelection();
-
-    useEffect(() => {
-        setGame(new Chess());
-    }, []);
 
     const navigateToMove = useCallback(
         (index: number) => {
@@ -40,8 +36,7 @@ export function useAnalysisBoard() {
     );
 
     const handleSquareClick = useCallback(
-        (square: string) => {
-            if (!game) return;
+        (square: Square) => {
             const outcome = resolveSquareClick(game, selectedSquare, square);
             if (outcome.type === 'none') return;
             if (outcome.type === 'select') {
@@ -84,8 +79,6 @@ export function useAnalysisBoard() {
         loadLine(g, history);
     };
 
-    const reset = () => loadLine(new Chess(), []);
-
-    const nav = { navigateToMove, handleSquareClick, loadPosition, loadPgn, reset };
+    const nav = { navigateToMove, handleSquareClick, loadPosition, loadPgn };
     return { game, moveHistory, currentMoveIndex, selectedSquare, legalTargets, ...nav };
 }

@@ -41,12 +41,10 @@ export function useEngineAnalysis(fen: string | undefined) {
     }, [fen, engineEnabled]);
 
     const current = engineEnabled && result !== null && result.fen === fen ? result : null;
-    const clearEngineData = () => setResult(null);
     return {
         engineEnabled,
         setEngineEnabled,
         engineData: current?.data ?? null,
         engineFailed: current?.failed ?? false,
-        clearEngineData,
     };
 }

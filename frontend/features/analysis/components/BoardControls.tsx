@@ -1,75 +1,58 @@
-import { ChevronLeft, ChevronRight, FlipHorizontal2, RotateCcw, SkipBack, SkipForward } from 'lucide-react';
-import { panelSurface, textHover } from '../styles';
+import { Icon } from '@/components/ui/Icon';
+
+const ROUND = 'flex h-12 w-12 items-center justify-center rounded-full border-1 border-line bg-surface p-0 text-ink';
+
+const NAV = [
+    { label: 'First move', path: 'M11 17l-5-5 5-5M18 17l-5-5 5-5' },
+    { label: 'Previous move', path: 'M15 18l-6-6 6-6' },
+    { label: 'Next move', path: 'M9 18l6-6-6-6' },
+    { label: 'Last move', path: 'M13 17l5-5-5-5M6 17l5-5-5-5' },
+] as const;
+
+const FLIP = 'M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3';
 
 interface BoardControlsProps {
+    /** Ply shown on the board (-1 = start). */
     currentMoveIndex: number;
     total: number;
     onNavigate: (index: number) => void;
     onFlip: () => void;
-    onReset: () => void;
 }
 
-const squareButton = 'w-9 h-9 flex items-center justify-center rounded-xl transition-colors hover:bg-hover';
-const squareButtonStyle = { ...panelSurface, color: 'var(--text-secondary)' };
+/** Index each navigation button jumps to, clamped to the line. */
+function targets(current: number, total: number): number[] {
+    return [-1, Math.max(-1, current - 1), Math.min(total - 1, current + 1), total - 1];
+}
 
-/** First / previous / next / last, the move counter, flip and reset. */
-export function BoardControls({ currentMoveIndex, total, onNavigate, onFlip, onReset }: BoardControlsProps) {
-    const buttons = [
-        { icon: <SkipBack size={15} strokeWidth={1.5} />, action: () => onNavigate(-1), title: 'First' },
-        {
-            icon: <ChevronLeft size={15} strokeWidth={1.5} />,
-            action: () => onNavigate(Math.max(-1, currentMoveIndex - 1)),
-            title: 'Previous',
-        },
-        {
-            icon: <ChevronRight size={15} strokeWidth={1.5} />,
-            action: () => onNavigate(Math.min(total - 1, currentMoveIndex + 1)),
-            title: 'Next',
-        },
-        { icon: <SkipForward size={15} strokeWidth={1.5} />, action: () => onNavigate(total - 1), title: 'Last' },
-    ];
+/** First / previous / next / last and Flip board, with the position announced to screen readers. */
+export function BoardControls({ currentMoveIndex, total, onNavigate, onFlip }: BoardControlsProps) {
+    const to = targets(currentMoveIndex, total);
+    let position = '';
+    if (total > 0) position = currentMoveIndex < 0 ? 'Start' : `Move ${currentMoveIndex + 1} / ${total}`;
     return (
-        <div className="flex items-center gap-2">
-            <div className="flex items-center rounded-xl p-1 gap-0.5" style={panelSurface}>
-                {buttons.map((b, i) => (
-                    <button
-                        key={i}
-                        onClick={b.action}
-                        title={b.title}
-                        className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:bg-hover"
-                        style={{ color: 'var(--text-secondary)' }}
-                        {...textHover}
-                    >
-                        {b.icon}
-                    </button>
-                ))}
-            </div>
-
-            {total > 0 && (
-                <span className="text-xs tabular-nums" style={{ color: 'var(--text-tertiary)', minWidth: 70 }}>
-                    {currentMoveIndex < 0 ? 'Start' : `Move ${currentMoveIndex + 1} / ${total}`}
-                </span>
-            )}
-
+        <div className="flex flex-wrap items-center justify-center gap-[10px]">
+            {NAV.map((b, i) => (
+                <button
+                    key={b.label}
+                    type="button"
+                    aria-label={b.label}
+                    onClick={() => onNavigate(to[i])}
+                    className={ROUND}
+                >
+                    <Icon path={b.path} size={20} />
+                </button>
+            ))}
             <button
+                type="button"
                 onClick={onFlip}
-                title="Flip board"
-                className={squareButton}
-                style={squareButtonStyle}
-                {...textHover}
+                className="flex min-h-[48px] items-center gap-2 rounded-pill border-1 border-line bg-surface px-5 text-[15px] font-semibold text-ink"
             >
-                <FlipHorizontal2 size={15} strokeWidth={1.5} />
+                <Icon path={FLIP} size={18} />
+                Flip board
             </button>
-
-            <button
-                onClick={onReset}
-                title="Reset board"
-                className={squareButton}
-                style={squareButtonStyle}
-                {...textHover}
-            >
-                <RotateCcw size={14} strokeWidth={1.5} />
-            </button>
+            <span role="status" className="sr-only">
+                {position}
+            </span>
         </div>
     );
 }
