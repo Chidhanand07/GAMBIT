@@ -873,13 +873,21 @@ describe('board preferences (Settings)', () => {
     }
     const marks = (kind: string) => Array.from(document.querySelectorAll(`[data-mark="${kind}"]`)).map(m => m.parentElement!.getAttribute('data-square'))
 
-    test('defaults: coordinates, legal-move dots and the last-move tint are shown', async () => {
+    // was: 'defaults: coordinates, legal-move dots and the last-move tint are shown' — [F-100]
+    // Game.dc.html draws no coordinates, so they are off by default and opt-in from Settings.
+    test('defaults: legal-move dots and the last-move tint are shown, coordinates are not', async () => {
         await renderGame()
         playE4E5()
         expect(marks('last')).toEqual(['e7', 'e5'])
         click(square('g1'))
         expect(document.querySelectorAll('[data-dot]').length).toBe(3) // e2, f3, h3
+        expect(within(square('a1')).queryByText('1')).toBeNull()
+    })
+
+    test('[F-100] coordinates show when the setting is on', async () => {
+        await renderGameWithSettings({ showCoordinates: true })
         expect(within(square('a1')).getByText('1')).toBeInTheDocument()
+        expect(within(square('a1')).getByText('a')).toBeInTheDocument()
     })
 
     test('legal-move dots, last-move tint and coordinates follow their switches; the theme colours the squares', async () => {

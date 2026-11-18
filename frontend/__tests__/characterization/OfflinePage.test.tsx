@@ -112,10 +112,16 @@ describe('playing as white', () => {
         expect(screen.getByText('No moves yet.')).toBeInTheDocument()
         expect(pieceOn(container, 'e1')).toBe('wk')
         expect(squares(container)[0]).toHaveAttribute('data-square', 'a8')
-        expect(square(container, 'a1').textContent).toContain('1')
-        expect(square(container, 'a1').textContent).toContain('a')
+        // was: a1 shows '1' and 'a' — [F-100] coordinates are off by default app-wide
+        expect(square(container, 'a1').textContent).toBe('')
         expect(screen.getByRole('button', { name: /Takeback/ })).toBeDisabled()
         expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    test('[F-100] coordinates show when the setting is on', () => {
+        const { container } = startWithSettings({ showCoordinates: true })
+        expect(square(container, 'a1').textContent).toContain('1')
+        expect(square(container, 'a1').textContent).toContain('a')
     })
 
     test('player move then MAVERICK reply after 250 ms with exact request; 400 ms minimum think', async () => {

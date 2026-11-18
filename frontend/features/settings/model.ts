@@ -18,10 +18,13 @@ export interface UserSettings {
     confirmResignDraw: boolean;
 }
 
-/** The mockup's defaults. */
+/**
+ * The mockups' defaults. Coordinates are off: Game.dc.html and Analysis.dc.html draw their boards
+ * without them, and that wins over the Settings mockup's sample row (F-100).
+ */
 export const DEFAULT_SETTINGS: Readonly<UserSettings> = {
     boardTheme: 'maple',
-    showCoordinates: true,
+    showCoordinates: false,
     highlightLegalMoves: true,
     highlightLastMove: true,
     pieceAnimation: 'smooth',

@@ -113,6 +113,12 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 | [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
 
+**Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-100](#f-100) | Board coordinates are off by default: the Game and Analysis mockups win over the Settings sample row | v2 | A2-1 |
+
 ---
 
 ## F-001
@@ -2385,3 +2391,21 @@ the Dependabot part of F-057).**
   (notifications only) may be enabled in the repository settings.
 - **Deviation.** GIT-06 says Dependabot MUST be enabled. This ADR records the owner's decision to
   deviate. To restore it, re-add the file from F-057 (`git show 6746d8b:.github/dependabot.yml`).
+
+## F-100
+
+**Board coordinates default to off (A2-1).**
+
+- **Context.** `Game.dc.html` and `Analysis.dc.html` draw their boards without rank or file labels.
+  `Settings.dc.html` shows the "Show coordinates" row switched on in its sample. The app-wide
+  default (`DEFAULT_SETTINGS.showCoordinates`) cannot match both.
+- **Options.** (a) default on, as the Settings sample shows, and the default Game/Analysis boards
+  differ from their mockups; (b) default off, and the Settings sample row differs; (c) hard-code
+  "no coordinates" on the Game/Analysis boards and ignore the setting there.
+- **Decision.** (b). The default app looks like the two screens people spend their time on; the
+  Settings page is the place where a preference is *changed*, so its sample row is read as "a
+  switch", not as "the default". (c) would make the switch do nothing on the main boards.
+- **Consequences.** The switch still works everywhere (game, analysis, offline, result review),
+  and the Settings live preview follows the draft value. A stored `showCoordinates: true` keeps
+  working; only users with nothing stored see the change. "Reset to defaults" now turns
+  coordinates off.

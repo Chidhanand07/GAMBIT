@@ -42,6 +42,7 @@ describe('SettingsProvider', () => {
         const store = memoryStore({
             ...DEFAULT_SETTINGS,
             boardTheme: 'slate',
+            showCoordinates: true,
             moveSounds: false,
             pieceAnimation: 'fast',
         });

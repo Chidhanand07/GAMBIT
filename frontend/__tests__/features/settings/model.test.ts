@@ -22,6 +22,11 @@ describe('parseSettings', () => {
             moveSounds: false,
         });
     });
+    test('[F-100] coordinates default to off, as on the Game and Analysis mockups; a stored choice wins', () => {
+        expect(DEFAULT_SETTINGS.showCoordinates).toBe(false);
+        expect(parseSettings({}).showCoordinates).toBe(false);
+        expect(parseSettings({ showCoordinates: true }).showCoordinates).toBe(true);
+    });
 });
 
 describe('boardPrefsOf', () => {
@@ -30,7 +35,7 @@ describe('boardPrefsOf', () => {
             theme: 'maple',
             animate: true,
             slideMs: 420,
-            showCoordinates: true,
+            showCoordinates: false,
             highlightLegalMoves: true,
             highlightLastMove: true,
             sound: true,
@@ -68,7 +73,7 @@ describe('preferredBoardProps', () => {
     const legalDestinations = ['e3', 'e4'] as const
 
     test('theme, animation and coordinates always; marks only while their switch is on', () => {
-        const on = preferredBoardProps(boardPrefsOf(DEFAULT_SETTINGS), { lastMove, legalDestinations })
+        const on = preferredBoardProps(boardPrefsOf({ ...DEFAULT_SETTINGS, showCoordinates: true }), { lastMove, legalDestinations })
         expect(on).toEqual({ theme: 'maple', animate: true, showCoordinates: true, lastMove, legalDestinations })
         const off = preferredBoardProps(
             boardPrefsOf({

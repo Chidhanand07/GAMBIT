@@ -63,7 +63,8 @@ describe('initial render', () => {
         expect(allSquares()).toHaveLength(64)
         // was: <img alt="wk" src="/pieces/classic/wk.png"> — the redesign draws SVG pieces
         expect(sq('e1')).toHaveAccessibleName('e1, white king')
-        expect(sq('a1').textContent).toBe('1a')
+        // was: '1a' — [F-100] Analysis.dc.html draws no coordinates, so the default is off
+        expect(sq('a1').textContent).toBe('')
         expect(screen.getByText('Stockfish 16')).toBeInTheDocument()
         expect(screen.getByText('Enable engine to evaluate the current position.')).toBeInTheDocument()
         expect(screen.getByText(EMPTY_MOVES)).toBeInTheDocument()
@@ -172,7 +173,13 @@ describe('moves and navigation', () => {
     // was: 'flip reverses orientation; reset clears history' — the design has no Reset button;
     // the "Starting Position" preset is the way back to a fresh line.
     test('flip reverses orientation; the Starting Position preset clears history', () => {
-        render(<AnalysisPage />)
+        // [F-100] coordinates are opt-in now; switched on here so the flipped labels stay checked
+        const stored = { ...DEFAULT_SETTINGS, showCoordinates: true }
+        render(
+            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+                <AnalysisPage />
+            </SettingsProvider>,
+        )
         playE4()
         click(screen.getByRole('button', { name: 'Flip board' }))
         expect(allSquares()[0]).toBe(sq('h1'))
