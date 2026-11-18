@@ -180,6 +180,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-150](#f-150) | Draw offers are approved: the owner kept the "Draw offers approved" line in the brief | B4 | DRAW-OFFER |
 | [F-151](#f-151) | Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the finalizer | B4 | DRAW-OFFER |
 | [F-165](#f-165) | An accepted draw offer is stored as `end_reason = 'agreement'` (CHECK extended); profile counts it as "Stalemate or draw" | STACK | DRAW-OFFER |
+| [F-152](#f-152) | Takebacks: undo own last move (two plies after a reply), opponent's per-game opt-in, per-ply clock snapshots, `moves` rows deleted | B4 | TAKEBACK |
 
 ---
 
@@ -3682,3 +3683,55 @@ finalizer (DRAW-OFFER).**
 - **Rollout.** The migration before the game server that offers draws.
 - Tests: server `adjudication.test.js` (code list, was without `agreement`), frontend
   `gameFactsLength.test.ts`, pgTAP `090_end_reason_agreement`.
+
+## F-152
+
+**Takebacks: what is undone, who may ask, how the clocks and the `moves` rows follow (TAKEBACK).**
+
+- **What is undone.** A player asks to undo *their own* last move. If the opponent has not replied
+  (it is the opponent's turn) that is one ply; if the opponent has replied (the requester is to move)
+  it is two plies, the reply and the requester's move, so the requester is to move again. This is the
+  mockup's `takeback` (Game.dc.html removes two plies when it is your turn). A request with no move of
+  the requester's to undo is refused `takeback_nothing_to_undo`.
+- **Who may ask.** The Settings mockup's "Allow takeback requests — Opponents may ask to take back a
+  move" (default off) is the *receiver's* setting. Settings are browser-only on this branch
+  (`features/settings/store.ts`, no server storage), so the client declares it per game with
+  `takeback_pref { game_id, allow }`; the server stores `takebackPrefs[color]` in the Redis game
+  state, broadcasts `takeback_prefs` to the room, and refuses requests to a player who has not
+  allowed them (`takebacks_disabled`; absent = not allowed, so an older client is never asked). The
+  client sends nothing while the setting is off. Rated games are not treated differently: neither the
+  mockups nor the settings say so, and the opponent's consent is required either way.
+- **Limits.** One standing request (`takeback_pending`); a 15 s cooldown per side after each request,
+  whatever the answer (`takeback_cooldown`); `takeback_request` has the `socketOffer` rate rule. Any
+  move, an answer and the end of the game clear the request; an accept checks inside the same
+  compare-and-set that the request still stands for the current position, so a move or an ending that
+  commits first wins (`no_pending_request` / `game_not_active`).
+- **Rolling back** (`domain/takeback.js`, pure). Position = the FEN of the last kept ply (or
+  `startFen`); `moveLog` sliced; clocks = the snapshot stored with that ply — every move now appends
+  `{ whiteMs, blackMs }` (after the increment) to `clockLog`, kept in step with `moveLog`; back at the
+  start position the starting clocks. The clock runs from the moment of the accept (`lastMoveAt =
+  now`); back at the start it is stopped and the first-move window reopens (`startedAt = now`), so the
+  first-move abort rule does not fire on a game that was just rewound. A log without snapshots (a game
+  restored from its `games` row after a Redis loss) keeps the clocks as they stand. The room gets
+  `takeback_applied { plies, fen, moveLog, whiteMs, blackMs, activeSide, clockActive }`.
+- **Database.** Move rows can be deleted: `service_role` keeps Supabase's default table privileges on
+  `moves` (no migration revokes them). After Redis commits, the server deletes the rows with
+  `move_number > kept` (`movesRepository.deleteAfter`) and writes the restored `fen` and clocks to the
+  `games` row, fire-and-forget with logging, exactly like moves are persisted. Chosen over "mark in
+  Redis, rewrite at finalization" because the `moves` table is read during the game (stale-game
+  detection, F-044) and a crash before finalization would leave undone moves in it. **Residual risk:**
+  a move's own insert still in flight when its takeback commits (it would have to take longer than the
+  request + accept round trip) would land after the delete and leave one stale row; not observed,
+  logged here.
+- **Client.** A Takeback button joins Flip / Draw / Resign (a four-column row) only when the opponent
+  allows takebacks, so the default screen is the mockup's three buttons; it reads "Requested" while my
+  request stands. An incoming request shows "<opponent> asks to take back their last move / the last
+  two moves" with Decline / Accept above the board. "Takeback declined" and "A move was taken back" are
+  info toasts. `ACK_POLICY`: request and accept are never re-sent; decline and `takeback_pref` retry
+  once. The settings preview shows a "Takebacks on/off" chip (Settings.dc.html `statusChips`).
+- **Proof.** `domain/takeback.test.js`, `services/takebackService.test.js` (each rejection, both
+  undo depths, clocks restored, persistence, a move clearing the request, reconnect),
+  `integration/takebackTwoInstances.test.js` (request on A, accept on B, Redis and the `moves` rows
+  agree; an accept racing a move across replicas: exactly one wins), frontend
+  `features/game/takeback.test.tsx` and the game page characterization.
+

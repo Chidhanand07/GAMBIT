@@ -16,6 +16,17 @@ export interface MovePair {
     to: Square;
 }
 
+/** The position a takeback returned to (ADR F-152), from the server's `takeback_applied`. */
+export interface RestoredPosition {
+    fen: string;
+    fens: string[];
+    sans: string[];
+    lastMove: MovePair | null;
+    whiteMs: number;
+    blackMs: number;
+    clockActive: boolean;
+}
+
 export interface GameOverInfo {
     result: string;
     reason: string;
@@ -119,6 +130,7 @@ export type GameAction =
     | { type: 'spectatorsChanged'; count: number }
     | { type: 'moveReceived'; fen: string; from: Square; to: Square; san: string; whiteMs?: number; blackMs?: number }
     | { type: 'moveCommitted'; fen: string; from: Square; to: Square }
+    | { type: 'takebackApplied'; restored: RestoredPosition }
     | { type: 'moveRejected' }
     | { type: 'squareSelected'; square: Square; dests: Square[] }
     | { type: 'selectionCleared' }
@@ -194,6 +206,21 @@ const handlers: Handlers = {
         fen: a.fen,
         lastMove: { from: a.from, to: a.to },
         pendingPromotion: null,
+    }),
+    // The server rolled the game back: its position, history and clocks replace ours.
+    takebackApplied: (s, { restored: r }) => ({
+        ...s,
+        ...noSelection(),
+        ...clearedRequests(),
+        fen: r.fen,
+        fenSnapshots: r.fens,
+        moveList: r.sans,
+        lastMove: r.lastMove,
+        viewIndex: null,
+        pendingPromotion: null,
+        whiteTime: msToSeconds(r.whiteMs),
+        blackTime: msToSeconds(r.blackMs),
+        clockActive: r.clockActive,
     }),
     // The server refused the optimistic move; game_state_sync (sent right after) restores the position.
     moveRejected: (s) => ({ ...s, ...noSelection(), lastMove: null, pendingPromotion: null }),

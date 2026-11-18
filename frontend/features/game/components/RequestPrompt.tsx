@@ -1,6 +1,6 @@
 'use client';
 
-// An opponent's request that waits for this player's answer (a draw offer), above the board so
+// An opponent's request that waits for this player's answer (a draw offer, a takeback), above the board so
 // it shows in focus mode too. The mockup has none: it uses the status line's inset surface
 // (GameNotice) and the game screen's pill buttons, [Decline, Accept] as in RematchPrompt.
 import { GameNotice } from './StatusBanners';

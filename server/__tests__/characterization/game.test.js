@@ -16,7 +16,19 @@ jest.mock('../../services/rating', () => ({ processGameEnd: jest.fn(async () => 
 const { supabase } = require('../../supabase');
 const redis = require('../../lib/redis');
 const { getGame, setGame } = require('../../lib/gameStore');
-const { useServer, once, record, recordAll, sleep, opsFor, makeGame, uniqueId, AFTER_E4, START_FEN, gameKeys } = require('./harness');
+const {
+    useServer,
+    once,
+    record,
+    recordAll,
+    sleep,
+    opsFor,
+    makeGame,
+    uniqueId,
+    AFTER_E4,
+    START_FEN,
+    gameKeys,
+} = require('./harness');
 
 const ctx = useServer();
 
@@ -227,7 +239,10 @@ describe('join_game: restore from the database (Redis empty)', () => {
     });
 
     test('a waiting game in DB → nothing emitted, nothing cached', async () => {
-        supabase.queue('games', { data: { id: 'db-w', status: 'waiting', white_id: 'w', black_id: null }, error: null });
+        supabase.queue('games', {
+            data: { id: 'db-w', status: 'waiting', white_id: 'w', black_id: null },
+            error: null,
+        });
         const s = await ctx.connect();
         const events = record(s, 'game_state_sync');
         const ends = record(s, 'game_end');
@@ -301,10 +316,15 @@ describe('make_move', () => {
             activeSide: 'b',
             lastMoveAt: expect.any(Number),
             moveLog: [{ move: 'e2e4', fen: AFTER_E4, san: 'e4' }],
+            // [TAKEBACK] both clocks after each ply, so a takeback can restore them (ADR F-152).
+            clockLog: [{ whiteMs: 600000, blackMs: 600000 }],
         });
         await sleep(20);
         expect(opsFor('games')).toEqual([
-            [['update', { fen: AFTER_E4, white_clock_ms: 600000, black_clock_ms: 600000 }], ['eq', 'id', game.id]],
+            [
+                ['update', { fen: AFTER_E4, white_clock_ms: 600000, black_clock_ms: 600000 }],
+                ['eq', 'id', game.id],
+            ],
         ]);
         expect(opsFor('moves')).toEqual([
             [
@@ -560,7 +580,15 @@ describe('make_move', () => {
         expect(seen[6]).toMatchObject({ captured: true, move: 'e4d5' });
         expect(seen[8].flags).toContain('k');
         expect((await getGame(game.id)).moveLog.map((m) => m.move)).toEqual([
-            'e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'd7d5', 'e4d5', 'g8f6', 'e1g1',
+            'e2e4',
+            'e7e5',
+            'g1f3',
+            'b8c6',
+            'f1c4',
+            'd7d5',
+            'e4d5',
+            'g8f6',
+            'e1g1',
         ]);
     });
 });

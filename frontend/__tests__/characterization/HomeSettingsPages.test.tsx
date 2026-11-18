@@ -400,7 +400,7 @@ describe('settings page', () => {
         expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account'])
         // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
         // those are real profile columns now; everything else here still has no backing.
-        const unbacked = /premove|takeback|move by|visib/i
+        const unbacked = /premove|move by|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]

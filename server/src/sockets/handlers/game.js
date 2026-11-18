@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Game room events: join, spectate, move, resign, draw offers. There is no `game_end`
+ * Game room events: join, spectate, move, resign, draw offers, takebacks. There is no `game_end`
  * handler: results are decided by the server (NODE-16).
  */
 
@@ -18,6 +18,10 @@ const { wrap } = require('../wrap');
  * @property {(data: any, userId: string) => Promise<unknown>} offerDraw
  * @property {(data: any, userId: string) => Promise<unknown>} acceptDraw
  * @property {(data: any, userId: string) => Promise<unknown>} declineDraw
+ * @property {(data: any, userId: string) => Promise<unknown>} setTakebackPref
+ * @property {(data: any, userId: string) => Promise<unknown>} requestTakeback
+ * @property {(data: any, userId: string) => Promise<unknown>} acceptTakeback
+ * @property {(data: any, userId: string) => Promise<unknown>} declineTakeback
  */
 
 /**
@@ -37,6 +41,10 @@ function registerGameHandlers(socket, client, { gameService, log }) {
         draw_offer: (data) => gameService.offerDraw(data, userId),
         draw_accept: (data) => gameService.acceptDraw(data, userId),
         draw_decline: (data) => gameService.declineDraw(data, userId),
+        takeback_pref: (data) => gameService.setTakebackPref(data, userId),
+        takeback_request: (data) => gameService.requestTakeback(data, userId),
+        takeback_accept: (data) => gameService.acceptTakeback(data, userId),
+        takeback_decline: (data) => gameService.declineTakeback(data, userId),
     };
     for (const [event, handler] of Object.entries(handlers)) {
         socket.on(event, wrap(event, schemas[/** @type {keyof typeof schemas} */ (event)], handler, log));

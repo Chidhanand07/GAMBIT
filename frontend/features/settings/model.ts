@@ -19,6 +19,8 @@ export interface UserSettings {
     defaultTimeControl: SpeedBucket;
     autoQueen: boolean;
     confirmResignDraw: boolean;
+    /** Opponents may ask to take back a move (declared to the game server per game, ADR F-152). */
+    allowTakebacks: boolean;
 }
 
 /**
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: Readonly<UserSettings> = {
     defaultTimeControl: 'blitz',
     autoQueen: true,
     confirmResignDraw: true,
+    allowTakebacks: false,
 };
 
 export const BOARD_THEMES: readonly BoardTheme[] = ['maple', 'green', 'slate', 'walnut'];
@@ -56,6 +59,7 @@ const BOOLEAN_KEYS: readonly BooleanSetting[] = [
     'moveSounds',
     'autoQueen',
     'confirmResignDraw',
+    'allowTakebacks',
 ];
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

@@ -39,6 +39,10 @@ function deps() {
             offerDraw: fn(),
             acceptDraw: fn(),
             declineDraw: fn(),
+            setTakebackPref: fn(),
+            requestTakeback: fn(),
+            acceptTakeback: fn(),
+            declineTakeback: fn(),
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
@@ -81,6 +85,10 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'draw_offer',
             'draw_accept',
             'draw_decline',
+            'takeback_pref',
+            'takeback_request',
+            'takeback_accept',
+            'takeback_decline',
             'disconnect',
         ].sort(),
     );
@@ -210,6 +218,23 @@ test('draw events: the service gets the game id and the verified user; anything 
         { ok: true },
         { ok: false, error: 'invalid_payload' },
     ]);
+});
+
+test('takeback events: the service gets the validated payload and the verified user [TAKEBACK]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.takeback_pref({ game_id: 'g', allow: true, user_id: 'victim' }, ack);
+    await handlers.takeback_request({ game_id: 'g', plies: 9 }, ack);
+    await handlers.takeback_accept({ game_id: 'g' }, ack);
+    await handlers.takeback_decline({ game_id: 'g' }, ack);
+    await handlers.takeback_pref({ game_id: 'g', allow: 'yes' }, ack);
+    expect(d.gameService.setTakebackPref).toHaveBeenCalledWith({ game_id: 'g', allow: true }, 'u1');
+    expect(d.gameService.requestTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.acceptTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.declineTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.setTakebackPref).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
 });
 
 test('social events: requests are sent *from*, and answers given *by*, the verified user [S2][S4]', async () => {

@@ -86,6 +86,26 @@ function Resign({ confirm }: { confirm: boolean }) {
     );
 }
 
+/** The settings that have no demo control, as chips (Settings.dc.html `statusChips`). */
+export function statusChips(settings: UserSettings): string[] {
+    return [`Takebacks ${settings.allowTakebacks ? 'on' : 'off'}`];
+}
+
+function StatusChips({ chips }: { chips: string[] }) {
+    return (
+        <div className="flex flex-wrap gap-[6px]">
+            {chips.map((chip) => (
+                <span
+                    key={chip}
+                    className="flex min-h-[26px] items-center rounded-pill border-1 border-line bg-bg-base px-[10px] text-[12px] font-semibold"
+                >
+                    {chip}
+                </span>
+            ))}
+        </div>
+    );
+}
+
 /** Default time control, auto-queen and resign confirmation, tried out on demo controls. */
 export function GameplayPreview({ settings }: { settings: UserSettings }) {
     return (
@@ -111,6 +131,7 @@ export function GameplayPreview({ settings }: { settings: UserSettings }) {
             </div>
             <Promotion autoQueen={settings.autoQueen} />
             <Resign confirm={settings.confirmResignDraw} />
+            <StatusChips chips={statusChips(settings)} />
         </PreviewCard>
     );
 }

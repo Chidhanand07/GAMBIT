@@ -20,6 +20,8 @@ test.each([
     ['draw_offer', 'socketOffer'],
     ['draw_accept', 'socketEvent'],
     ['draw_decline', 'socketEvent'],
+    ['takeback_request', 'socketOffer'],
+    ['takeback_accept', 'socketEvent'],
     ['resign', 'socketEvent'],
     ['join_game', 'socketEvent'],
     ['anything_else', 'socketEvent'],

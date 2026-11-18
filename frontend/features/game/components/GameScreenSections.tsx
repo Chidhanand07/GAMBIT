@@ -14,6 +14,7 @@ import { GameInfoCard } from './GameInfoCard';
 import { GameSeat } from './GameSeat';
 import { PromotionPicker } from './PromotionPicker';
 import { canOfferDraw } from '../utils/drawOffer';
+import { canRequestTakeback } from '../utils/takeback';
 import { RequestPrompt } from './RequestPrompt';
 import { StatusBanners } from './StatusBanners';
 
@@ -28,11 +29,27 @@ function drawState({ myColor, drawOffer, lastDrawOfferPly, moveList }: GameScree
     };
 }
 
-export function gameActions({ state, controls }: GameScreen): GameActionsProps {
+/** The Takeback button, when the opponent allows takeback requests (their setting). */
+function takebackAction(screen: GameScreen): GameActionsProps['takeback'] {
+    const { state, liveChess } = screen;
+    const me = state.myColor;
+    if (me === 'spectator' || state.takebackPrefs[me === 'white' ? 'black' : 'white'] !== true) return null;
+    const myTurn = liveChess.turn() === me[0];
+    const pending = state.takeback !== null;
+    return {
+        requested: state.takeback?.by === me,
+        enabled: canRequestTakeback({ plies: state.moveList.length, myTurn, pending }),
+        onClick: screen.requestTakeback,
+    };
+}
+
+export function gameActions(screen: GameScreen): GameActionsProps {
+    const { state, controls } = screen;
     return {
         isPlayer: state.myColor !== 'spectator',
         over: state.gameOver !== null,
         ...drawState(state),
+        takeback: takebackAction(screen),
         onFlip: controls.onFlip,
         onDraw: controls.onDraw,
         onResign: controls.onResign,
@@ -76,17 +93,32 @@ export function BoardArea({ screen }: { screen: GameScreen }) {
     );
 }
 
-/** The opponent's standing draw offer, waiting for this player's answer. */
+const takebackText = (name: string, plies: number) =>
+    plies === 1 ? `${name} asks to take back their last move` : `${name} asks to take back the last two moves`;
+
+/** The opponent's standing draw offer and takeback request, waiting for this player's answer. */
 function IncomingRequests({ screen }: { screen: GameScreen }) {
     const { state, view } = screen;
     const me = state.myColor;
-    if (me === 'spectator' || state.gameOver || !state.drawOffer || state.drawOffer === me) return null;
+    if (me === 'spectator' || state.gameOver) return null;
+    const { drawOffer, takeback } = state;
     return (
-        <RequestPrompt
-            text={`${view.opponentName} offers a draw`}
-            onAccept={screen.acceptDraw}
-            onDecline={screen.declineDraw}
-        />
+        <>
+            {drawOffer && drawOffer !== me && (
+                <RequestPrompt
+                    text={`${view.opponentName} offers a draw`}
+                    onAccept={screen.acceptDraw}
+                    onDecline={screen.declineDraw}
+                />
+            )}
+            {takeback && takeback.by !== me && (
+                <RequestPrompt
+                    text={takebackText(view.opponentName, takeback.plies)}
+                    onAccept={screen.acceptTakeback}
+                    onDecline={screen.declineTakeback}
+                />
+            )}
+        </>
     );
 }
 

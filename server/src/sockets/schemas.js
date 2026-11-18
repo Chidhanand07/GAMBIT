@@ -81,6 +81,11 @@ const schemas = {
     draw_offer: z.object({ game_id: id }),
     draw_accept: z.object({ game_id: id }),
     draw_decline: z.object({ game_id: id }),
+    // The caller's own setting "Allow takeback requests", declared per game (ADR F-152).
+    takeback_pref: z.object({ game_id: id, allow: z.boolean() }),
+    takeback_request: z.object({ game_id: id }),
+    takeback_accept: z.object({ game_id: id }),
+    takeback_decline: z.object({ game_id: id }),
     // The web client sends `text`. An older `message` field is read as the text
     // too. Either way the result is one trimmed, non-empty, bounded string (G6).
     send_message: z

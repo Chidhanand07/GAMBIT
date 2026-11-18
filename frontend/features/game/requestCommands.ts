@@ -1,5 +1,5 @@
 // Player commands for requests between the players: offer, accept and decline a draw
-// (ADR F-151). The payload names only the game: the server knows who is acting from the
+// (ADR F-151); request, accept and decline a takeback (ADR F-152). The payload names only the game: the server knows who is acting from the
 // handshake, and it decides whether the request stands. Refusals are shown as a toast.
 import { send, type CommandContext } from './commands';
 
@@ -24,4 +24,23 @@ export function declineDraw(ctx: CommandContext): void {
     if (!isPlayerInLiveGame(ctx)) return;
     ctx.dispatch({ type: 'drawOfferCleared' });
     send(ctx, 'draw_decline', { game_id: ctx.gameId });
+}
+
+/** Asks the opponent to take back this player's last move (ADR F-152). */
+export function requestTakeback(ctx: CommandContext): void {
+    if (!isPlayerInLiveGame(ctx)) return;
+    send(ctx, 'takeback_request', { game_id: ctx.gameId });
+}
+
+/** Grants the opponent's request; the server's `takeback_applied` restores the board. */
+export function acceptTakeback(ctx: CommandContext): void {
+    if (!isPlayerInLiveGame(ctx)) return;
+    send(ctx, 'takeback_accept', { game_id: ctx.gameId });
+}
+
+/** Declines the opponent's request; the prompt closes at once. */
+export function declineTakeback(ctx: CommandContext): void {
+    if (!isPlayerInLiveGame(ctx)) return;
+    ctx.dispatch({ type: 'takebackCleared' });
+    send(ctx, 'takeback_decline', { game_id: ctx.gameId });
 }

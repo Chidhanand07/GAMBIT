@@ -32,12 +32,13 @@ function makeCtx(over: Partial<SocketHandlerContext> = {}) {
 
 beforeEach(() => jest.clearAllMocks())
 
-test('registers the legacy 13 events in order, plus move_rejected [S1], then the draw-offer events [DRAW-OFFER]', () => {
+test('registers the legacy 13 events in order, plus move_rejected [S1], then the draw-offer [DRAW-OFFER] and takeback [TAKEBACK] events', () => {
     const { handlers } = makeCtx()
     expect([...handlers.keys()]).toEqual([
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
         'move_rejected', 'spectators_changed', 'draw_offered', 'draw_declined',
+        'takeback_requested', 'takeback_declined', 'takeback_applied', 'takeback_prefs',
     ])
 })
 
@@ -160,7 +161,7 @@ test('game_state_sync: position first, history only when the log is non-empty, t
         { type: 'positionSet', fen: AFTER_E4 },
         { type: 'stateSynced', history: null, whiteMs: 1000, blackMs: 2000, clockActive: true },
         // [DRAW-OFFER] no offer in the sync: none stands.
-        { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: {} },
+        { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: {}, takeback: null, takebackPrefs: {} },
     ])
     expect(ctx.lastProcessedFenRef.current).toBe(AFTER_E4)
     expect(ctx.clockSyncedRef.current).toBe(true)
@@ -182,7 +183,7 @@ describe('draw offers [DRAW-OFFER]', () => {
             fen: AFTER_E4, moveLog: [], whiteMs: 1, blackMs: 1, clockActive: true,
             drawOffer: { by: 'black' }, lastDrawOfferPly: { black: 4 },
         })
-        expect(dispatched()).toContainEqual({ type: 'requestsSynced', drawOffer: 'black', lastDrawOfferPly: { black: 4 } })
+        expect(dispatched()).toContainEqual({ type: 'requestsSynced', drawOffer: 'black', lastDrawOfferPly: { black: 4 }, takeback: null, takebackPrefs: {} })
     })
 
     test('draw_offered records who offered and when, for this game only', () => {

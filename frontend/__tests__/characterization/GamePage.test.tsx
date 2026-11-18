@@ -212,12 +212,14 @@ describe('mount', () => {
             'rematch_declined', 'rematch_ready', 'rematch_request', 'spectators_changed',
             // [DRAW-OFFER]
             'draw_declined', 'draw_offered',
+            // [TAKEBACK]
+            'takeback_applied', 'takeback_declined', 'takeback_prefs', 'takeback_requested',
         ].sort())
     })
 
     test('unmount removes every handler it registered', async () => {
         const { unmount } = await renderGame()
-        const registered = socket.on.mock.calls.slice(-16)
+        const registered = socket.on.mock.calls.slice(-20)
         unmount()
         expect(socket.listenedEvents()).toEqual([])
         for (const [event, handler] of registered) {
@@ -962,6 +964,45 @@ describe('draw', () => {
         click(drawButton())
         click(screen.getByRole('button', { name: 'Cancel' }))
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+})
+
+describe('takebacks [TAKEBACK]', () => {
+    test('the Takeback button appears once the opponent allows takebacks; it emits takeback_request', async () => {
+        await renderGame()
+        bothMoved()
+        expect(screen.queryByRole('button', { name: 'Takeback' })).not.toBeInTheDocument()
+        socket.serverSends('takeback_prefs', { game_id: 'g1', black: true })
+        socket.emit.mockClear()
+        click(screen.getByRole('button', { name: 'Takeback' }))
+        expect(socket.emitted('takeback_request')).toEqual([{ game_id: 'g1' }])
+    })
+
+    test('an incoming request shows Accept / Decline naming how much is undone', async () => {
+        await renderGame()
+        bothMoved()
+        socket.serverSends('takeback_requested', { game_id: 'g1', by: 'black', plies: 1 })
+        expect(screen.getByText('Bob asks to take back their last move')).toBeInTheDocument()
+        socket.emit.mockClear()
+        click(screen.getByRole('button', { name: 'Accept' }))
+        expect(socket.emitted('takeback_accept')).toEqual([{ game_id: 'g1' }])
+    })
+
+    test('takeback_applied restores the board and the move list from the server', async () => {
+        await renderGame()
+        bothMoved()
+        socket.serverSends('takeback_applied', {
+            game_id: 'g1', plies: 1, fen: AFTER_E4, moveLog: [{ move: 'e2e4', fen: AFTER_E4, san: 'e4' }],
+            whiteMs: 300_000, blackMs: 300_000, activeSide: 'b', clockActive: true,
+        })
+        expect(pieceOn('e7')).toBe('bp')
+        expect(pieceOn('e5')).toBeNull()
+        expect(screen.queryByText('e5')).not.toBeInTheDocument()
+    })
+
+    test('with "Allow takeback requests" on, the player declares it to the server for this game', async () => {
+        await renderGameWithSettings({ allowTakebacks: true })
+        expect(socket.emitted('takeback_pref')).toEqual([{ game_id: 'g1', allow: true }])
     })
 })
 

@@ -112,6 +112,10 @@ export interface ClientToServerEvents {
     draw_offer: (payload: GameIdPayload) => void;
     draw_accept: (payload: GameIdPayload) => void;
     draw_decline: (payload: GameIdPayload) => void;
+    takeback_pref: (payload: GameIdPayload & { allow: boolean }) => void;
+    takeback_request: (payload: GameIdPayload) => void;
+    takeback_accept: (payload: GameIdPayload) => void;
+    takeback_decline: (payload: GameIdPayload) => void;
 }
 
 // ── server → client ──────────────────────────────────────────────────────────
@@ -156,6 +160,42 @@ export interface GameStateSyncPayload {
     drawOffer?: { by: PlayerColor };
     /** Moves played when each side last offered a draw; present once anyone has offered. */
     lastDrawOfferPly?: Partial<Record<PlayerColor, number>>;
+    /** Present only while a takeback request stands (ADR F-152). */
+    takeback?: { by: PlayerColor; plies: number };
+    /** Each player's "Allow takeback requests" setting, as declared for this game. */
+    takebackPrefs?: Partial<Record<PlayerColor, boolean>>;
+}
+
+/** A player asked to take back their last move (`plies`: 1, or 2 when the opponent replied). */
+export interface TakebackRequestedPayload {
+    game_id: string;
+    by: PlayerColor;
+    plies: number;
+}
+
+/** A player declined the standing takeback request. */
+export interface TakebackDeclinedPayload {
+    game_id: string;
+    by: PlayerColor;
+}
+
+/** The takeback was granted: the restored position, move log and clocks. */
+export interface TakebackAppliedPayload {
+    game_id: string;
+    plies: number;
+    fen: string;
+    moveLog: MoveLogEntry[];
+    whiteMs: number;
+    blackMs: number;
+    activeSide: 'w' | 'b';
+    clockActive: boolean;
+}
+
+/** Both players' takeback settings after one of them changed. */
+export interface TakebackPrefsPayload {
+    game_id: string;
+    white?: boolean;
+    black?: boolean;
 }
 
 /** A live game's spectator count changed (F-130). */
@@ -256,6 +296,10 @@ export interface ServerToClientEvents {
     move_rejected: (payload: MoveRejectedPayload) => void;
     draw_offered: (payload: DrawOfferedPayload) => void;
     draw_declined: (payload: DrawDeclinedPayload) => void;
+    takeback_requested: (payload: TakebackRequestedPayload) => void;
+    takeback_declined: (payload: TakebackDeclinedPayload) => void;
+    takeback_applied: (payload: TakebackAppliedPayload) => void;
+    takeback_prefs: (payload: TakebackPrefsPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;
     rating_updated: (payload: RatingUpdatedPayload) => void;

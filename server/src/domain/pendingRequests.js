@@ -1,12 +1,12 @@
 // @ts-check
 /**
- * Requests between the players that stand until something happens (ADR F-151): a
- * draw offer. Each lives in the Redis game state and is cleared by any move and
+ * Requests between the players that stand until something happens: a draw offer
+ * (ADR F-151) and a takeback request (ADR F-152). Each lives in the Redis game state and is cleared by any move and
  * by the end of the game.
  */
 
 /** State keys of the requests a move or the end of the game clears. */
-const PENDING_KEYS = Object.freeze(['drawOffer']);
+const PENDING_KEYS = Object.freeze(['drawOffer', 'takeback']);
 
 /**
  * Fields that clear every pending request `game` holds. Keys that are absent or
@@ -21,4 +21,19 @@ function clearedRequests(game) {
     return out;
 }
 
-module.exports = { PENDING_KEYS, clearedRequests };
+/**
+ * The standing requests a (re)joining client must see in `game_state_sync`, each only
+ * when there is one (an older client ignores the extra keys): the draw offer and each
+ * side's last offer, the takeback request and each player's takeback setting.
+ * @param {any} game
+ */
+function requestsView(game) {
+    return {
+        ...(game.drawOffer ? { drawOffer: { by: game.drawOffer.by } } : {}),
+        ...(game.lastDrawOfferPly ? { lastDrawOfferPly: game.lastDrawOfferPly } : {}),
+        ...(game.takeback ? { takeback: { by: game.takeback.by, plies: game.takeback.plies } } : {}),
+        ...(game.takebackPrefs ? { takebackPrefs: game.takebackPrefs } : {}),
+    };
+}
+
+module.exports = { PENDING_KEYS, clearedRequests, requestsView };

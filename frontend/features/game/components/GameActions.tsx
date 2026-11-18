@@ -11,20 +11,34 @@ export interface GameActionsProps {
     drawOffered?: boolean;
     /** The server would accept a draw offer now (utils/drawOffer); otherwise Draw is disabled. */
     canOfferDraw?: boolean;
+    /** Shown only when the opponent allows takeback requests (their setting, ADR F-152). */
+    takeback?: TakebackAction | null;
     onFlip: () => void;
     onDraw: () => void;
     onResign: () => void;
+}
+
+export interface TakebackAction {
+    /** My request stands: the button reads "Requested" and is disabled. */
+    requested: boolean;
+    /** There is a move of mine to undo and no request stands. */
+    enabled: boolean;
+    onClick: () => void;
 }
 
 const drawLabel = (offered?: boolean) => (offered ? 'Draw offered' : 'Draw');
 const drawDisabled = ({ over, drawOffered, canOfferDraw = true }: GameActionsProps) =>
     over || Boolean(drawOffered) || !canOfferDraw;
 
-/** Flip / Draw / Resign in the controls card: a three-column grid (Game.dc.html). */
+/**
+ * Flip / Draw / Resign in the controls card: a three-column grid (Game.dc.html). When the
+ * opponent allows takebacks a fourth button, Takeback, joins the row (the mockup has none).
+ */
 export function GameActionsGrid(props: GameActionsProps) {
     const { isPlayer, over, onFlip, onDraw, onResign } = props;
+    const takeback = isPlayer ? props.takeback : null;
     return (
-        <div className="grid grid-cols-3 gap-2">
+        <div className={cn('grid gap-2', takeback ? 'grid-cols-4' : 'grid-cols-3')}>
             <ActionButton label="Flip" iconPath={GAME_ICONS.flip} onClick={onFlip} />
             {isPlayer && (
                 <>
@@ -42,6 +56,14 @@ export function GameActionsGrid(props: GameActionsProps) {
                         disabled={over}
                     />
                 </>
+            )}
+            {takeback && (
+                <ActionButton
+                    label={takeback.requested ? 'Requested' : 'Takeback'}
+                    iconPath={GAME_ICONS.takeback}
+                    onClick={takeback.onClick}
+                    disabled={over || takeback.requested || !takeback.enabled}
+                />
             )}
         </div>
     );

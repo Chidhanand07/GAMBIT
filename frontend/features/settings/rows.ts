@@ -72,6 +72,12 @@ export const GAMEPLAY_ROWS: SettingRowDef[] = [
         label: 'Confirm resign and draw',
         hint: 'Ask before you resign or offer a draw.',
     },
+    {
+        kind: 'switch',
+        key: 'allowTakebacks',
+        label: 'Allow takeback requests',
+        hint: 'Opponents may ask to take back a move.',
+    },
 ];
 
 /** The current value of a choice row, as its option id. */

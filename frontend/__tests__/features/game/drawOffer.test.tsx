@@ -44,7 +44,7 @@ describe('reducer', () => {
     })
 
     test('requestsSynced replaces both from the server', () => {
-        const synced = gameReducer(offered, { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: { white: 2 } })
+        const synced = gameReducer(offered, { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: { white: 2 }, takeback: null, takebackPrefs: {} })
         expect(synced.drawOffer).toBeNull()
         expect(synced.lastDrawOfferPly).toEqual({ white: 2 })
     })

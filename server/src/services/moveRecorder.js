@@ -45,7 +45,22 @@ function stateAfterMove(game, played, at) {
         activeSide: clocks.nextSide,
         lastMoveAt: at,
         moveLog: [...(game.moveLog || []), { move: played.uci, fen: played.fen, san: played.san }],
+        ...clockLogAfter(game, clocks),
     };
+}
+
+/**
+ * The per-ply clock snapshots a takeback restores (ADR F-152), extended by this move. Kept only
+ * while it is in step with the move log: a game restored from the database has a move log
+ * without snapshots, and starts none.
+ * @param {any} game state before the move
+ * @param {{ whiteMs: number, blackMs: number }} clocks both clocks right after the move
+ * @returns {{ clockLog?: Array<{ whiteMs: number, blackMs: number }> }}
+ */
+function clockLogAfter(game, clocks) {
+    const log = Array.isArray(game.clockLog) ? game.clockLog : [];
+    if (log.length !== (game.moveLog?.length ?? 0)) return {};
+    return { clockLog: [...log, { whiteMs: clocks.whiteMs, blackMs: clocks.blackMs }] };
 }
 
 /**

@@ -41,6 +41,7 @@ const SOCKET_EVENT_RULES = Object.freeze({
     challenge_request: 'socketChallenge',
     rematch_request: 'socketChallenge',
     draw_offer: 'socketOffer',
+    takeback_request: 'socketOffer',
 });
 
 /** HTTP route prefixes with a rule; routes not listed are not limited here. */

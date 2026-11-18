@@ -14,11 +14,13 @@ const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../dom
 const { adjudicate, REASON } = require('../domain/adjudication');
 const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
+const { requestsView } = require('../domain/pendingRequests');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom, playerRoom } = require('./emitter');
 const { createDrawOffers } = require('./drawOfferService');
 const { createGameFinalizer } = require('./gameFinalizer');
+const { createTakebacks } = require('./takebackService');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
 
@@ -48,7 +50,7 @@ async function spectatorAllowed(ctx, game) {
  *   removeActiveGame: Function }} gameStore
  * @property {{ findForRestore: Function, updateById: Function, updateIfActive: Function,
  *   finishIfActive: Function }} gamesRepo
- * @property {{ insert: Function }} movesRepo
+ * @property {{ insert: Function, deleteAfter: Function }} movesRepo
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame' | 'forgetGame'>} sessions
@@ -194,18 +196,6 @@ function sendState(ctx, game, client, spectators) {
 
         ...requestsView(game),
     });
-}
-
-/**
- * The standing requests a reconnecting client must see, only when there are any
- * (an older client ignores the extra keys): the draw offer and each side's last offer.
- * @param {any} game
- */
-function requestsView(game) {
-    return {
-        ...(game.drawOffer ? { drawOffer: { by: game.drawOffer.by } } : {}),
-        ...(game.lastDrawOfferPly ? { lastDrawOfferPly: game.lastDrawOfferPly } : {}),
-    };
 }
 
 /**
@@ -364,6 +354,7 @@ function createGameService(deps) {
         /** @type {(userId: string | undefined, gameId: string | undefined) => Promise<void>} */
         handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
         ...createDrawOffers(ctx),
+        ...createTakebacks(ctx),
     };
 }
 
