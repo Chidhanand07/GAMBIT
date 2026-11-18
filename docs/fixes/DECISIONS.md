@@ -112,6 +112,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-093](#f-093) | Unused axios removed; nanoid stays on 3.x | L4 | SUPPLY-CHAIN |
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 | [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
+| [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2776,3 +2777,31 @@ the Dependabot part of F-057).**
     points between runs on shared CI machines. Make it required once it has been stable on `preprod`.
 - **Signed-in e2e** needs the test Supabase project (`frontend/.env.test.local`) and is pending; the
   signed-in variant is covered by component tests.
+## F-097
+
+**Scripts that write to a database only ever reach the owner's separate TEST Supabase project; the
+guard reads the env files and fails closed (SEC-08, NODE-16).**
+
+- **Context.** The parity harness (F-096) needs real signed-in pages and a live game, so it needs a
+  database with seeded rows. Local Supabase needs Docker (unavailable here) and production must never
+  be touched. The owner provides a TEST project in `frontend/.env.test.local` and `server/.env.test`
+  (git-ignored), plus `SUPABASE_TEST_DB_URL` (the Postgres connection string) in `server/.env.test`.
+- **Decision.** `scripts/test-db/env.js` is the only loader. `loadTestEnv()` refuses unless: both test
+  files exist; the frontend file has `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  and `SUPABASE_SECRET_KEY` and the server file `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and
+  `SUPABASE_TEST_DB_URL`; both files name the same project; at least one production URL is known
+  (`frontend/.env.local`, `server/.env`, or `PRODUCTION_SUPABASE_URL` in CI) and the test project differs
+  from it in URL (normalised origin), in secret key, and the DB URL does not contain the production
+  project ref. With no production URL to compare against it refuses (fail closed). Messages never
+  contain keys or connection strings.
+- **Migrations.** `scripts/test-db/migrate.js` runs
+  `supabase db push --remote=<SUPABASE_TEST_DB_URL> --include-all --yes`. CLI v3.2.0 still accepts
+  `--db-url` but prints a deprecation warning ("removed in v4"); `--remote=<url>` is its documented
+  replacement and targets the same database. `--yes` because hosted pushes do not prompt otherwise.
+- **Why canonical key names are required.** `next dev` loads `.env.local` (production) too; process
+  variables win over it, so the test file must override all three Supabase variables by their canonical
+  names, or a production key could leak in through a legacy fallback name.
+- **Tests.** `scripts/test-db/env.test.js` (`node --test`, in the Server job's script self-tests):
+  refuses missing files, a missing DB URL, the production URL in any spelling, a production key, a DB URL
+  naming the production ref, mismatched projects and an unknown production URL; never prints a secret.
+
