@@ -31,6 +31,8 @@ test('there is a schema for every client → server event (and none for `authent
             'takeback_request',
             'takeback_accept',
             'takeback_decline',
+            'premove_set',
+            'premove_cancel',
         ].sort(),
     );
 });

@@ -17,6 +17,8 @@ export interface UserSettings {
     moveSounds: boolean;
     /** Pre-selected in the lobby. */
     defaultTimeControl: SpeedBucket;
+    /** Queue a move while it is the opponent's turn (live games, ADR F-153). */
+    premoves: boolean;
     autoQueen: boolean;
     confirmResignDraw: boolean;
     /** Opponents may ask to take back a move (declared to the game server per game, ADR F-152). */
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: Readonly<UserSettings> = {
     pieceAnimation: 'smooth',
     moveSounds: true,
     defaultTimeControl: 'blitz',
+    premoves: false,
     autoQueen: true,
     confirmResignDraw: true,
     allowTakebacks: false,
@@ -57,6 +60,7 @@ const BOOLEAN_KEYS: readonly BooleanSetting[] = [
     'highlightLegalMoves',
     'highlightLastMove',
     'moveSounds',
+    'premoves',
     'autoQueen',
     'confirmResignDraw',
     'allowTakebacks',

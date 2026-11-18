@@ -181,6 +181,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-151](#f-151) | Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the finalizer | B4 | DRAW-OFFER |
 | [F-165](#f-165) | An accepted draw offer is stored as `end_reason = 'agreement'` (CHECK extended); profile counts it as "Stalemate or draw" | STACK | DRAW-OFFER |
 | [F-152](#f-152) | Takebacks: undo own last move (two plies after a reply), opponent's per-game opt-in, per-ply clock snapshots, `moves` rows deleted | B4 | TAKEBACK |
+| [F-153](#f-153) | Premoves: one queued move per player in Redis, played in the opponent's move transaction at zero thinking time | B4 | PREMOVE |
 
 ---
 
@@ -3734,4 +3735,49 @@ finalizer (DRAW-OFFER).**
   `integration/takebackTwoInstances.test.js` (request on A, accept on B, Redis and the `moves` rows
   agree; an accept racing a move across replicas: exactly one wins), frontend
   `features/game/takeback.test.tsx` and the game page characterization.
+
+## F-153
+
+**Premoves: one queued move per player in Redis, played in the same transaction as the opponent's
+move (PREMOVE).**
+
+- **State.** `premove: { by, from, to, promotion? } | null` in the Redis game state, set by
+  `premove_set` (validated like `make_move`: squares and promotion only) and cleared by
+  `premove_cancel`, both through `mutateGame`'s compare-and-set. Refused when it is the caller's
+  own turn (`premove_your_turn`) or the from-square holds no piece of theirs (`illegal_premove`);
+  full legality cannot be known before the opponent moves. A new premove replaces the old one.
+  It is private: acked, never broadcast, and only the owner's `game_state_sync` carries it
+  (`premoveView`, so `sendState` now takes the viewer's verified id).
+- **Playing it.** Inside the same `mutateGame` callback that applies the opponent's move
+  (`moveRecorder.decide` → `domain/premove.resolvePremove`): if that move ended the game the
+  premove lapses silently; otherwise it is tried with the server's rules on the new position —
+  legal → applied with `stateAfterMove` at the *same instant*, so the owner is charged zero
+  thinking time and still gets the increment; illegal → dropped and `premove_discarded
+  { game_id, reason }` is sent to the owner's `player:<game>:<user>` room only. One write, so no
+  replica can see the opponent's move without the premove's resolution. The room gets two
+  `move_made` events in order; the two `moves` rows are inserted in order (the second after the
+  first settles, so the `games` row ends on the final position). The finalizer's verdict is taken
+  on the premove's position when it ends the game (mate by premove). The end of the game and an
+  accepted takeback clear a queued premove (`ALL_REQUEST_KEYS`); an ordinary move does not (the
+  move the premove waits for resolves it). The pure move-state function moved from the move
+  recorder to `domain/moveState.js` so the domain can reuse it.
+- **Rate limit.** `premove_set` / `premove_cancel` use the move rule (`socketMove`).
+- **Setting.** The Settings mockup's "Premoves — Queue a move while it is the opponent turn"
+  (default off) is browser-only like every setting on this branch, so it gates the client: with it
+  off the board ignores clicks on the opponent's turn and nothing is sent. The server needs no
+  copy: a player who never sends `premove_set` never has a premove.
+- **Client.** On the opponent's turn a click on one of my pieces selects it with geometric
+  destinations (`utils/premoveDests.ts`: other pieces do not block, castling squares from the home
+  square), a click on a destination queues it (`premove_set`; a pawn to the last rank promotes to a
+  queen) and tints both squares with `mark-premove` (the mockup has no premove state: the turn dot's
+  green, translucent like the other marks); any click while one is queued cancels it. The
+  opponent's `move_made` (the side to move becomes mine) clears the tint; a refusal clears it with a
+  message, except `premove_your_turn`. `ACK_POLICY`: `premove_set` never re-sent, `premove_cancel`
+  retried once. The settings preview shows "Premoves on/off".
+- **Proof.** `domain/premove.test.js` (zero time with increment, illegal, game over),
+  `services/premoveService.test.js` (rejections, the 64 s / 55 s clock arithmetic, row order, mate
+  by premove, a takeback clearing it, owner-only sync), `integration/premoveTwoInstances.test.js`
+  (premove queued on B played when the move on A commits; an illegal one reported only to its owner
+  on the other replica), frontend `features/game/premove.test.tsx` and the game page
+  characterization.
 

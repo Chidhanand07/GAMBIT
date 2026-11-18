@@ -79,7 +79,8 @@ export function BoardArea({ screen }: { screen: GameScreen }) {
                 selectedSquare={state.selectedSq}
                 {...preferredBoardProps(prefs, { lastMove: state.lastMove, legalDestinations: state.legalDests })}
                 checkSquare={screen.checkSquare}
-                onSquareClick={view.isMyTurn ? board.handleSquareClick : undefined}
+                premove={board.isLive ? state.premove : null}
+                onSquareClick={view.isMyTurn || board.premoveActive ? board.handleSquareClick : undefined}
             >
                 {pending && state.myColor !== 'spectator' && (
                     <PromotionPicker

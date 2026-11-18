@@ -36,6 +36,8 @@ const RULES = Object.freeze({
 /** Socket events with their own rule; every other event uses `socketEvent`. */
 const SOCKET_EVENT_RULES = Object.freeze({
     make_move: 'socketMove',
+    premove_set: 'socketMove',
+    premove_cancel: 'socketMove',
     send_message: 'socketChat',
     join_queue: 'socketQueueJoin',
     challenge_request: 'socketChallenge',

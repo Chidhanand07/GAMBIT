@@ -11,15 +11,17 @@
  * (G2): the same pair the restore reads.
  */
 const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
-const { adjudicate, REASON } = require('../domain/adjudication');
+const { REASON } = require('../domain/adjudication');
 const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
 const { requestsView } = require('../domain/pendingRequests');
+const { premoveView } = require('../domain/premove');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom, playerRoom } = require('./emitter');
 const { createDrawOffers } = require('./drawOfferService');
 const { createGameFinalizer } = require('./gameFinalizer');
+const { createPremoves } = require('./premoveService');
 const { createTakebacks } = require('./takebackService');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
@@ -136,7 +138,7 @@ async function joinGame(ctx, gameId, client, userId) {
         // Visible to every instance: is any socket of this player still at this board?
         client.join(playerRoom(gameId, userId));
     }
-    sendState(ctx, game, client, await viewerCount(ctx, game, userId, client.id));
+    sendState(ctx, game, client, { viewerId: userId, spectators: await viewerCount(ctx, game, userId, client.id) });
 }
 
 /**
@@ -161,13 +163,15 @@ async function viewerCount({ spectators }, game, userId, socketId) {
 
 /**
  * Send `client` the authoritative view of `game`: the result when it is over,
- * otherwise position, move log and clocks (`game_state_sync`).
+ * otherwise position, move log and clocks (`game_state_sync`), the standing requests,
+ * and the viewer's own queued premove.
  * @param {GameCtx} ctx
  * @param {any} game
  * @param {ClientPort} client
- * @param {number} [spectators] how many watch, when known
+ * @param {{ viewerId?: string, spectators?: number }} [viewer] the connection's verified user, and
+ *   how many watch when known
  */
-function sendState(ctx, game, client, spectators) {
+function sendState(ctx, game, client, { viewerId, spectators } = {}) {
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
         client.emit('game_end', {
@@ -193,8 +197,8 @@ function sendState(ctx, game, client, spectators) {
         whiteId: game.whiteId,
         blackId: game.blackId,
         ...(spectators === undefined ? {} : { spectators }),
-
         ...requestsView(game),
+        ...premoveView(game, viewerId),
     });
 }
 
@@ -240,8 +244,9 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
 async function makeMove(ctx, data, userId, client) {
     const outcome = await ctx.moves.submit(data, userId);
     if (outcome.accepted) {
-        const verdict = adjudicate(outcome.played.position);
-        // The game ended with this move, at this move's time: the opponent's clock is not charged.
+        // The game ended with this move (or the opponent's premove right after it), at that
+        // move's time: the opponent's clock is not charged.
+        const verdict = outcome.verdict ?? outcome.premove?.verdict ?? null;
         if (verdict) await ctx.finalizer.endGame(data.game_id, verdict, outcome.state.lastMoveAt);
         return { ok: true };
     }
@@ -252,7 +257,7 @@ async function makeMove(ctx, data, userId, client) {
         const at = ctx.now();
         await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at), at);
     } else if (outcome.game) {
-        sendState(ctx, outcome.game, client);
+        sendState(ctx, outcome.game, client, { viewerId: userId });
     }
     return { ok: false, error: outcome.reason };
 }
@@ -355,6 +360,7 @@ function createGameService(deps) {
         handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
         ...createDrawOffers(ctx),
         ...createTakebacks(ctx),
+        ...createPremoves(ctx),
     };
 }
 

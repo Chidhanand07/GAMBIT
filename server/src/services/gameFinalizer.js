@@ -14,7 +14,7 @@
  */
 const { endReasonCode } = require('../domain/adjudication');
 const { clocksAt } = require('../domain/clock');
-const { clearedRequests } = require('../domain/pendingRequests');
+const { clearedRequests, ALL_REQUEST_KEYS } = require('../domain/pendingRequests');
 const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
 const { resultJob, applyResultEffects } = require('./gameResultEffects');
@@ -139,7 +139,7 @@ function finishedState(game, decide, at) {
     const { whiteMs, blackMs } = clocksAt(game, at);
     return {
         ...game,
-        ...clearedRequests(game),
+        ...clearedRequests(game, ALL_REQUEST_KEYS),
         whiteClockMs: whiteMs,
         blackClockMs: blackMs,
         status: 'completed',

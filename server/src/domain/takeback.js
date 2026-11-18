@@ -16,7 +16,7 @@
  *   `moveLog`, so a takeback restores the clocks of the position it returns to.
  */
 const { activeSideFromFen } = require('./gameState');
-const { clearedRequests } = require('./pendingRequests');
+const { clearedRequests, ALL_REQUEST_KEYS } = require('./pendingRequests');
 const { clocksAt } = require('./clock');
 const { initialClockMs } = require('./timeControl');
 const { opponentColor, sideToColor } = require('./result');
@@ -124,7 +124,7 @@ function rolledBack(game, at) {
     const clocks = clocksAfterPly(game, keep, at);
     return {
         ...game,
-        ...clearedRequests(game),
+        ...clearedRequests(game, ALL_REQUEST_KEYS),
         fen,
         moveLog,
         ...(Array.isArray(game.clockLog) ? { clockLog: game.clockLog.slice(0, keep) } : {}),

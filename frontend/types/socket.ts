@@ -116,6 +116,8 @@ export interface ClientToServerEvents {
     takeback_request: (payload: GameIdPayload) => void;
     takeback_accept: (payload: GameIdPayload) => void;
     takeback_decline: (payload: GameIdPayload) => void;
+    premove_set: (payload: MakeMovePayload) => void;
+    premove_cancel: (payload: GameIdPayload) => void;
 }
 
 // ── server → client ──────────────────────────────────────────────────────────
@@ -164,6 +166,14 @@ export interface GameStateSyncPayload {
     takeback?: { by: PlayerColor; plies: number };
     /** Each player's "Allow takeback requests" setting, as declared for this game. */
     takebackPrefs?: Partial<Record<PlayerColor, boolean>>;
+    /** This player's own queued premove; sent to its owner only (ADR F-153). */
+    premove?: { from: string; to: string; promotion?: string };
+}
+
+/** The owner's premove was not legal after the opponent's move and was dropped. */
+export interface PremoveDiscardedPayload {
+    game_id: string;
+    reason: 'illegal_move';
 }
 
 /** A player asked to take back their last move (`plies`: 1, or 2 when the opponent replied). */
@@ -300,6 +310,7 @@ export interface ServerToClientEvents {
     takeback_declined: (payload: TakebackDeclinedPayload) => void;
     takeback_applied: (payload: TakebackAppliedPayload) => void;
     takeback_prefs: (payload: TakebackPrefsPayload) => void;
+    premove_discarded: (payload: PremoveDiscardedPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;
     rating_updated: (payload: RatingUpdatedPayload) => void;

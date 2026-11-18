@@ -1,10 +1,12 @@
 // Handlers for the server events about requests between the players: draw offers (ADR F-151)
-// and takebacks (ADR F-152). The server is the authority; these only mirror what it broadcast.
+// takebacks (ADR F-152) and the owner's premove (ADR F-153). The server is the authority; these
+// only mirror what it sent.
 import type { Square } from 'chess.js';
 import type {
     DrawDeclinedPayload,
     DrawOfferedPayload,
     GameStateSyncPayload,
+    PremoveDiscardedPayload,
     TakebackAppliedPayload,
     TakebackDeclinedPayload,
     TakebackPrefsPayload,
@@ -21,6 +23,7 @@ export function requestsSyncedFrom(data: GameStateSyncPayload): GameAction {
         lastDrawOfferPly: data.lastDrawOfferPly ?? {},
         takeback: data.takeback ?? null,
         takebackPrefs: data.takebackPrefs ?? {},
+        premove: data.premove ? { from: data.premove.from as Square, to: data.premove.to as Square } : null,
     };
 }
 
@@ -89,6 +92,15 @@ function onTakebackApplied(ctx: SocketHandlerContext) {
     };
 }
 
+/** My premove was not legal after the opponent's move: the server dropped it. */
+function onPremoveDiscarded(ctx: SocketHandlerContext) {
+    return (data: PremoveDiscardedPayload) => {
+        if (data.game_id !== ctx.gameId) return;
+        ctx.dispatch({ type: 'premoveCleared' });
+        ctx.inform?.('Premove cancelled: it was not legal after that move');
+    };
+}
+
 function onTakebackPrefs(ctx: SocketHandlerContext) {
     return ({ game_id: gameId, white, black }: TakebackPrefsPayload) => {
         if (gameId !== ctx.gameId) return;
@@ -107,5 +119,6 @@ export function requestHandlerList(ctx: SocketHandlerContext): Array<[string, So
         ['takeback_declined', onTakebackDeclined(ctx)],
         ['takeback_applied', onTakebackApplied(ctx)],
         ['takeback_prefs', onTakebackPrefs(ctx)],
+        ['premove_discarded', onPremoveDiscarded(ctx)],
     ];
 }

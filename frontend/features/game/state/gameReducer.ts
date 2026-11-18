@@ -4,6 +4,7 @@
 import { Chess, type Square } from 'chess.js';
 import type { GameWithPlayers, PlayerColor, SeatColor } from '@/types/game';
 import {
+    allClearedRequests,
     clearedRequests,
     createInitialRequests,
     requestHandlers,
@@ -165,6 +166,13 @@ function syncedSeconds(prev: number, ms: number): number {
     return Math.abs(prev * MS_PER_SECOND - ms) > CLOCK_SYNC_TOLERANCE_MS ? msToSeconds(ms) : prev;
 }
 
+/** The colour to move in a FEN ('w' → white); null for a FEN without a side field. */
+function sideToMoveOf(fen: string): PlayerColor | null {
+    const side = fen.split(' ')[1];
+    if (side === 'w') return 'white';
+    return side === 'b' ? 'black' : null;
+}
+
 /** Fresh empty destination list each time, as the legacy `setLegalDests([])` did. */
 const noSelection = () => ({ selectedSq: null, legalDests: [] as Square[] });
 
@@ -192,6 +200,8 @@ const handlers: Handlers = {
         ...s,
         ...noSelection(),
         ...clearedRequests(),
+        // The opponent's move resolves my premove (the server played or dropped it); my own does not.
+        premove: sideToMoveOf(a.fen) === s.myColor ? null : s.premove,
         fen: a.fen,
         fenSnapshots: [...s.fenSnapshots, a.fen],
         viewIndex: null,
@@ -211,7 +221,7 @@ const handlers: Handlers = {
     takebackApplied: (s, { restored: r }) => ({
         ...s,
         ...noSelection(),
-        ...clearedRequests(),
+        ...allClearedRequests(),
         fen: r.fen,
         fenSnapshots: r.fens,
         moveList: r.sans,
@@ -240,7 +250,7 @@ const handlers: Handlers = {
     // A confirmation still open when the game ends no longer applies.
     gameEnded: (s, a) => ({
         ...s,
-        ...clearedRequests(),
+        ...allClearedRequests(),
         confirm: null,
         gameOver: { result: a.info.result, reason: a.info.reason },
     }),

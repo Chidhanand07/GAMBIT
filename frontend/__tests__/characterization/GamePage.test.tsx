@@ -214,12 +214,14 @@ describe('mount', () => {
             'draw_declined', 'draw_offered',
             // [TAKEBACK]
             'takeback_applied', 'takeback_declined', 'takeback_prefs', 'takeback_requested',
+            // [PREMOVE]
+            'premove_discarded',
         ].sort())
     })
 
     test('unmount removes every handler it registered', async () => {
         const { unmount } = await renderGame()
-        const registered = socket.on.mock.calls.slice(-20)
+        const registered = socket.on.mock.calls.slice(-21)
         unmount()
         expect(socket.listenedEvents()).toEqual([])
         for (const [event, handler] of registered) {
@@ -1003,6 +1005,42 @@ describe('takebacks [TAKEBACK]', () => {
     test('with "Allow takeback requests" on, the player declares it to the server for this game', async () => {
         await renderGameWithSettings({ allowTakebacks: true })
         expect(socket.emitted('takeback_pref')).toEqual([{ game_id: 'g1', allow: true }])
+    })
+})
+
+describe('premoves [PREMOVE]', () => {
+    const premoveMarks = () => Array.from(document.querySelectorAll('[data-mark="premove"]')).map(m => m.parentElement!.getAttribute('data-square')).sort()
+
+    test('with the setting on, on the opponent’s turn: pick a piece and a square → premove_set and the tint', async () => {
+        await renderGameWithSettings({ premoves: true })
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4', whiteMs: 300_000, blackMs: 300_000 })
+        socket.emit.mockClear()
+        click(square('g1'))
+        click(square('f3'))
+        expect(socket.emitted('premove_set')).toEqual([{ game_id: 'g1', from: 'g1', to: 'f3' }])
+        expect(premoveMarks()).toEqual(['f3', 'g1'])
+        // The opponent's move resolves it on the server; the tint goes.
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5', whiteMs: 300_000, blackMs: 300_000 })
+        expect(premoveMarks()).toEqual([])
+    })
+
+    test('a click while one is queued cancels it', async () => {
+        await renderGameWithSettings({ premoves: true })
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4', whiteMs: 300_000, blackMs: 300_000 })
+        click(square('g1'))
+        click(square('f3'))
+        socket.emit.mockClear()
+        click(square('a1'))
+        expect(socket.emitted('premove_cancel')).toEqual([{ game_id: 'g1' }])
+        expect(premoveMarks()).toEqual([])
+    })
+
+    test('with the setting off (the default), the board ignores clicks on the opponent’s turn', async () => {
+        await renderGame()
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4', whiteMs: 300_000, blackMs: 300_000 })
+        socket.emit.mockClear()
+        expect(square('g1').tagName).not.toBe('BUTTON')
+        expect(socket.emitted('premove_set')).toEqual([])
     })
 })
 

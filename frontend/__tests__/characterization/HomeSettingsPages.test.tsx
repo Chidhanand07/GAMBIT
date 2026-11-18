@@ -400,13 +400,13 @@ describe('settings page', () => {
         expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account'])
         // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
         // those are real profile columns now; everything else here still has no backing.
-        const unbacked = /premove|move by|visib/i
+        const unbacked = /move by|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]
             const names = controls.map(c => `${c.getAttribute('aria-label') ?? ''} ${c.textContent ?? ''} ${(c as HTMLInputElement).placeholder ?? ''}`)
             expect(names.filter(n => unbacked.test(n))).toEqual([])
-            expect(document.body.textContent).not.toMatch(/premove|show my country|show rating history/i)
+            expect(document.body.textContent).not.toMatch(/show my country|show rating history/i)
         }
     })
 

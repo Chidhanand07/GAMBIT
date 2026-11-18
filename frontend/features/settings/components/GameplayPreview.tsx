@@ -88,7 +88,8 @@ function Resign({ confirm }: { confirm: boolean }) {
 
 /** The settings that have no demo control, as chips (Settings.dc.html `statusChips`). */
 export function statusChips(settings: UserSettings): string[] {
-    return [`Takebacks ${settings.allowTakebacks ? 'on' : 'off'}`];
+    const onOff = (on: boolean) => (on ? 'on' : 'off');
+    return [`Premoves ${onOff(settings.premoves)}`, `Takebacks ${onOff(settings.allowTakebacks)}`];
 }
 
 function StatusChips({ chips }: { chips: string[] }) {

@@ -43,6 +43,8 @@ function deps() {
             requestTakeback: fn(),
             acceptTakeback: fn(),
             declineTakeback: fn(),
+            setPremove: fn(),
+            cancelPremove: fn(),
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
@@ -89,6 +91,8 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'takeback_request',
             'takeback_accept',
             'takeback_decline',
+            'premove_set',
+            'premove_cancel',
             'disconnect',
         ].sort(),
     );
@@ -234,6 +238,19 @@ test('takeback events: the service gets the validated payload and the verified u
     expect(d.gameService.acceptTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
     expect(d.gameService.declineTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
     expect(d.gameService.setTakebackPref).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
+});
+
+test('premove events: squares and promotion only, for the verified user [PREMOVE]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.premove_set({ game_id: 'g', from: 'e7', to: 'e5', fen: 'x', by: 'white' }, ack);
+    await handlers.premove_cancel({ game_id: 'g' }, ack);
+    await handlers.premove_set({ game_id: 'g', from: 'e9', to: 'e5' }, ack);
+    expect(d.gameService.setPremove).toHaveBeenCalledWith({ game_id: 'g', from: 'e7', to: 'e5' }, 'u1');
+    expect(d.gameService.cancelPremove).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.setPremove).toHaveBeenCalledTimes(1);
     expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
 });
 
