@@ -13,7 +13,8 @@ const GAME_WITH_PLAYERS_COLUMNS = `
 const HISTORY_COLUMNS = `
             id, time_control, status, result, winner_id,
             white_accuracy, black_accuracy, created_at, ended_at,
-            white_id, black_id,
+            white_id, black_id, rating_category,
+            white_rating_before, white_rating_after, black_rating_before, black_rating_after,
             white:profiles!games_white_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical),
             black:profiles!games_black_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;

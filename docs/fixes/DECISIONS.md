@@ -116,6 +116,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
 | [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
 | [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
+| [F-120](#f-120) | Rated games store both ratings before/after; only `apply_game_result` writes them | B1 | RATING-SNAPSHOT |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2897,3 +2898,32 @@ not a required check.**
   holds `design/design`, because `design/` is not in the repository). Pull requests from forks get no
   secrets, so the job cannot run there.
 
+
+## F-120
+
+**Rated games store both players' ratings before and after, written only by `apply_game_result`
+(B1 item 1; SEC-04, NODE-16, NX-07).**
+
+- **Context.** The profile design shows a rating history chart, a rating change per game and a
+  "best win" (opponent rating at the time). The database kept only the current rating per pool.
+- **Options.** (a) Columns written by the finalizer from the values the rating service computed;
+  (b) a separate `rating_history` table; (c) columns written inside `apply_game_result`.
+- **Decision.** (c). Migration `20261118100000_game_rating_snapshots.sql` adds
+  `games.rating_category` (`bullet|blitz|rapid|classical`, CHECK) and
+  `games.{white,black}_rating_{before,after}` (`numeric(7,2)`, like the profile columns). The
+  function, still security definer with the same signature and compare-and-set, fills them in the
+  transaction that writes the profiles: "before" is the stored value the compare-and-set just
+  verified, "after" the value written. `already_applied` and `stale` calls write nothing.
+- **Why.** One writer, one transaction: a snapshot can never disagree with the profile, and the
+  idempotency (`rated_at`) already covers it. The game server needs no change. A history table
+  would duplicate what one game row can carry.
+- **Privileges.** `anon`/`authenticated` lose INSERT/UPDATE/DELETE/TRUNCATE on `games` (no policy
+  ever allowed a write). `service_role` loses table-level INSERT/UPDATE and gets them back per
+  column on every existing column except `rated_at`, `rating_category` and the four snapshots. A
+  later migration that adds a column the server writes must grant it to `service_role`.
+- **Old games.** Glicko-2 depends on each player's RD and volatility at that moment, which were
+  never stored, so old games stay NULL. The UI shows no change for them and the rating chart says
+  history starts with the first game rated after this migration.
+- **Rollout.** Migration first, then the web app (it only reads the columns). Rollback:
+  `GRANT INSERT, UPDATE ON TABLE public.games TO service_role;` and re-create the function from
+  `20261113100000_rating_atomic.sql`. pgTAP `060_game_rating_snapshots.test.sql`.

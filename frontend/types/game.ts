@@ -1,6 +1,6 @@
 // `public.games` / `public.moves` rows and the API shapes built from them.
 import type { ProfileSummary } from './profile';
-import type { TimeControl } from './timeControl';
+import type { SpeedBucket, TimeControl } from './timeControl';
 
 export type GameStatus = 'waiting' | 'active' | 'completed' | 'aborted';
 
@@ -43,6 +43,13 @@ export interface Game {
     black_move_classifications?: MoveClassification[] | null;
     critical_moments?: unknown;
     is_rated: boolean | null;
+    /** Rating pool the game was rated in (F-120); null for unrated games and games rated before F-120. */
+    rating_category?: SpeedBucket | null;
+    /** Both players' ratings in `rating_category` before and after the game (F-120); null when not recorded. */
+    white_rating_before?: number | null;
+    white_rating_after?: number | null;
+    black_rating_before?: number | null;
+    black_rating_after?: number | null;
     spectator_count?: number | null;
     started_at?: string | null;
     ended_at?: string | null;

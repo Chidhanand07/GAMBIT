@@ -4,7 +4,19 @@ import type { ProfileSummary } from './profile';
 import type { SpeedBucket } from './timeControl';
 
 /** Row of GET /api/profile/[username]/games (players embedded via PostgREST joins). */
-export interface ProfileGameRow extends Pick<Game, 'id' | 'time_control' | 'status' | 'result' | 'winner_id'> {
+export interface ProfileGameRow
+    extends
+        Pick<Game, 'id' | 'time_control' | 'status' | 'result' | 'winner_id'>,
+        Partial<
+            Pick<
+                Game,
+                | 'rating_category'
+                | 'white_rating_before'
+                | 'white_rating_after'
+                | 'black_rating_before'
+                | 'black_rating_after'
+            >
+        > {
     white_accuracy: number | null;
     black_accuracy: number | null;
     created_at: string;

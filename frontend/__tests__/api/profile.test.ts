@@ -219,6 +219,15 @@ describe('GET /api/profile/[username]/games', () => {
         ]))
     })
 
+    test('each row carries the rating category and both ratings before and after the game [F-120]', async () => {
+        db.queue('profiles', { data: { id: uid('p') }, error: null })
+        await getGames(req('/x'), { params: Promise.resolve({ username: 'bob' }) })
+        const columns = String(db.op(db.callsFor('games')[0], 'select')![0])
+        for (const column of ['rating_category', 'white_rating_before', 'white_rating_after', 'black_rating_before', 'black_rating_after']) {
+            expect(columns).toContain(column)
+        }
+    })
+
     test('limit is capped at 50 and defaults to 15', async () => {
         db.queue('profiles', { data: { id: uid('p') }, error: null }, { data: { id: uid('p') }, error: null })
         await getGames(req('/x?limit=500'), { params: Promise.resolve({ username: 'bob' }) })

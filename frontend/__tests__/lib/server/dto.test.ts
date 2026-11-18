@@ -58,6 +58,17 @@ describe('toGameDto', () => {
         })
     })
 
+    test('carries the rating snapshot of a rated game [F-120]', () => {
+        const snapshot = {
+            rating_category: 'blitz',
+            white_rating_before: 1200,
+            white_rating_after: 1208,
+            black_rating_before: 1250,
+            black_rating_after: 1242,
+        }
+        expect(toGameDto({ ...gameRow, ...snapshot })).toMatchObject(snapshot)
+    })
+
     test('clocks leave the server in the one canonical pair; the legacy *_time_ms columns do not [G2]', () => {
         const dto = toGameDto(gameRow)
         expect(dto).toMatchObject({ white_clock_ms: 1, black_clock_ms: 2 })
