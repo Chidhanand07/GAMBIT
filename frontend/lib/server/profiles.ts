@@ -101,6 +101,14 @@ export function listLeaderboard(admin: SupabaseClient, field: RatingField) {
         .limit(LEADERBOARD_SIZE);
 }
 
+/**
+ * How many players the leaderboard ranks: every profile (the board orders all of them by rating).
+ * A HEAD count, so no rows are read.
+ */
+export function countLeaderboardPlayers(admin: SupabaseClient) {
+    return admin.from('profiles').select('id', { count: 'exact', head: true });
+}
+
 /** Email local part with non-word characters replaced by `_`, max 15 chars, else "player". */
 function usernameBaseFromEmail(email: string): string {
     return (

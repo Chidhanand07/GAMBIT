@@ -58,6 +58,21 @@ describe('GET /api/leaderboard', () => {
         expect(db.calls).toEqual([])
     })
 
+    test('sends the number of ranked players (a HEAD count of every profile) as X-Total-Count', async () => {
+        db.queue('profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: null, count: 1234 })
+        const res = await leaderboard(req('/api/leaderboard'))
+        expect(res.headers.get('X-Total-Count')).toBe('1234')
+        const count = db.callsFor('profiles')[1]
+        expect(count.ops).toEqual([['select', 'id', { count: 'exact', head: true }]])
+    })
+
+    test('no X-Total-Count when the count fails; the list is still returned', async () => {
+        db.queue('profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: { message: 'x' } })
+        const res = await leaderboard(req('/api/leaderboard'))
+        expect(res.headers.get('X-Total-Count')).toBeNull()
+        expect((await json(res)).body).toEqual([{ username: 'a' }])
+    })
+
     test('database error → empty list', async () => {
         db.queue('profiles', { data: null, error: { message: 'x' } })
         expect(await json(await leaderboard(req('/api/leaderboard')))).toEqual({ status: 200, body: [] })

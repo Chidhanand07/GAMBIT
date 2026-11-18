@@ -20,9 +20,16 @@ export interface RankRow {
     href: string;
 }
 
+/** Rows GET /api/leaderboard returns at most (LEADERBOARD_SIZE in lib/server/profiles). */
+export const LEADERBOARD_SIZE = 50;
+
 export interface LeaderboardTotals {
-    players: number;
+    /** Every ranked player, or null when unknown (no server count and the list is capped). */
+    players: number | null;
+    /** Mean rating of the players shown. */
     avgRating: number;
+    /** True when the list is capped, so the mean covers only the top players shown. */
+    avgOfTop: boolean;
 }
 
 /** What the "Your standing" card shows for the signed-in viewer. */
@@ -66,10 +73,22 @@ export function toRankRows(players: readonly LeaderboardPlayer[], field: RatingF
     });
 }
 
-/** Player count and mean rating (1200 for an empty board). */
-export function totalsOf(players: readonly LeaderboardPlayer[], field: RatingField): LeaderboardTotals {
+/**
+ * Player count and mean rating (1200 for an empty board). `total` is the server's count of ranked
+ * players; without it the list length is the count only while the list is not capped.
+ */
+export function totalsOf(
+    players: readonly LeaderboardPlayer[],
+    field: RatingField,
+    total: number | null = null,
+): LeaderboardTotals {
     const sum = players.reduce((a, p) => a + (p[field] ?? DEFAULT_RATING), 0);
-    return { players: players.length, avgRating: Math.round(sum / players.length || DEFAULT_RATING) };
+    const capped = players.length >= LEADERBOARD_SIZE;
+    return {
+        players: total ?? (capped ? null : players.length),
+        avgRating: Math.round(sum / players.length || DEFAULT_RATING),
+        avgOfTop: capped,
+    };
 }
 
 export function standingOf(rows: readonly RankRow[], viewer: StandingProfile, bucket: SpeedBucket): Standing {

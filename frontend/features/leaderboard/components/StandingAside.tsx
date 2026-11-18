@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Icon } from '@/components/ui/Icon';
-import type { LeaderboardTotals, Standing } from '../leaderboardView';
+import { LEADERBOARD_SIZE, type LeaderboardTotals, type Standing } from '../leaderboardView';
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -45,14 +45,20 @@ interface StandingAsideProps {
     playHref: string;
 }
 
-/** Right column: the viewer's standing and the three board totals. */
+/**
+ * Right column: the viewer's standing and the board totals. "Total players" is left out when the
+ * count is unknown, and the mean rating says when it covers only the top players shown.
+ */
 export function StandingAside({ standing, totals, onlineNow, playHref }: StandingAsideProps) {
     return (
         <aside className="flex min-w-0 max-w-[520px] flex-[1_1_300px] flex-col gap-4">
             {standing && <StandingCard standing={standing} playHref={playHref} />}
             <div className="flex flex-wrap gap-3">
-                <SummaryStat value={totals.players} label="Total players" />
-                <SummaryStat value={totals.avgRating} label="Avg rating" />
+                {totals.players !== null && <SummaryStat value={totals.players} label="Total players" />}
+                <SummaryStat
+                    value={totals.avgRating}
+                    label={totals.avgOfTop ? `Avg rating, top ${LEADERBOARD_SIZE}` : 'Avg rating'}
+                />
                 <SummaryStat value={onlineNow} label="Online now" />
             </div>
         </aside>

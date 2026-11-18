@@ -310,6 +310,41 @@ describe('leaderboard', () => {
         expect(screen.getByText('No ranked players yet')).toBeInTheDocument()
     })
 
+    test('a capped board (50 rows) shows the server count of ranked players and labels the mean as the top 50', async () => {
+        const fifty = Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))
+        fetchMock.mockImplementation(async () => jsonResponse(fifty, true, { 'X-Total-Count': '1234' }))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.getByText('Total players').previousSibling!.textContent).toBe('1234')
+        expect(screen.getByText('Avg rating, top 50').previousSibling!.textContent).toBe('1500')
+        expect(screen.queryByText('Avg rating')).toBeNull()
+    })
+
+    test('a capped board without a server count leaves "Total players" out instead of showing 50', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse(Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.queryByText('Total players')).toBeNull()
+        expect(screen.getByText('Avg rating, top 50')).toBeInTheDocument()
+    })
+
+    test('the open board re-reads the rankings every 30 s ("Updated live")', async () => {
+        jest.useFakeTimers()
+        try {
+            fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+            const { unmount } = render(<LeaderboardPage />)
+            await act(async () => {})
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            await act(async () => { jest.advanceTimersByTime(30_000) })
+            expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_rapid'])
+            unmount()
+            await act(async () => { jest.advanceTimersByTime(60_000) })
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        } finally {
+            jest.useRealTimers()
+        }
+    })
+
     test('signed in: own row is marked "You" and the standing card shows rank, rating and record', async () => {
         profile = { id: 'me', username: 'b', display_name: 'Bee', rating_rapid: 1700.2, games_played: 20, wins: 15 }
         fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800), P('b', 1700), P('c', 1600)]))

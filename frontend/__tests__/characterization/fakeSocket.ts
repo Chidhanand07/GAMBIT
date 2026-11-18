@@ -53,7 +53,7 @@ export function createFakeSocket(): FakeSocket {
     return socket
 }
 
-/** A minimal fetch Response double. */
-export function jsonResponse(body: unknown, ok = true) {
-    return { ok, status: ok ? 200 : 404, json: async () => body }
+/** A minimal fetch Response double (`headers`, e.g. the leaderboard's X-Total-Count, default to none). */
+export function jsonResponse(body: unknown, ok = true, headers: Record<string, string> = {}) {
+    return { ok, status: ok ? 200 : 404, headers: new Headers(headers), json: async () => body }
 }

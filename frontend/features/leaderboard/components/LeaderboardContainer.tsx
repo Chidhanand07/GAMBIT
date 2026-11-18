@@ -15,7 +15,7 @@ const PLAY_HREF = '/lobby';
  * and the presence count for "Online now".
  */
 export function LeaderboardContainer() {
-    const { filter, setFilter, players, loading } = useLeaderboard();
+    const { filter, setFilter, players, total, loading } = useLeaderboard();
     const { profile } = useProfile();
     const { onlineCount } = usePresence();
 
@@ -32,7 +32,7 @@ export function LeaderboardContainer() {
             podium={podiumOf(rows)}
             bucket={bucket}
             standing={standing}
-            totals={totalsOf(players, `rating_${bucket}`)}
+            totals={totalsOf(players, `rating_${bucket}`, total)}
             onlineNow={onlineCount}
             playHref={PLAY_HREF}
         />
