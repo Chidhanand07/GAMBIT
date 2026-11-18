@@ -38,8 +38,16 @@ export function createSupabaseMock() {
         return b
     })
 
+    /** `rpc(fn, args)`: recorded as table `rpc:<fn>`, resolved from `queue('rpc:<fn>', …)`. */
+    const rpc = jest.fn((fn: string, args?: unknown) => {
+        const call: Call = { table: `rpc:${fn}`, ops: [['rpc', fn, args]] }
+        calls.push(call)
+        return next(call)
+    })
+
     const client = {
         from,
+        rpc,
         calls,
         auth: {
             getUser: jest.fn(async () => ({ data: { user: null }, error: null })),
@@ -75,6 +83,7 @@ export function createSupabaseMock() {
             queues.clear()
             calls.length = 0
             from.mockClear()
+            rpc.mockClear()
             client.auth.getUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.getClaims.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.getSession.mockReset().mockResolvedValue({ data: { session: null }, error: null })

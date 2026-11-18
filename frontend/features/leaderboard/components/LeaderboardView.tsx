@@ -13,26 +13,19 @@ export interface LeaderboardViewProps {
     rows: readonly RankRow[];
     /** Second / first / third, or empty below three players. */
     podium: readonly RankRow[];
-    /** Rating pool label under each rating ("rapid"). */
-    bucket: string;
     standing: Standing | null;
     totals: LeaderboardTotals;
     onlineNow: number;
     playHref: string;
 }
 
-function Rankings({
-    loading,
-    rows,
-    podium,
-    bucket,
-}: Pick<LeaderboardViewProps, 'loading' | 'rows' | 'podium' | 'bucket'>) {
+function Rankings({ loading, rows, podium }: Pick<LeaderboardViewProps, 'loading' | 'rows' | 'podium'>) {
     if (loading) return <RankingsSkeleton />;
     if (rows.length === 0) return <RankingsEmpty />;
     return (
         <>
             {podium.length > 0 && <Podium slots={podium} />}
-            <RankingsTable rows={rows} bucket={bucket} />
+            <RankingsTable rows={rows} />
         </>
     );
 }
@@ -57,7 +50,7 @@ export function LeaderboardView(props: LeaderboardViewProps) {
                     onChange={props.onFilterChange}
                     className="self-start"
                 />
-                <Rankings loading={props.loading} rows={props.rows} podium={props.podium} bucket={props.bucket} />
+                <Rankings loading={props.loading} rows={props.rows} podium={props.podium} />
             </section>
             <StandingAside
                 standing={props.standing}

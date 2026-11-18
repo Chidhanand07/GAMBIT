@@ -34,8 +34,8 @@ const liveGames = [{
     black: { username: 'bob', display_name: null, avatar_url: null, rating: 1200 },
 }]
 const friends = [
-    { id: 'f-off', username: 'zed', display_name: null, avatar_url: null, rating_rapid: 1100.4, friendship_id: 'x' },
-    { id: 'f-on', username: 'amy', display_name: 'Amy', avatar_url: null, rating_rapid: 1376, friendship_id: 'y' },
+    { id: 'f-off', username: 'zed', display_name: null, avatar_url: null, rating_rapid: 1100.4, rating_blitz: 1050, friendship_id: 'x' },
+    { id: 'f-on', username: 'amy', display_name: 'Amy', avatar_url: null, rating_rapid: 1376, rating_blitz: 1239, friendship_id: 'y' },
 ]
 
 let fetchMock: jest.Mock
@@ -135,10 +135,19 @@ test('Friend lists my friends, online first, and Challenge opens the challenge p
     await userEvent.click(screen.getByRole('button', { name: 'Friend' }))
     expect(await screen.findByText('Amy')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/friends')
-    expect(screen.getByText('Online · 1376')).toBeInTheDocument()
-    expect(screen.getByText('Offline · 1100')).toBeInTheDocument()
+    // F-125 (was: always the rapid rating): the rating of the selected time control's pool, Blitz by default.
+    expect(screen.getByText('Online · 1239')).toBeInTheDocument()
+    expect(screen.getByText('Offline · 1050')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Challenge Amy' })).toHaveAttribute('href', '/challenge/amy')
     expect(screen.queryByRole('link', { name: 'Challenge zed' })).not.toBeInTheDocument()
+})
+
+test('Friend: picking Rapid shows each friend\'s rapid rating [F-125]', async () => {
+    render(<LobbyPage />)
+    await userEvent.click(screen.getByText('Rapid'))
+    await userEvent.click(screen.getByRole('button', { name: 'Friend' }))
+    expect(await screen.findByText('Online · 1376')).toBeInTheDocument()
+    expect(screen.getByText('Offline · 1100')).toBeInTheDocument()
 })
 
 test('live games list both players with ratings and a Watch link to the game', async () => {

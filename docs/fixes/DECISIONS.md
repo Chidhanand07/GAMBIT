@@ -121,6 +121,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-122](#f-122) | Best win = highest opponent rating at the time, per pool, from the snapshots | B1 | BEST-WIN |
 | [F-123](#f-123) | Openings from stored moves via a built-in ECO table; `moves` index and browser writes revoked | B1 | OPENINGS |
 | [F-124](#f-124) | `games.end_reason` written by the finalizer; game length from the final FEN | B1 | GAME-ENDINGS |
+| [F-125](#f-125) | "All" = best pool with ≥ 1 rated game; `leaderboard_rank` for any place; friends carry every pool | B1 | RANKINGS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3015,3 +3016,35 @@ an index and loses its browser write privileges (B1 item 4).**
   "Average game length" and "Fastest win"; the games route returns `move_count` per game instead of the
   positions.
 - **Rollout.** Migration, then the game server and web app. pgTAP `062_game_end_reason.test.sql`.
+
+## F-125
+
+**"All" ranks every player by their best pool with at least one rated game; a SQL function gives any
+player's rank; friends carry every pool's rating (B1 item 6).**
+
+- **Context.** The "All" tab ranked by the rapid rating, a player outside the top 50 had no rank, and
+  `/api/friends` returned the rapid rating only, so the lobby showed it whatever time control was picked.
+- **Options for "All".** (a) the highest rating across pools; (b) a games-weighted mean; (c) (a) with a
+  minimum number of rated games per pool.
+- **Decision: (c) with a threshold of 1.** `profiles.rating_all` is a stored generated column: the
+  greatest rating among the pools where `rated_games_<pool> >= 1`, NULL before any rated game.
+  Without the threshold an untouched pool's 1200 default would count (a 1,050 rapid player would rank
+  as 1,200). A higher threshold would hide most players of a small community; Glicko-2's deviation
+  already damps the first games. A weighted mean was rejected because it mixes pools that are not
+  comparable and changes when a player tries a new pool. The rule's constant also lives in
+  `lib/chess/ratingPools.ts` (`MIN_RATED_GAMES_FOR_ALL`), which names the pool the rating comes from.
+- **Counters.** `profiles.rated_games_{bullet,blitz,rapid,classical}` are incremented only by
+  `apply_game_result` (same signature) when it rates a game; backfilled from finished, applied, rated
+  games with the pool read from `time_control` exactly like the server's model. No role can write them
+  directly (the browser roles have no column grant; `service_role` has no UPDATE on profiles, F-086).
+- **Rank.** `public.leaderboard_rank(profile, board)` (STABLE, security invoker, service-role only):
+  1 + players with a higher rating, + players with the same rating and an earlier username, the
+  order every list uses (`rating desc, username asc`, NULLs left out). Both counts are range scans on
+  new `(rating, username)` indexes, one per board (partial on `rating_all IS NOT NULL`).
+  `GET /api/leaderboard/me?field=` returns the verified user's `{ rank, rating, pool }`; the standing
+  card prefers the row's position when the viewer is in the top 50.
+- **API.** `GET /api/leaderboard` defaults to `rating_all`, leaves out players without a rating on the
+  board, and counts only those for `X-Total-Count`. `GET /api/friends` returns all four ratings; the
+  lobby's friend list shows the one of the selected time control's pool.
+- **Database.** Migration `20261118100300_leaderboard_ranking.sql`, pgTAP
+  `063_leaderboard_ranking.test.sql`. Rollout: migration, then the web app.

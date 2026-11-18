@@ -18,7 +18,7 @@ export interface LobbyFriend {
     username: string;
     display_name: string | null;
     avatar_url: string | null;
-    /** Rapid rating: the only rating GET /api/friends returns. */
+    /** Rating in the pool of the selected time control (GET /api/friends returns every pool, F-125). */
     rating: number;
     /** In the shared presence set right now. */
     online: boolean;

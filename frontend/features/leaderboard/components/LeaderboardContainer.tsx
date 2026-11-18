@@ -4,24 +4,24 @@ import { usePresence } from '@/components/PresenceProvider';
 import { useProfile } from '@/components/ProfileProvider';
 import { useLeaderboard } from '../hooks/useLeaderboard';
 import { podiumOf, standingOf, toRankRows, totalsOf } from '../leaderboardView';
-import { bucketOf } from '../types';
+import { fieldOf } from '../types';
 import { LeaderboardView } from './LeaderboardView';
 
 const PLAY_HREF = '/lobby';
 
 /**
- * Wires the leaderboard to real data: GET /api/leaderboard per tab (Glicko-2 ratings), the
- * signed-in profile (ProfileProvider, from the verified session) for "You" and "Your standing",
- * and the presence count for "Online now".
+ * Wires the leaderboard to real data: GET /api/leaderboard per tab (Glicko-2 ratings; All ranks by
+ * each player's best pool, F-125), the signed-in profile (ProfileProvider, from the verified session)
+ * for "You", GET /api/leaderboard/me for "Your standing" beyond the top 50, and the presence count.
  */
 export function LeaderboardContainer() {
-    const { filter, setFilter, players, total, loading } = useLeaderboard();
     const { profile } = useProfile();
+    const { filter, setFilter, players, total, viewer, loading } = useLeaderboard(Boolean(profile));
     const { onlineCount } = usePresence();
 
-    const bucket = bucketOf(filter);
-    const rows = toRankRows(players, `rating_${bucket}`, profile?.username);
-    const standing = profile && !loading ? standingOf(rows, profile, bucket) : null;
+    const field = fieldOf(filter);
+    const rows = toRankRows(players, field, profile?.username);
+    const standing = profile && !loading ? standingOf(rows, profile, field, viewer) : null;
 
     return (
         <LeaderboardView
@@ -30,9 +30,8 @@ export function LeaderboardContainer() {
             loading={loading}
             rows={rows}
             podium={podiumOf(rows)}
-            bucket={bucket}
             standing={standing}
-            totals={totalsOf(players, `rating_${bucket}`, total)}
+            totals={totalsOf(players, field, total)}
             onlineNow={onlineCount}
             playHref={PLAY_HREF}
         />

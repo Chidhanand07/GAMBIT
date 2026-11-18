@@ -1,6 +1,5 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { RatingField } from '@/types/timeControl';
 import { createAdminClient } from './supabase';
 
 /** Starting rating in every speed bucket for a brand-new profile. */
@@ -11,7 +10,6 @@ const MAX_USERNAME_BASE_LENGTH = 15;
 
 const STATS_COLUMNS =
     'id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical';
-const LEADERBOARD_SIZE = 50;
 
 /** Columns of a freshly created profile row (signup, /api/profile/me auto-create, OAuth). */
 export function newProfileRow(id: string, username: string) {
@@ -104,23 +102,6 @@ export function updateProfile(userClient: SupabaseClient, id: string, fields: Re
 /** Inserts a new profile row (no returning select). */
 export function insertProfile(admin: SupabaseClient, row: Record<string, unknown>) {
     return admin.from('profiles').insert(row);
-}
-
-/** Top 50 profiles by one rating column, best first. */
-export function listLeaderboard(admin: SupabaseClient, field: RatingField) {
-    return admin
-        .from('profiles')
-        .select(`username, display_name, ${field}, games_played, wins, losses, draws`)
-        .order(field, { ascending: false })
-        .limit(LEADERBOARD_SIZE);
-}
-
-/**
- * How many players the leaderboard ranks: every profile (the board orders all of them by rating).
- * A HEAD count, so no rows are read.
- */
-export function countLeaderboardPlayers(admin: SupabaseClient) {
-    return admin.from('profiles').select('id', { count: 'exact', head: true });
 }
 
 /** Email local part with non-word characters replaced by `_`, max 15 chars, else "player". */

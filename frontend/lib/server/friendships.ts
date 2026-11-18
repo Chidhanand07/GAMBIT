@@ -4,8 +4,10 @@ import type { FriendRelation, FriendshipStatus } from '@/types/friendship';
 import type { ProfileSummary } from '@/types/profile';
 import { betweenUsersFilter, eitherSideFilter } from './filters';
 
-const ACCEPTED_COLUMNS =
-    'id, requester_id, addressee_id, requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, rating_rapid), addressee:profiles!friendships_addressee_id_fkey(id, username, display_name, avatar_url, rating_rapid)';
+/** A friend's card: identity and the rating in every pool (the lobby shows the selected pool's, F-125). */
+const FRIEND_COLUMNS =
+    'id, username, display_name, avatar_url, rating_bullet, rating_blitz, rating_rapid, rating_classical';
+const ACCEPTED_COLUMNS = `id, requester_id, addressee_id, requester:profiles!friendships_requester_id_fkey(${FRIEND_COLUMNS}), addressee:profiles!friendships_addressee_id_fkey(${FRIEND_COLUMNS})`;
 const PENDING_COLUMNS =
     'id, created_at, requester:profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url, rating_rapid)';
 

@@ -71,6 +71,8 @@ export const schemas = {
     newUsername: z.string().regex(new RegExp(`^[A-Za-z0-9_]{${MIN_NEW_USERNAME_LENGTH},${MAX_NEW_USERNAME_LENGTH}}$`)),
     friendAction: z.enum(['accept', 'decline']),
     ratingField: z.enum(['rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical']),
+    /** A leaderboard: one rating pool, or "All" (profiles.rating_all, F-125). */
+    leaderboardField: z.enum(['rating_all', 'rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical']),
     gamesPage: z.object({
         limit: queryInt(DEFAULT_PAGE_SIZE)
             .pipe(z.number().int().min(1))

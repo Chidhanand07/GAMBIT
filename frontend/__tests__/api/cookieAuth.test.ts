@@ -21,6 +21,7 @@ import * as friendStatus from '@/app/api/friends/status/[username]/route'
 import * as gameById from '@/app/api/games/[id]/route'
 import * as gamesActive from '@/app/api/games/active/route'
 import * as gamesCreate from '@/app/api/games/private/create/route'
+import * as leaderboardMe from '@/app/api/leaderboard/me/route'
 import * as notifRead from '@/app/api/notifications/read/route'
 import * as notifications from '@/app/api/notifications/route'
 import * as profileGames from '@/app/api/profile/[username]/games/route'
@@ -58,6 +59,7 @@ const PROTECTED: Case[] = [
     ['GET /api/games/[id]', () => gameById.GET(req(`/api/games/${GAME}`), { params: Promise.resolve({ id: GAME }) })],
     ['PATCH /api/games/[id]', () => gameById.PATCH(req(`/api/games/${GAME}`, { method: 'PATCH', body: { draw_offer: true } }), { params: Promise.resolve({ id: GAME }) })],
     ['GET /api/games/active', () => gamesActive.GET()],
+    ['GET /api/leaderboard/me', () => leaderboardMe.GET(req('/api/leaderboard/me?field=rating_all'))],
     ['POST /api/games/private/create', () => gamesCreate.POST(req('/api/games/private/create', { method: 'POST', body: { timeControl: '10' } }))],
     ['PUT /api/notifications/read', () => notifRead.PUT()],
     ['GET /api/notifications', () => notifications.GET()],
@@ -265,6 +267,7 @@ describe('route handlers that read identity are always dynamic (NX-11)', () => {
         ['games/[id]', gameById],
         ['games/active', gamesActive],
         ['games/private/create', gamesCreate],
+        ['leaderboard/me', leaderboardMe],
         ['notifications/read', notifRead],
         ['notifications', notifications],
         ['profile/[username]', profileByName],

@@ -34,6 +34,14 @@ describe('GET /api/friends', () => {
         expect(call.ops).toEqual(expect.arrayContaining([['or', `requester_id.eq.${uid('me')},addressee_id.eq.${uid('me')}`], ['eq', 'status', 'accepted']]))
     })
 
+    test('each friend carries their rating in every pool [F-125]', async () => {
+        await listFriends(req('/api/friends'))
+        const columns = String(db.op(db.callsFor('friendships')[0], 'select')![0])
+        for (const pool of ['bullet', 'blitz', 'rapid', 'classical']) {
+            expect(columns.match(new RegExp(`rating_${pool}`, 'g'))).toHaveLength(2)
+        }
+    })
+
     test('?userId lists another user\'s friends (public profile)', async () => {
         await listFriends(req(`/api/friends?userId=${uid('other')}`))
         expect(db.callsFor('friendships')[0].ops).toContainEqual(['or', `requester_id.eq.${uid('other')},addressee_id.eq.${uid('other')}`])
