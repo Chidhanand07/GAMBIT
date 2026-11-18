@@ -1,5 +1,6 @@
 // Client-side fetch helpers for the /api routes the lobby page calls.
 // Same URL, method, headers and body as the original inline page code.
+import type { LiveGame } from '@/types/liveGame';
 import type { ActiveGame, PrivateColor } from '@/types/lobby';
 import type { TimeControl } from '@/types/timeControl';
 
@@ -28,5 +29,12 @@ export async function createPrivateGame(body: CreatePrivateGameBody): Promise<Cr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
+    return res.json();
+}
+
+/** GET /api/games/live. Rejects on a non-ok response, so the caller keeps what it had. */
+export async function fetchLiveGames(): Promise<LiveGame[]> {
+    const res = await fetch('/api/games/live');
+    if (!res.ok) throw new Error(`Live games request failed (${res.status})`);
     return res.json();
 }

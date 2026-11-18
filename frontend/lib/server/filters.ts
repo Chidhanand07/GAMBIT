@@ -33,3 +33,8 @@ export function betweenUsersFilter(firstId: string, secondId: string): string {
     const b = requireUuid(secondId);
     return `and(requester_id.eq.${a},addressee_id.eq.${b}),and(requester_id.eq.${b},addressee_id.eq.${a})`;
 }
+
+/** Games whose clock deadline is unset or still ahead of `now` (an ISO time from the server's clock). */
+export function liveDeadlineFilter(now: Date): string {
+    return `clock_deadline.is.null,clock_deadline.gt.${now.toISOString()}`;
+}
