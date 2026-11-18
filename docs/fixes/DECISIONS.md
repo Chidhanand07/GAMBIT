@@ -112,6 +112,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-093](#f-093) | Unused axios removed; nanoid stays on 3.x | L4 | SUPPLY-CHAIN |
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 | [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
+| [F-096](#f-096) | Visual parity harness: Playwright + pixelmatch, five widths, shared masks, PARITY.md | V2-A1 | PARITY-HARNESS |
 | [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
 | [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
 
@@ -2834,4 +2835,44 @@ the harness's live game is a real private-invite game played on a local game ser
 - **Tests.** `seed-data.test.js` (counters agree with games, winner matches result, mating lines are
   wins for the mating side, UUIDs unique and valid, reserved domain), `stack.test.js` (test values and
   local ports override the inherited environment).
+
+## F-096
+
+**A committed visual parity harness: Playwright (Chromium) screenshots of each app page and its
+mockup at 375, 768, 1024, 1440 and 1920 px, diffed with pixelmatch; target at most 0.5 %.**
+
+- **Context.** The redesign must match `design/design/*.dc.html` at five widths. Until now parity was
+  checked by eye from headless-Chrome screenshots. The owner asked for a repeatable, committed check.
+- **Options.** (a) Playwright's own `toHaveScreenshot`: compares against committed baselines of the
+  *same* page, not against a second page, and its threshold is per-test pixel counts. (b) A bespoke
+  Puppeteer script: no test runner, fixtures, web-server management or projects. (c) `@playwright/test`
+  driving both pages, with `pixelmatch` + `pngjs` for the comparison. Chosen: (c). Playwright gives
+  projects (one per width), `webServer` (next dev, and the game stack of F-098), storageState for signed-
+  in pages, multi-context fixtures for a two-player game and built-in screenshot masks; pixelmatch gives
+  an anti-aliasing-aware count and a diff image. Versions pinned exactly (`@playwright/test` 1.64.1,
+  `pixelmatch` 8.0.0, `pngjs` 7.0.0, `@types/pngjs` 6.0.5): all older than two weeks; 1.65.x was not.
+- **Comparison.** Full-page screenshots at device scale 1, `reducedMotion: reduce` (the mockups and the
+  app both switch motion off, and the splash is not shown), animations disabled, caret hidden, the
+  Next.js dev overlay hidden. Different sizes are padded onto one canvas with a colour that always
+  differs, so a height or width mismatch counts. pixelmatch threshold 0.1 (its default). Each result
+  lists the three 160 px grid cells with the highest share of differing pixels ("worst regions").
+- **Masks.** Data-driven regions are painted `#FF00FF` on both sides by Playwright's `mask`. A mask is
+  one selector per side; where the app and the mockup share accessible names, text or structure (the
+  header's "Account menu, …" button, "N online", "Welcome back, …", the "Live games" list, clocks,
+  "@handle", the rankings rows) one Playwright selector serves both, so no app component needed a
+  `data-parity-mask` attribute; `appMaskSelector()` falls back to `[data-parity-mask="<key>"]` for a
+  region with no such hook. A selector that matches nothing is reported, not fatal. Masks cover only
+  the data, so the layout around them still counts; exceptions are documented in `config/pages.ts`
+  (Home signed out masks the header, because Home.dc.html draws the signed-in header; the Profile
+  Games/Stats/Friends tabs compare only the panels' frames, because everything inside is data).
+- **States.** Each page has a default state plus scenario steps (click) for dialogs, menus, panels,
+  focus mode and every Profile and Settings tab. Header menus are captured once, on the lobby.
+- **Output.** `PARITY_OUT_DIR` (default `<repo>/design`, which is untracked by the owner's choice):
+  `PARITY.md` (page × state × width table, failures worst first with diff image paths and worst
+  regions, mask misses, pending reasons) and `parity/` (app, mockup and diff PNGs, one JSON per case).
+  CI points it at a workspace folder and uploads it (F-099). `PARITY_MOCKUP_DIR` locates the mockups.
+- **Without the TEST project** (F-097) only the signed-out pages run; signed-in cases still capture
+  the mockup and are reported as "pending". One worker: the seeded accounts play one game at a time.
+- **Tests.** Jest: `__tests__/e2e/parityCanvas.test.ts` (padding, percentages, worst regions),
+  `parityReport.test.ts` (PARITY.md), `parityPages.test.ts` (page list, tabs, roles, masks).
 
