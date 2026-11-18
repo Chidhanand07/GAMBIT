@@ -138,6 +138,7 @@ export function statFacts(stats: ProfileStats): Fact[] {
     const facts: Fact[] = [];
     if (f.averageAccuracy !== null) facts.push({ k: 'Average accuracy', v: `${f.averageAccuracy}%` });
     facts.push({ k: 'Longest win streak', v: `${f.longestWinStreak} ${f.longestWinStreak === 1 ? 'game' : 'games'}` });
+    if (typeof f.bestWin === 'number') facts.push({ k: 'Best win', v: `vs ${f.bestWin}` });
     if (f.mostActiveDay) facts.push({ k: 'Most active day', v: f.mostActiveDay });
     return facts;
 }

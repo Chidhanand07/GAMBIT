@@ -2,6 +2,7 @@ import 'server-only';
 import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
+import { bestWins, overallBestWin } from './gameFacts';
 import { ratingHistory, type SnapshotGameRow } from './ratingHistory';
 
 /** Rating reported for a bucket whose column is null. */
@@ -106,6 +107,7 @@ function mostActiveDay(games: StatsGameRow[], profileId: string): string | null 
 
 /** Response body of GET /api/profile/[username]/stats. */
 export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[]) {
+    const wins = bestWins(games, profile.id);
     return {
         total: profile.games_played ?? 0,
         wins: profile.wins ?? 0,
@@ -120,9 +122,11 @@ export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[
         byCategory: statsByCategory(games, profile.id),
         byColour: statsByColour(games, profile.id),
         ratingHistory: ratingHistory(games, profile.id),
+        bestWins: wins,
         facts: {
             averageAccuracy: averageAccuracy(games, profile.id),
             longestWinStreak: longestWinStreak(games, profile.id),
+            bestWin: overallBestWin(wins),
             mostActiveDay: mostActiveDay(games, profile.id),
         },
     };

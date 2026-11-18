@@ -118,6 +118,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
 | [F-120](#f-120) | Rated games store both ratings before/after; only `apply_game_result` writes them | B1 | RATING-SNAPSHOT |
 | [F-121](#f-121) | Rating chart, Peak and Low from the stored snapshots (supersedes F-082) | B1 | RATING-HISTORY |
+| [F-122](#f-122) | Best win = highest opponent rating at the time, per pool, from the snapshots | B1 | BEST-WIN |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2946,3 +2947,16 @@ not a required check.**
   for rated games from now on and earlier games have none (they cannot be recomputed, F-120).
 - **Cost.** No extra query: the stats route already reads the player's finished games; it now also
   selects the snapshot columns.
+
+## F-122
+
+**"Best win" is the highest opponent rating at the time of a win, per pool, from the snapshots
+(B1 item 3).**
+
+- **Decision.** `lib/server/gameFacts.ts` reads the player's won games that carry a rating snapshot
+  (F-120) and keeps, per pool, the opponent's rating *before* the game. The stats route returns
+  `bestWins` per pool and `facts.bestWin` (the best over all pools), shown as the "Best win · vs N"
+  tile in the mockup's order. The opponent's current rating is not used: it says nothing about the
+  game, and it changes after it.
+- **Old games.** Without a snapshot the opponent's rating at the time is unknown, so those wins are
+  not candidates; the tile is left out until a recorded win exists.

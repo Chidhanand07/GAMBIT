@@ -89,6 +89,15 @@ describe('colourRows and statFacts', () => {
             { k: 'Longest win streak', v: '4 games' },
         ]);
     });
+    test('best win as "vs <rating>" after the win streak, only when known [F-122]', () => {
+        const facts = { averageAccuracy: null, longestWinStreak: 2, mostActiveDay: 'Monday' };
+        expect(statFacts({ facts: { ...facts, bestWin: 1250 } })).toEqual([
+            { k: 'Longest win streak', v: '2 games' },
+            { k: 'Best win', v: 'vs 1250' },
+            { k: 'Most active day', v: 'Monday' },
+        ]);
+        expect(statFacts({ facts: { ...facts, bestWin: null } }).map((f) => f.k)).not.toContain('Best win');
+    });
 });
 
 describe('gameRowDetail [F-104]', () => {

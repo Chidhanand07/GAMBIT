@@ -213,7 +213,26 @@ describe('GET /api/profile/[username]/stats', () => {
             white: { played: 3, wins: 2, losses: 1, draws: 0 },
             black: { played: 1, wins: 1, losses: 0, draws: 0 },
         })
-        expect(body.facts).toEqual({ averageAccuracy: 80, longestWinStreak: 2, mostActiveDay: 'Tuesday' })
+        expect(body.facts).toEqual({ averageAccuracy: 80, longestWinStreak: 2, bestWin: null, mostActiveDay: 'Tuesday' })
+    })
+
+    test('best win per pool and overall: the highest opponent rating at the time among wins [F-122]', async () => {
+        const p = uid('p')
+        const x = uid('x')
+        db.queue('profiles', { data: { id: p, games_played: 4, wins: 3, losses: 1, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                { time_control: '3', white_id: p, black_id: x, winner_id: p, rating_category: 'blitz', black_rating_before: 1250.4 },
+                { time_control: '3', white_id: x, black_id: p, winner_id: p, rating_category: 'blitz', white_rating_before: 1180 },
+                { time_control: '3', white_id: p, black_id: x, winner_id: x, rating_category: 'blitz', black_rating_before: 1900 },
+                { time_control: '10', white_id: x, black_id: p, result: 'black', rating_category: 'rapid', white_rating_before: 1376 },
+                { time_control: '1', white_id: p, black_id: x, winner_id: p },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.bestWins).toEqual({ bullet: null, blitz: 1250, rapid: 1376, classical: null })
+        expect(body.facts.bestWin).toBe(1376)
     })
 
     test('404 for an unknown user', async () => {

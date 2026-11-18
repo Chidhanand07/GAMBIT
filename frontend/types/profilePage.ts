@@ -51,6 +51,8 @@ export interface ProfileFacts {
     /** Mean analysed accuracy (%), null when no game was analysed. */
     averageAccuracy: number | null;
     longestWinStreak: number;
+    /** Highest opponent rating (at the time) the player beat, over every pool; null without one (F-122). */
+    bestWin?: number | null;
     /** English weekday name (UTC), null without games. */
     mostActiveDay: string | null;
 }
@@ -69,5 +71,7 @@ export interface ProfileStats {
      * oldest first (F-121). Empty for a pool without recorded games (games rated before F-120 have none).
      */
     ratingHistory?: Partial<Record<SpeedBucket, number[]>>;
+    /** Per pool, the highest opponent rating (at the time) the player beat; null without one (F-122). */
+    bestWins?: Partial<Record<SpeedBucket, number | null>>;
     facts?: ProfileFacts;
 }
