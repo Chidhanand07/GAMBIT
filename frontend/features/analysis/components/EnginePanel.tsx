@@ -1,11 +1,10 @@
 import { Icon } from '@/components/ui/Icon';
+import { InfoRow } from '@/components/ui/InfoRow';
 import { ANALYSIS_DEPTH } from '@/lib/api/analysis';
 import { cn } from '@/lib/design/cn';
 import { formatEvaluation } from '../evaluation';
 import type { EngineAnalysis } from '../types';
 
-/** Scores within ±0.2 pawns are shown as neutral. */
-const NEUTRAL_BAND = 0.2;
 const PV_SHOWN = 8;
 
 export const ENGINE_NOTES = {
@@ -13,11 +12,6 @@ export const ENGINE_NOTES = {
     on: 'Engine on. Evaluating the current position.',
     failed: 'Engine unavailable. It will try again on the next move.',
 } as const;
-
-function scoreTone(score: number) {
-    if (score > NEUTRAL_BAND) return 'text-success';
-    return score < -NEUTRAL_BAND ? 'text-danger' : 'text-ink';
-}
 
 function EngineSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
     return (
@@ -41,26 +35,17 @@ function EngineSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
     );
 }
 
-/** The current evaluation: score (White's view), best move, depth and the principal variation. */
+/**
+ * The current evaluation as "Game info" rows (Game.dc.html, the design's label / value pattern):
+ * score from White's view, best move, search depth and, when the engine sends one, the line.
+ */
 function Readout({ data }: { data: EngineAnalysis }) {
     return (
-        <div className="flex flex-col gap-1 rounded-12 border-1 border-line bg-bg-base px-[14px] py-3">
-            <div className="flex items-baseline justify-between gap-3">
-                <span className="flex items-baseline gap-3">
-                    <span className={cn('font-mono text-[18px] font-bold', scoreTone(data.score))}>
-                        {formatEvaluation(data)}
-                    </span>
-                    <span className="text-[14px] text-ink-muted">
-                        Best <span className="font-mono text-ink">{data.best_move}</span>
-                    </span>
-                </span>
-                <span className="font-mono text-[13px] text-ink-faint">{`d${ANALYSIS_DEPTH}`}</span>
-            </div>
-            {data.pv && (
-                <span className="font-mono text-[13px] text-ink-muted [overflow-wrap:anywhere]">
-                    {data.pv.split(' ').slice(0, PV_SHOWN).join(' ')}
-                </span>
-            )}
+        <div aria-label="Engine evaluation" role="group" className="flex flex-col">
+            <InfoRow label="Evaluation" value={formatEvaluation(data)} />
+            <InfoRow label="Best move" value={data.best_move} />
+            <InfoRow label="Depth" value={String(ANALYSIS_DEPTH)} />
+            {data.pv && <InfoRow label="Line" value={data.pv.split(' ').slice(0, PV_SHOWN).join(' ')} wrap />}
         </div>
     );
 }

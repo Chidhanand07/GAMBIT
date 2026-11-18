@@ -213,9 +213,12 @@ describe('engine', () => {
         }]])
         // eval bar (was: its printed label) + engine readout
         expect(screen.getByRole('img', { name: 'Evaluation bar: +0.3' })).toBeInTheDocument()
+        // [F-103] was: a free-form readout with a "d18" tag — now "Game info" rows (Game.dc.html)
+        const readout = screen.getByRole('group', { name: 'Engine evaluation' })
+        const rows = Array.from(readout.children).map(r => Array.from(r.children).map(c => c.textContent))
+        expect(rows).toEqual([['Evaluation', '+0.3'], ['Best move', 'e7e5'], ['Depth', '18']])
         expect(screen.getByText('+0.3')).toBeInTheDocument()
         expect(screen.getByText('e7e5')).toBeInTheDocument()
-        expect(screen.getByText('d18')).toBeInTheDocument()
         expect(screen.queryByText(/^[a-h][1-8][a-h][1-8] [a-h][1-8]/)).toBeNull()
         // new position re-queries
         playE4()
@@ -225,7 +228,7 @@ describe('engine', () => {
         // toggle off clears data
         click(engineSwitch())
         expect(screen.getByText('Enable engine to evaluate the current position.')).toBeInTheDocument()
-        expect(screen.queryByText('d18')).toBeNull()
+        expect(screen.queryByRole('group', { name: 'Engine evaluation' })).toBeNull()
         expect(screen.getByRole('img', { name: 'Evaluation bar: no evaluation' })).toBeInTheDocument()
     })
 

@@ -120,6 +120,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-100](#f-100) | Board coordinates are off by default: the Game and Analysis mockups win over the Settings sample row | v2 | A2-1 |
 | [F-101](#f-101) | Sign in with "Email or username": server-side lookup, one failure message, one timing class | v2 | A2-2 |
 | [F-102](#f-102) | Game screen = Game.dc.html: sound lives in Settings, no bell in a game, no "You" chip, typed slots for watchers / rating risk / country | v2 | A2-3 |
+| [F-103](#f-103) | Analysis engine readout rebuilt from the design's "Game info" rows; no Reset (the mockup has none) | v2 | A2-4 |
 
 ---
 
@@ -2486,3 +2487,23 @@ the Dependabot part of F-057).**
   moves card. History navigation (clicking a move, the "Viewing move … Return to live" notice)
   adds no control to the layout and stays. Spectators get the read-only chat, an "A vs B" title
   and a "Spectating" pill. Nothing the mockup shows had been removed, so nothing was restored.
+
+## F-103
+
+**Analysis: the engine readout is kept and rebuilt from the design's label / value rows (A2-4).**
+
+- **Context.** `Analysis.dc.html` shows the engine header (Stockfish 16, note, switch), the
+  evaluation bar, the move list and the FEN; it has no engine-on output state. The app showed a
+  bespoke readout card (coloured score, "Best", a "d18" tag, the line).
+- **Search of the nine mockups for a matching component.** `Game.dc.html` "Game info" has the
+  exact pattern for named values: a hairline row, muted label left, JetBrains Mono bold value
+  right (Move, Captures, Material, Time control, Your clock). Profile, Leaderboard and Settings
+  have stat tiles and setting rows, which fit worse (tiles are for totals, setting rows hold
+  controls).
+- **Decision.** Keep the readout, rebuilt as those rows: Evaluation (`+0.3`, `M3`), Best move,
+  Depth, and Line when the engine sends one. The row is now a shared primitive,
+  `components/ui/InfoRow`, used by the game's info card and the analysis panel (tokens only; the
+  success/danger score colours went, the design's rows have none). The evaluation bar stays the
+  visual of the score.
+- **Reset.** The mockup has no Reset button, so the earlier choice stands: the Import tab's
+  "Starting Position" preset is the way back to a fresh board.
