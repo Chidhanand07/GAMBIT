@@ -7,6 +7,7 @@ import { Chess } from 'chess.js';
 import { useSocket } from '@/components/SocketProvider';
 import { useProfile } from '@/components/ProfileProvider';
 import { useToast } from '@/components/Toast';
+import { useUserSettings } from '@/features/settings/SettingsProvider';
 import type { GameWithPlayers } from '@/types/game';
 import { createInitialGameState, gameReducer } from '../state/gameReducer';
 import { bindGameCommands } from './gameCommands';
@@ -33,12 +34,13 @@ export function useGameController(gameId: string) {
     const socket = useSocket();
     const { profile: myProfile } = useProfile();
     const { toast } = useToast();
+    const { autoQueen, confirmResignDraw } = useUserSettings().settings;
     const notify = (message: string) => toast(message, 'error');
     const [state, dispatch] = useReducer(gameReducer, undefined, createInitialGameState);
     const { moveListRef, ...refs } = useGameRefs();
     const { chessRef, clockSyncedRef, lastProcessedFenRef } = refs;
     const disconnect = useOpponentDisconnect();
-    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify });
+    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify, autoQueen });
     const { myColor, soundOn, gameOver, gameData } = state;
     const { markDisconnected, markReconnected, opponentDisconnected } = disconnect;
 
@@ -64,7 +66,7 @@ export function useGameController(gameId: string) {
         disconnect,
         liveChess: chessRef.current,
         moveListRef,
-        ...bindGameCommands({ socket, myProfile, gameId, state, dispatch, board, router, notify }),
+        ...bindGameCommands({ socket, myProfile, gameId, state, dispatch, board, router, notify, confirmResignDraw }),
     };
 }
 

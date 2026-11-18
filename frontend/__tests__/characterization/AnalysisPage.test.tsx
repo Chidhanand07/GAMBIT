@@ -14,6 +14,8 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
 import AnalysisPage from '@/app/analysis/page'
+import { DEFAULT_SETTINGS } from '@/features/settings/model'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 
 const ENGINE_URL = 'http://127.0.0.1:3001/api/analysis/engine'
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
@@ -68,6 +70,24 @@ describe('initial render', () => {
         expect(screen.getByRole('button', { name: 'Analysis' })).toHaveAttribute('aria-pressed', 'true')
         expect(fenText()).toBe(START_FEN)
         expect(fetchMock).not.toHaveBeenCalled()
+    })
+})
+
+describe('board preferences (Settings)', () => {
+    test('coordinates, legal-move dots and the last-move tint follow the settings (the board hard-codes none of them)', () => {
+        const stored = { ...DEFAULT_SETTINGS, showCoordinates: false, highlightLegalMoves: false, highlightLastMove: false }
+        render(
+            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+                <AnalysisPage />
+            </SettingsProvider>,
+        )
+        expect(sq('a1').textContent).toBe('')
+        click(sq('e2'))
+        expect(hasDot('e4')).toBe(false)
+        click(sq('e4'))
+        expect(fenText()).toBe(AFTER_E4)
+        expect(mark('e4')).toBeNull()
+        expect(mark('e2')).toBeNull()
     })
 })
 

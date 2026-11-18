@@ -20,10 +20,13 @@ jest.mock('@/lib/sounds', () => ({
     playCheckSound: jest.fn(),
     playGameEndSound: jest.fn(),
     playGameStartSound: jest.fn(),
+    setSoundsEnabled: jest.fn(),
 }))
 import * as sounds from '@/lib/sounds'
 
 import ComputerPage from '@/app/offline/page'
+import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
@@ -66,6 +69,17 @@ function start(opts: { difficulty?: string; color?: string } = {}) {
     const utils = render(<ComputerPage />)
     if (opts.difficulty) click(screen.getByRole('button', { name: new RegExp(`^${opts.difficulty}`) }))
     if (opts.color) click(screen.getByRole('button', { name: new RegExp(opts.color) }))
+    click(screen.getByRole('button', { name: 'Start Game' }))
+    return utils
+}
+/** Start a game under a SettingsProvider holding `changes` over the default settings. */
+function startWithSettings(changes: Partial<UserSettings>) {
+    const stored = { ...DEFAULT_SETTINGS, ...changes }
+    const utils = render(
+        <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+            <ComputerPage />
+        </SettingsProvider>,
+    )
     click(screen.getByRole('button', { name: 'Start Game' }))
     return utils
 }
@@ -202,6 +216,32 @@ describe('playing as white', () => {
         expect(screen.getByText('You win by checkmate!')).toBeInTheDocument()
         await flush(1000)
         expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+})
+
+describe('board preferences (Settings)', () => {
+    test('defaults: legal-move dots and the last-move tint after MAVERICK replies', async () => {
+        const { container } = start()
+        click(square(container, 'e2'))
+        expect(container.querySelectorAll('[data-dot]')).toHaveLength(2)
+        click(square(container, 'e4'))
+        await flush(250)
+        await flush(400)
+        const last = Array.from(container.querySelectorAll('[data-mark="last"]')).map(m => m.parentElement!.getAttribute('data-square'))
+        expect(last).toEqual(['e7', 'e5'])
+    })
+
+    test('switched off: no dots, no last-move tint, no coordinates; the theme colours the squares', async () => {
+        const { container } = startWithSettings({ highlightLegalMoves: false, highlightLastMove: false, showCoordinates: false, boardTheme: 'slate' })
+        expect(square(container, 'a1').textContent).toBe('')
+        expect(square(container, 'a1').className).toContain('bg-board-slate-dark')
+        click(square(container, 'e2'))
+        expect(container.querySelectorAll('[data-dot]')).toHaveLength(0)
+        click(square(container, 'e4'))
+        await flush(250)
+        await flush(400)
+        expect(pieceOn(container, 'e5')).toBe('bp')
+        expect(container.querySelectorAll('[data-mark="last"]')).toHaveLength(0)
     })
 })
 

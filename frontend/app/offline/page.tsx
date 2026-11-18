@@ -6,6 +6,9 @@ import { parseComputerSetup } from '@/features/offline/setupParams';
 import { Board } from '@/components/chess/Board';
 import { MoveList } from '@/components/chess/MoveList';
 import { GameLayout } from '@/features/game/components/GameLayout';
+import { PromotionPicker } from '@/features/game/components/PromotionPicker';
+import { preferredBoardProps } from '@/features/settings/boardProps';
+import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import { checkedKingSquare } from '@/lib/chess/board';
 import { useComputerGame } from '@/features/offline/hooks/useComputerGame';
 import { statusOf } from '@/features/offline/game';
@@ -29,6 +32,7 @@ function ComputerGame() {
     const preset = useMemo(() => parseComputerSetup(searchParams), [searchParams]);
     const { phase, difficulty, setDifficulty, colorChoice, setColorChoice, startGame, backToSetup, board } =
         useComputerGame(preset);
+    const prefs = useBoardPrefs();
     const { game, playerColor, moveHistory, thinking, gameOver, engineError } = board;
 
     if (phase === 'setup') {
@@ -65,12 +69,15 @@ function ComputerGame() {
                         fen={game.fen()}
                         orientation={playerColor === 'w' ? 'white' : 'black'}
                         selectedSquare={board.selectedSquare as Square | null}
-                        legalDestinations={board.legalMoves as Square[]}
-                        lastMove={board.lastMove as { from: Square; to: Square } | null}
+                        {...preferredBoardProps(prefs, {
+                            lastMove: board.lastMove as { from: Square; to: Square } | null,
+                            legalDestinations: board.legalMoves as Square[],
+                        })}
                         checkSquare={checkedKingSquare(game)}
                         onSquareClick={board.handleSquareClick}
-                        showCoordinates
-                    />
+                    >
+                        {board.pendingPromotion && <PromotionPicker color={playerColor} onSelect={board.promote} />}
+                    </Board>
                     <OfflineBar {...bars} position="bottom" />
                 </>
             }

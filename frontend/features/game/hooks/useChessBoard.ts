@@ -18,6 +18,8 @@ interface Options {
     chessRef: MutableRefObject<Chess>;
     /** Shows the player why the server refused a move (the board itself is resynced by the server). */
     notify?: (message: string) => void;
+    /** Promote straight to a queen instead of asking (the auto-queen setting). */
+    autoQueen?: boolean;
 }
 
 export interface ChessBoardControls {
@@ -82,7 +84,7 @@ export function useChessBoard(opts: Options): ChessBoardControls {
     const commitMove = (from: Square, to: Square, promotion: string) => commitMoveWith(opts, from, to, promotion);
 
     const tryMoveTo = (from: Square, sq: Square) => {
-        if (isPromotionMove(chessRef.current.get(from), sq)) {
+        if (!opts.autoQueen && isPromotionMove(chessRef.current.get(from), sq)) {
             dispatch({ type: 'promotionPending', move: { from, to: sq } });
             return;
         }

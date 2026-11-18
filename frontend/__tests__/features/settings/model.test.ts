@@ -1,5 +1,6 @@
 import { boardPrefsOf, DEFAULT_SETTINGS, parseSettings } from '@/features/settings/model';
 import { createLocalSettingsStore, SETTINGS_STORAGE_KEY } from '@/features/settings/store';
+import { preferredBoardProps } from '@/features/settings/boardProps';
 
 describe('parseSettings', () => {
     test('anything that is not an object reads as the defaults', () => {
@@ -61,3 +62,29 @@ describe('createLocalSettingsStore', () => {
         expect(() => blocked.save(DEFAULT_SETTINGS)).not.toThrow();
     });
 });
+
+describe('preferredBoardProps', () => {
+    const lastMove = { from: 'e2', to: 'e4' } as const
+    const legalDestinations = ['e3', 'e4'] as const
+
+    test('theme, animation and coordinates always; marks only while their switch is on', () => {
+        const on = preferredBoardProps(boardPrefsOf(DEFAULT_SETTINGS), { lastMove, legalDestinations })
+        expect(on).toEqual({ theme: 'maple', animate: true, showCoordinates: true, lastMove, legalDestinations })
+        const off = preferredBoardProps(
+            boardPrefsOf({
+                ...DEFAULT_SETTINGS,
+                boardTheme: 'slate',
+                pieceAnimation: 'off',
+                showCoordinates: false,
+                highlightLastMove: false,
+                highlightLegalMoves: false,
+            }),
+            { lastMove, legalDestinations },
+        )
+        expect(off).toEqual({ theme: 'slate', animate: false, showCoordinates: false, lastMove: null, legalDestinations: undefined })
+    })
+
+    test('no marks given: no last move', () => {
+        expect(preferredBoardProps(boardPrefsOf(DEFAULT_SETTINGS)).lastMove).toBeNull()
+    })
+})

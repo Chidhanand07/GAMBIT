@@ -4,6 +4,8 @@
 // section hands plain props to the presentational components.
 import { Board } from '@/components/chess/Board';
 import { MoveList } from '@/components/chess/MoveList';
+import { preferredBoardProps } from '@/features/settings/boardProps';
+import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import type { GameScreen } from '../hooks/useGameScreen';
 import { ChatCard } from './ChatCard';
 import { ControlsCard } from './ControlsCard';
@@ -26,6 +28,7 @@ export function gameActions({ state, controls }: GameScreen): GameActionsProps {
 export function BoardArea({ screen }: { screen: GameScreen }) {
     const { state, board, disconnect, view } = screen;
     const pending = state.pendingPromotion;
+    const prefs = useBoardPrefs();
     return (
         <>
             <StatusBanners
@@ -42,8 +45,7 @@ export function BoardArea({ screen }: { screen: GameScreen }) {
                 fen={screen.displayFen}
                 orientation={state.flipped ? 'black' : 'white'}
                 selectedSquare={state.selectedSq}
-                legalDestinations={state.legalDests}
-                lastMove={state.lastMove}
+                {...preferredBoardProps(prefs, { lastMove: state.lastMove, legalDestinations: state.legalDests })}
                 checkSquare={screen.checkSquare}
                 onSquareClick={view.isMyTurn ? board.handleSquareClick : undefined}
             >

@@ -1,6 +1,8 @@
 import type { Square } from 'chess.js';
 import { Board } from '@/components/chess/Board';
 import { gridPosition } from '@/components/chess/boardModel';
+import { preferredBoardProps } from '@/features/settings/boardProps';
+import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import type { MoveClassification } from '@/types/game';
 import { CLASS_META, moveHighlights } from '../review';
 
@@ -34,9 +36,15 @@ export function ReviewBoard({ fen, flipped, curMove }: ReviewBoardProps) {
     const lastMove = lastFrom && lastTo ? { from: lastFrom as Square, to: lastTo as Square } : null;
     const rings = [bestFrom, bestTo].filter((sq): sq is string => !!sq && sq !== lastFrom && sq !== lastTo);
     const badge = curMove ? CLASS_META[curMove.classification] : undefined;
+    const prefs = useBoardPrefs();
     return (
         <div className="relative">
-            <Board fen={fen} orientation={flipped ? 'black' : 'white'} lastMove={lastMove} label="Review board">
+            <Board
+                fen={fen}
+                orientation={flipped ? 'black' : 'white'}
+                {...preferredBoardProps(prefs, { lastMove })}
+                label="Review board"
+            >
                 {rings.map((sq) => (
                     <BestMoveRing key={sq} square={sq as Square} flipped={flipped} />
                 ))}

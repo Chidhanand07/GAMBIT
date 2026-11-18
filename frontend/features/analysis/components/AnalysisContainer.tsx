@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Board } from '@/components/chess/Board';
+import { preferredBoardProps } from '@/features/settings/boardProps';
+import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import { useAnalysisBoard } from '../hooks/useAnalysisBoard';
 import { useEngineAnalysis } from '../hooks/useEngineAnalysis';
 import { useImportForm } from '../hooks/useImportForm';
@@ -43,6 +45,7 @@ export function AnalysisContainer() {
     const form = useImportForm({ loadPosition: board.loadPosition, loadPgn: board.loadPgn });
     const { copied, copy } = useCopyLabel();
     const last = moveHistory[currentMoveIndex];
+    const prefs = useBoardPrefs();
 
     const analysis = (
         <>
@@ -83,10 +86,11 @@ export function AnalysisContainer() {
                     fen={fen}
                     orientation={flipped ? 'black' : 'white'}
                     selectedSquare={board.selectedSquare}
-                    legalDestinations={board.legalTargets}
-                    lastMove={last ? { from: last.from, to: last.to } : null}
+                    {...preferredBoardProps(prefs, {
+                        lastMove: last ? { from: last.from, to: last.to } : null,
+                        legalDestinations: board.legalTargets,
+                    })}
                     onSquareClick={board.handleSquareClick}
-                    showCoordinates
                     frame="analysis"
                     label={`Analysis board, ${game.turn() === 'w' ? 'white' : 'black'} to move`}
                 />

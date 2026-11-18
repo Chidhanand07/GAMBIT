@@ -15,6 +15,8 @@ import { jsonResponse } from './fakeSocket'
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, className }: any) => <a href={href} className={className}>{children}</a> }))
 
 import GameResultPage from '@/app/game/[id]/result/page'
+import { DEFAULT_SETTINGS } from '@/features/settings/model'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 import { routeParams } from '../helpers/params'
 
 const WHITE_CLS = [
@@ -207,6 +209,21 @@ describe('review screen', () => {
         expect(screen.getByText('0 / 5')).toBeInTheDocument()
         click(flip)
         expect(pieceOn(container, 'e1', true)).toBe('wk')
+    })
+
+    test('board preferences: no last-move tint or coordinates when switched off; the theme colours the squares', async () => {
+        const stored = { ...DEFAULT_SETTINGS, highlightLastMove: false, showCoordinates: false, boardTheme: 'walnut' as const }
+        const { container } = render(
+            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+                <GameResultPage params={routeParams({ id: 'g1' })} />
+            </SettingsProvider>,
+        )
+        await settle()
+        click(ctrls()[2])
+        expect(screen.getByText('1 / 5')).toBeInTheDocument()
+        expect(container.querySelector('[data-mark="last"]')).toBeNull()
+        expect(square(container, 'a1').textContent).toBe('')
+        expect(square(container, 'a1').className).toContain('bg-board-walnut-dark')
     })
 
     test('move list pills seek to their ply', async () => {

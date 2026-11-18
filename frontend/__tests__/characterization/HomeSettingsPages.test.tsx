@@ -1,7 +1,7 @@
 /**
  * Characterization tests (fe-misc, PR 16 track) for app/page.tsx (landing) and app/settings/page.tsx.
  */
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
 const push = jest.fn()
@@ -253,6 +253,20 @@ describe('settings page', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Resign game' }))
         fireEvent.click(screen.getByRole('button', { name: 'Yes' }))
         expect(screen.getByText('You resigned. Game over.')).toBeInTheDocument()
+    })
+
+    test('[REDESIGN-INTEGRATION] only settings that work are offered: no Notifications/Privacy tabs or unbacked account, gameplay or profile controls', () => {
+        render(<SettingsPage />)
+        const sections = within(screen.getByRole('group', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
+        expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Account'])
+        const unbacked = /notification|privacy|two-factor|2fa|sign-in emails|delete account|change email|premove|takeback|move by|piece set|pronoun|playing style|experience|favou?rite|website|city|visib/i
+        for (const section of sections) {
+            fireEvent.click(screen.getByRole('button', { name: section! }))
+            const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]
+            const names = controls.map(c => `${c.getAttribute('aria-label') ?? ''} ${c.textContent ?? ''} ${(c as HTMLInputElement).placeholder ?? ''}`)
+            expect(names.filter(n => unbacked.test(n))).toEqual([])
+            expect(document.body.textContent).not.toMatch(/two-factor|delete account|change email|premove|pronouns/i)
+        }
     })
 
     test('account tab shows read-only username and rounded ratings (1200 fallback)', () => {

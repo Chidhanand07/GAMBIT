@@ -29,6 +29,7 @@ jest.mock('@/lib/sounds', () => ({
     playPromoteSound: jest.fn(),
     playGameStartSound: jest.fn(),
     playGameEndSound: jest.fn(),
+    setSoundsEnabled: jest.fn(),
 }))
 
 const socket = createFakeSocket()
@@ -39,6 +40,8 @@ jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ online
 jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast: jest.fn() }) }))
 
 import GamePage from '@/app/game/[id]/page'
+import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
+import { SettingsProvider } from '@/features/settings/SettingsProvider'
 import * as sounds from '@/lib/sounds'
 import { routeParams } from '../helpers/params'
 
@@ -79,6 +82,19 @@ afterEach(() => {
 async function renderGame(id = 'g1') {
     const utils = render(<GamePage params={routeParams({ id })} />)
     // game data loaded once a player strip shows a name
+    await screen.findAllByText(/Alice|Bob/)
+    return utils
+}
+
+/** The page under a SettingsProvider holding `changes` over the default settings. */
+async function renderGameWithSettings(changes: Partial<UserSettings>) {
+    const stored = { ...DEFAULT_SETTINGS, ...changes }
+    const store = { load: () => stored, save: jest.fn() }
+    const utils = render(
+        <SettingsProvider store={store}>
+            <GamePage params={routeParams({ id: 'g1' })} />
+        </SettingsProvider>,
+    )
     await screen.findAllByText(/Alice|Bob/)
     return utils
 }
@@ -610,8 +626,17 @@ describe('making moves', () => {
         expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'e4', to: 'd5', promotion: 'q' }])
     })
 
-    test('pawn reaching the last rank opens the promotion picker and emits the chosen piece', async () => {
+    test('auto-queen on (the default setting): a pawn reaching the last rank promotes to a queen without asking', async () => {
         await renderGame()
+        socket.serverSends('game_state_sync', { fen: '7k/P7/8/8/8/8/8/4K3 w - - 0 1', moveLog: [], whiteMs: 1000, blackMs: 1000, clockActive: false })
+        click(square('a7'))
+        click(square('a8'))
+        expect(screen.queryByText('Choose promotion')).not.toBeInTheDocument()
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'a7', to: 'a8', promotion: 'q' }])
+    })
+
+    test('auto-queen off: a pawn reaching the last rank opens the promotion picker and emits the chosen piece', async () => {
+        await renderGameWithSettings({ autoQueen: false })
         socket.serverSends('game_state_sync', { fen: '7k/P7/8/8/8/8/8/4K3 w - - 0 1', moveLog: [], whiteMs: 1000, blackMs: 1000, clockActive: false })
         click(square('a7'))
         click(square('a8'))
@@ -821,6 +846,54 @@ describe('draw', () => {
         click(screen.getAllByRole('button', { name: 'Draw' })[0])
         click(screen.getByRole('button', { name: 'Cancel' }))
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+})
+
+describe('confirm resign and draw off (Settings)', () => {
+    test('Resign acts at once: no dialog, `resign` { game_id } is emitted', async () => {
+        await renderGameWithSettings({ confirmResignDraw: false })
+        click(resignButton())
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
+    })
+
+    test('Draw opens no dialog and still sends nothing (no server draw flow yet)', async () => {
+        await renderGameWithSettings({ confirmResignDraw: false })
+        socket.emit.mockClear()
+        click(screen.getAllByRole('button', { name: 'Draw' })[0])
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+        expect(socket.emit).not.toHaveBeenCalled()
+    })
+})
+
+describe('board preferences (Settings)', () => {
+    const playE4E5 = () => {
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e2', to: 'e4', fen: AFTER_E4, san: 'e4', whiteMs: 300_000, blackMs: 300_000 })
+        socket.serverSends('move_made', { game_id: 'g1', from: 'e7', to: 'e5', fen: AFTER_E4_E5, san: 'e5', whiteMs: 300_000, blackMs: 300_000 })
+    }
+    const marks = (kind: string) => Array.from(document.querySelectorAll(`[data-mark="${kind}"]`)).map(m => m.parentElement!.getAttribute('data-square'))
+
+    test('defaults: coordinates, legal-move dots and the last-move tint are shown', async () => {
+        await renderGame()
+        playE4E5()
+        expect(marks('last')).toEqual(['e7', 'e5'])
+        click(square('g1'))
+        expect(document.querySelectorAll('[data-dot]').length).toBe(3) // e2, f3, h3
+        expect(within(square('a1')).getByText('1')).toBeInTheDocument()
+    })
+
+    test('legal-move dots, last-move tint and coordinates follow their switches; the theme colours the squares', async () => {
+        await renderGameWithSettings({ highlightLegalMoves: false, highlightLastMove: false, showCoordinates: false, boardTheme: 'green' })
+        playE4E5()
+        click(square('g1'))
+        expect(document.querySelectorAll('[data-dot]').length).toBe(0)
+        expect(marks('last')).toEqual([])
+        expect(marks('selected')).toEqual(['g1'])
+        expect(within(square('a1')).queryByText('1')).toBeNull()
+        expect(square('a1').className).toContain('bg-board-green-dark')
+        // the move itself still works without the dots
+        click(square('f3'))
+        expect(socket.emitted('make_move')).toEqual([{ game_id: 'g1', from: 'g1', to: 'f3', promotion: 'q' }])
     })
 })
 

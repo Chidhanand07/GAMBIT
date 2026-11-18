@@ -7,19 +7,26 @@ import type { ChessBoardControls } from './useChessBoard';
 interface BindOptions extends commands.CommandContext {
     board: ChessBoardControls;
     router: { push: (href: string) => void };
+    /** Ask before Resign and Draw (the "Confirm resign and draw" setting). Default on. */
+    confirmResignDraw?: boolean;
 }
 
 const confirmWith = (dispatch: Dispatch<GameAction>, value: ConfirmDialog) => () =>
     dispatch({ type: 'confirmSet', value });
 
-function boardControls({ state, dispatch }: BindOptions, resign: () => void) {
+/** Draw has no server flow yet, so without the confirmation step it does nothing. */
+function drawWithoutConfirm() {
+    // TODO(draw-offer): emit draw_offer once the server flow is approved — see design/DRAW-OFFER-PROPOSAL.md
+}
+
+function boardControls({ state, dispatch, confirmResignDraw = true }: BindOptions, resign: () => void) {
     return {
         soundOn: state.soundOn,
         onToggleSound: () => dispatch({ type: 'soundToggled' }),
         onFlip: () => dispatch({ type: 'flipToggled' }),
         onToggleFocus: () => dispatch({ type: 'focusToggled' }),
-        onDraw: confirmWith(dispatch, 'draw'),
-        onResign: confirmWith(dispatch, 'resign'),
+        onDraw: confirmResignDraw ? confirmWith(dispatch, 'draw') : drawWithoutConfirm,
+        onResign: confirmResignDraw ? confirmWith(dispatch, 'resign') : resign,
         onCancelConfirm: confirmWith(dispatch, null),
         onConfirmResign: resign,
         onConfirmDraw: () => {
