@@ -35,7 +35,7 @@ const config: Config = {
                 },
                 accent: {
                     DEFAULT: v('color-accent'),
-                    hover: v('accent-hover'), // legacy, used by pages not yet redesigned
+                    hover: v('accent-hover'), // legacy, used by the challenge and invite pages
                 },
                 ink: {
                     DEFAULT: v('color-ink'),
@@ -85,16 +85,8 @@ const config: Config = {
                 page: v('bg-page'),
                 elevated: v('bg-elevated'),
                 hover: v('bg-hover'),
-                frame: { outer: v('frame-outer'), inner: v('frame-inner') },
                 text: { primary: v('text-primary'), secondary: v('text-secondary'), tertiary: v('text-tertiary') },
                 border: { DEFAULT: v('border'), strong: v('border-strong') },
-                indicator: { green: v('green-indicator') },
-                highlight: {
-                    check: v('check-highlight'),
-                    lastMove: v('last-move'),
-                    selected: v('selected'),
-                    validDot: v('valid-dot'),
-                },
             },
             fontFamily: {
                 sans: [v('font-inter'), 'Inter', 'system-ui', 'sans-serif'],
@@ -111,8 +103,6 @@ const config: Config = {
             },
             borderRadius: {
                 // legacy
-                sm: '6px',
-                md: '10px',
                 lg: '14px',
                 // redesign
                 ...scale('radius', ['3', '4', '10', '12', '14', '16', '20', '24', '28', 'pill']),

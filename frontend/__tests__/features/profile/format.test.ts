@@ -1,4 +1,4 @@
-import { avatarInitial, formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
+import { formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
 import { matchesFriendSearch } from '@/features/profile/model';
 
 describe('formatDate', () => {
@@ -23,17 +23,6 @@ describe('profileRecord', () => {
     test('missing counters read as 0 and win rate is 0 without games', () => {
         const empty = { games_played: undefined, wins: undefined, losses: undefined, draws: undefined };
         expect(profileRecord(empty as never)).toEqual({ gamesPlayed: 0, wins: 0, losses: 0, draws: 0, winRate: 0 });
-    });
-});
-
-describe('avatarInitial', () => {
-    test.each([
-        ['bobby', 'bob', 'B'],
-        [null, 'alice', 'A'],
-        ['', '', '?'],
-        [undefined, undefined, '?'],
-    ])('(%p, %p) → %s', (name, username, initial) => {
-        expect(avatarInitial(name, username)).toBe(initial);
     });
 });
 

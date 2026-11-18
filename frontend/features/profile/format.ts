@@ -29,11 +29,6 @@ export function profileRecord(profile: Pick<Profile, 'games_played' | 'wins' | '
     return { gamesPlayed, wins, losses, draws, winRate };
 }
 
-/** First letter of the display name / username, upper-cased ("?" when both are empty). */
-export function avatarInitial(name: string | null | undefined, username: string | null | undefined): string {
-    return (name || username || '?')[0].toUpperCase();
-}
-
 /** Outcome of a finished game for `profileId`: win, loss, draw or aborted (see lib/chess/gameOutcome). */
 export function gameOutcome(game: OutcomeRow, profileId: string): PlayerOutcome {
     return playerOutcome(game, profileId);
