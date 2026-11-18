@@ -3,6 +3,7 @@ import {
     achievements,
     colourRows,
     filterGames,
+    openingRateTone,
     statFacts,
     timeControlLabel,
     gameRowDetail,
@@ -120,3 +121,16 @@ describe('friendStatus [F-104]', () => {
         expect(friendStatus('b', online, new Set(['b']))).toBe('Away')
     })
 })
+
+describe('openingRateTone [F-123]', () => {
+    test.each([
+        [73, 'good'],
+        [60, 'good'],
+        [59, 'even'],
+        [45, 'even'],
+        [44, 'poor'],
+        [0, 'poor'],
+    ])('%p%% → %s', (rate, tone) => {
+        expect(openingRateTone(rate)).toBe(tone);
+    });
+});

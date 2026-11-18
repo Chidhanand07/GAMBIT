@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listFinishedGamesPage } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
+import { OTHER_OPENING, openingsOfGames } from '@/lib/server/openings';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseInput, schemas } from '@/lib/server/validation';
@@ -39,5 +40,15 @@ export async function GET(request: NextRequest, props: { params: Promise<{ usern
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ games: games ?? [], profileId: profile.id });
+    const rows = games ?? [];
+    // The opening of each game (F-123); left out when its moves cannot be read.
+    const openings = await openingsOfGames(
+        admin,
+        rows.map((g) => g.id),
+    );
+    const withOpenings = rows.map((g) =>
+        openings?.has(g.id) ? { ...g, opening: openings.get(g.id)?.family ?? OTHER_OPENING } : g,
+    );
+
+    return NextResponse.json({ games: withOpenings, profileId: profile.id });
 }

@@ -235,6 +235,36 @@ describe('GET /api/profile/[username]/stats', () => {
         expect(body.facts.bestWin).toBe(1376)
     })
 
+    test('openings from the stored moves of the finished games [F-123]', async () => {
+        const p = uid('p')
+        db.queue('profiles', { data: { id: p, games_played: 2, wins: 1, losses: 1, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                { id: uid('g1'), time_control: '3', white_id: p, black_id: uid('x'), winner_id: p, white_accuracy: 81 },
+                { id: uid('g2'), time_control: '3', white_id: uid('x'), black_id: p, winner_id: uid('x') },
+            ],
+            error: null,
+        })
+        db.queue('moves', {
+            data: ['e4', 'e5', 'f4'].flatMap((san, i) => [
+                { game_id: uid('g1'), move_number: i + 1, san },
+                { game_id: uid('g2'), move_number: i + 1, san },
+            ]),
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.openings).toEqual([{ name: "King's Gambit", games: 2, winRate: 50, accuracy: 81 }])
+        expect(db.op(db.callsFor('moves')[0], 'in')).toEqual(['game_id', [uid('g1'), uid('g2')]])
+    })
+
+    test('openings are null when the moves cannot be read [F-123]', async () => {
+        db.queue('profiles', { data: { id: uid('p'), games_played: 0, wins: 0, losses: 0, draws: 0 }, error: null })
+        db.queue('games', { data: [{ id: uid('g1'), time_control: '3', winner_id: uid('p') }], error: null })
+        db.queue('moves', { data: null, error: { message: 'down' } })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.openings).toBeNull()
+    })
+
     test('404 for an unknown user', async () => {
         expect((await getStats(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
     })
@@ -263,6 +293,25 @@ describe('GET /api/profile/[username]/games', () => {
         for (const column of ['rating_category', 'white_rating_before', 'white_rating_after', 'black_rating_before', 'black_rating_after']) {
             expect(columns).toContain(column)
         }
+    })
+
+    test('each game carries its opening family, "Other" outside the table, none without moves [F-123]', async () => {
+        db.queue('profiles', { data: { id: uid('p') }, error: null })
+        db.queue('games', { data: [{ id: uid('g1') }, { id: uid('g2') }, { id: uid('g3') }], error: null })
+        db.queue('moves', {
+            data: [
+                { game_id: uid('g1'), move_number: 1, san: 'e4' },
+                { game_id: uid('g1'), move_number: 2, san: 'c5' },
+                { game_id: uid('g2'), move_number: 1, san: 'a3' },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getGames(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.games).toEqual([
+            { id: uid('g1'), opening: 'Sicilian Defense' },
+            { id: uid('g2'), opening: 'Other' },
+            { id: uid('g3') },
+        ])
     })
 
     test('limit is capped at 50 and defaults to 15', async () => {

@@ -7,6 +7,7 @@ import { SPEED_BUCKET_LABELS } from '@/lib/chess/timeControl';
 import type { ProfileStats } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
 import { colourRows, statFacts, type ColourRow } from '../model';
+import { OpeningsCard } from './OpeningsCard';
 import { EMPTY, PANEL, PANEL_TITLE } from './styles';
 
 const DEFAULT_RATING = 1200;
@@ -87,6 +88,7 @@ function StatsBody({ stats, rating }: { stats: ProfileStats; rating: ReactNode }
                     ))}
                 </Card>
             )}
+            {stats.openings && stats.openings.length > 0 && <OpeningsCard openings={stats.openings} />}
             {facts.length > 0 && (
                 <section className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
                     {facts.map((f) => (

@@ -2,7 +2,9 @@ import 'server-only';
 import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
+import type { Opening } from '@/lib/chess/eco';
 import { bestWins, overallBestWin } from './gameFacts';
+import { openingStats } from './openings';
 import { ratingHistory, type SnapshotGameRow } from './ratingHistory';
 
 /** Rating reported for a bucket whose column is null. */
@@ -23,6 +25,7 @@ interface StatsProfileRow {
 }
 
 interface StatsGameRow extends OutcomeRow, SnapshotGameRow {
+    id: string;
     time_control: string | null;
     white_accuracy?: number | null;
     black_accuracy?: number | null;
@@ -105,24 +108,41 @@ function mostActiveDay(games: StatsGameRow[], profileId: string): string | null 
     return top > 0 ? WEEKDAYS[counts.indexOf(top)] : null;
 }
 
-/** Response body of GET /api/profile/[username]/stats. */
-export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[]) {
-    const wins = bestWins(games, profile.id);
+/** Lifetime totals from the profile row (missing counters read as 0). */
+function totalsOf(profile: StatsProfileRow) {
     return {
         total: profile.games_played ?? 0,
         wins: profile.wins ?? 0,
         losses: profile.losses ?? 0,
         draws: profile.draws ?? 0,
-        ratings: {
-            bullet: profile.rating_bullet ?? DEFAULT_RATING,
-            blitz: profile.rating_blitz ?? DEFAULT_RATING,
-            rapid: profile.rating_rapid ?? DEFAULT_RATING,
-            classical: profile.rating_classical ?? DEFAULT_RATING,
-        },
+    };
+}
+
+/** Current rating per bucket (1200 for an empty column). */
+function ratingsOf(profile: StatsProfileRow): Record<SpeedBucket, number> {
+    return {
+        bullet: profile.rating_bullet ?? DEFAULT_RATING,
+        blitz: profile.rating_blitz ?? DEFAULT_RATING,
+        rapid: profile.rating_rapid ?? DEFAULT_RATING,
+        classical: profile.rating_classical ?? DEFAULT_RATING,
+    };
+}
+
+/** Response body of GET /api/profile/[username]/stats. */
+export function buildProfileStats(
+    profile: StatsProfileRow,
+    games: StatsGameRow[],
+    openings: Map<string, Opening | null> | null = null,
+) {
+    const wins = bestWins(games, profile.id);
+    return {
+        ...totalsOf(profile),
+        ratings: ratingsOf(profile),
         byCategory: statsByCategory(games, profile.id),
         byColour: statsByColour(games, profile.id),
         ratingHistory: ratingHistory(games, profile.id),
         bestWins: wins,
+        openings: openings ? openingStats(games, openings, profile.id) : null,
         facts: {
             averageAccuracy: averageAccuracy(games, profile.id),
             longestWinStreak: longestWinStreak(games, profile.id),

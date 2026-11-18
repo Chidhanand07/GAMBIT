@@ -27,7 +27,8 @@ export interface ProfileGameRow
     black: ProfileSummary | null;
     /**
      * Opening name and number of moves (Profile.dc.html "Italian Game · 5 min · 34 moves").
-     * Optional: the games API does not send them yet (data-profile track).
+     * The games API sends the opening family from the stored moves (F-123; "Other" outside the
+     * built-in table) and the move count from the final position (F-124); absent when unknown.
      */
     opening?: string | null;
     move_count?: number | null;
@@ -37,6 +38,15 @@ export interface ProfileGameRow
 export interface ProfileGamesPayload {
     games?: ProfileGameRow[];
     profileId?: string;
+}
+
+export interface OpeningStat {
+    name: string;
+    games: number;
+    /** Whole-number win percentage. */
+    winRate: number;
+    /** Mean analysed accuracy (%), null when none of these games was analysed. */
+    accuracy: number | null;
 }
 
 export interface CategoryRecord {
@@ -71,6 +81,8 @@ export interface ProfileStats {
      * oldest first (F-121). Empty for a pool without recorded games (games rated before F-120 have none).
      */
     ratingHistory?: Partial<Record<SpeedBucket, number[]>>;
+    /** Most played openings, then "Other" (F-123); null when the moves could not be read. */
+    openings?: OpeningStat[] | null;
     /** Per pool, the highest opponent rating (at the time) the player beat; null without one (F-122). */
     bestWins?: Partial<Record<SpeedBucket, number | null>>;
     facts?: ProfileFacts;

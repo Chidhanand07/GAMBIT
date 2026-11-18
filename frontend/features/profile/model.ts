@@ -142,3 +142,13 @@ export function statFacts(stats: ProfileStats): Fact[] {
     if (f.mostActiveDay) facts.push({ k: 'Most active day', v: f.mostActiveDay });
     return facts;
 }
+
+/** Win rates from this percentage up read as good (green), below EVEN_RATE as poor (red). */
+const GOOD_RATE = 60;
+const EVEN_RATE = 45;
+
+/** The colour band of an opening's win rate (Profile.dc.html: ≥ 60 green, ≥ 45 cream, else red). */
+export function openingRateTone(winRate: number): 'good' | 'even' | 'poor' {
+    if (winRate >= GOOD_RATE) return 'good';
+    return winRate >= EVEN_RATE ? 'even' : 'poor';
+}

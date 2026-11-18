@@ -119,6 +119,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-120](#f-120) | Rated games store both ratings before/after; only `apply_game_result` writes them | B1 | RATING-SNAPSHOT |
 | [F-121](#f-121) | Rating chart, Peak and Low from the stored snapshots (supersedes F-082) | B1 | RATING-HISTORY |
 | [F-122](#f-122) | Best win = highest opponent rating at the time, per pool, from the snapshots | B1 | BEST-WIN |
+| [F-123](#f-123) | Openings from stored moves via a built-in ECO table; `moves` index and browser writes revoked | B1 | OPENINGS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2960,3 +2961,31 @@ not a required check.**
   game, and it changes after it.
 - **Old games.** Without a snapshot the opponent's rating at the time is unknown, so those wins are
   not candidates; the tile is left out until a recorded win exists.
+
+## F-123
+
+**Openings are named by a small built-in ECO table, server-side, from the stored moves; `moves` gets
+an index and loses its browser write privileges (B1 item 4).**
+
+- **Context.** The profile shows each game's opening and an "Openings" table (games, win rate,
+  average accuracy). Games store no PGN (`games.pgn` is never written); the game server stores one
+  `moves` row per ply with the SAN.
+- **Options.** (a) an ECO dependency (e.g. a full 3,000-line database); (b) classify in the game
+  server at finalization and store the name; (c) a small table plus a pure classifier, run in
+  `lib/server` on the stored moves.
+- **Decision.** (c). `lib/chess/openings.data.ts` lists ~90 common lines (ECO, family, name, SAN);
+  `lib/chess/eco.ts` picks the longest line the game follows (check marks ignored) and needs only the
+  first `MAX_BOOK_PLIES` (11) plies. `lib/server/openings.ts` reads those plies for the requested games
+  (`moves.game_id IN (…) AND move_number <= 11`, chunked to stay under PostgREST's 1,000-row cap) and
+  builds the table: most played families first, at most five rows, the rest counted in "Other" (also
+  used for lines outside the table). A failed read gives `openings: null` and the card is left out
+  rather than showing a partial table. The games route adds each game's family as `opening`.
+- **Why.** No new runtime dependency; works for every game already played (moves exist for all of
+  them, unlike a column written at finalization); the table is data and is tested move by move against
+  chess.js, so a typo cannot ship.
+- **Database.** Migration `20261118100100_moves_book_index.sql`: `idx_moves_game_ply (game_id,
+  move_number)` for that read, and `anon`/`authenticated` lose INSERT/UPDATE/DELETE/TRUNCATE on `moves`
+  (no policy ever allowed a write; this keeps the openings server-written even if one were added).
+  pgTAP `061_moves_book_index.test.sql`.
+- **Limits.** Families are coarse by design (the mockup groups by family). Transpositions reach the
+  line they end in only if the move order matches a row.

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listFinishedGamesForStats } from '@/lib/server/games';
 import { requireUser } from '@/lib/server/identity';
+import { openingsOfGames } from '@/lib/server/openings';
 import { buildProfileStats } from '@/lib/server/profileStats';
 import { getProfileStatsRow } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
@@ -25,6 +26,11 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ username
 
     // Fetch all completed games for this user
     const { data: games } = await listFinishedGamesForStats(admin, profile.id);
+    const rows = games ?? [];
+    const openings = await openingsOfGames(
+        admin,
+        rows.map((g) => g.id),
+    );
 
-    return NextResponse.json(buildProfileStats(profile, games ?? []));
+    return NextResponse.json(buildProfileStats(profile, rows, openings));
 }
