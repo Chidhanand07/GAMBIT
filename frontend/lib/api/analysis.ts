@@ -1,5 +1,6 @@
 // Client-side fetch helper for the analysis board's engine panel.
 import { z } from 'zod';
+import type { GameAnalysis } from '@/types/gameAnalysis';
 
 /** An engine evaluation as the analysis page shows it. */
 export interface EngineAnalysis {
@@ -55,4 +56,18 @@ export async function requestEngineAnalysis(fen: string): Promise<EngineAnalysis
     const parsed = engineBodySchema.safeParse(await res.json());
     if (!parsed.success) throw new Error('engine response has no evaluation');
     return toAnalysis(parsed.data);
+}
+
+const HTTP_UNAUTHORIZED = 401;
+
+/** GET /api/games/:id/analysis: a finished game for /analysis?game=<id> (ADR F-134). */
+export async function fetchGameAnalysis(
+    gameId: string,
+): Promise<{ ok: true; game: GameAnalysis } | { ok: false; error: string }> {
+    const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/analysis`);
+    // /analysis is public; opening a game needs an account (the route answers 401 signed out).
+    if (res.status === HTTP_UNAUTHORIZED) return { ok: false, error: 'Sign in to open this game.' };
+    const body = await res.json().catch(() => null);
+    if (!res.ok) return { ok: false, error: typeof body?.error === 'string' ? body.error : 'Could not load the game' };
+    return { ok: true, game: body as GameAnalysis };
 }

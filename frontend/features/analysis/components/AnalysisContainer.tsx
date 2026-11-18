@@ -6,6 +6,7 @@ import { preferredBoardProps } from '@/features/settings/boardProps';
 import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import { useAnalysisBoard } from '../hooks/useAnalysisBoard';
 import { useEngineAnalysis } from '../hooks/useEngineAnalysis';
+import { useGameAnalysis } from '../hooks/useGameAnalysis';
 import { useImportForm } from '../hooks/useImportForm';
 import type { AnalysisTab } from '../types';
 import { AnalysisPanel, FenBox, MovesBox } from './AnalysisPanel';
@@ -13,6 +14,7 @@ import { AnalysisView } from './AnalysisView';
 import { BoardControls } from './BoardControls';
 import { EnginePanel } from './EnginePanel';
 import { EvalBar } from './EvalBar';
+import { GameReviewPanel } from './GameReviewPanel';
 import { ImportPanel } from './ImportPanel';
 
 const COPIED_LABEL_MS = 1500;
@@ -33,10 +35,14 @@ function useCopyLabel() {
 
 /**
  * Wires the analysis screen: the local board and its line (useAnalysisBoard), the engine
- * evaluation through the game server's /api/analysis/engine (useEngineAnalysis), PGN/FEN import.
+ * evaluation through the game server's /api/analysis/engine (useEngineAnalysis), PGN/FEN import,
+ * and, with `gameId`, a finished game's moves and stored review (useGameAnalysis, F-134).
  */
-export function AnalysisContainer() {
+export function AnalysisContainer({ gameId = null }: { gameId?: string | null }) {
     const board = useAnalysisBoard();
+    const review = useGameAnalysis(gameId, (g) => {
+        if (g.pgn) board.loadPgn(g.pgn);
+    });
     const { game, moveHistory, currentMoveIndex, navigateToMove } = board;
     const fen = game.fen();
     const engine = useEngineAnalysis(fen);
@@ -49,6 +55,7 @@ export function AnalysisContainer() {
 
     const analysis = (
         <>
+            <GameReviewPanel state={review} />
             <EnginePanel
                 enabled={engine.engineEnabled}
                 onToggle={() => engine.setEngineEnabled((v) => !v)}

@@ -158,6 +158,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-131](#f-131) | Friend "Away": each tab reports idleness in its presence payload | B2 | LIVE-2 |
 | [F-132](#f-132) | The lobby's rating range is the matchmaker's own window, pushed when it widens | B2 | LIVE-3 |
 | [F-133](#f-133) | The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service | B2 | LIVE-4 |
+| [F-134](#f-134) | `/analysis?game=<id>`: a finished game's moves and stored review, private games for players only | B2 | LIVE-5 |
 
 ---
 
@@ -3237,4 +3238,36 @@ their owner (B1 item 8).**
 - **Proof.** `services/ratingService.test.js` (estimate equals what `processGameEnd` then applies, nothing
   written), `services/ratingEstimateService.test.js` (players only, unrated, missing profiles, colour),
   schema and handler tests, `useResignEstimate.test.ts`, `ConfirmDialogs` and game page tests.
+
+## F-134
+
+**`/analysis?game=<id>`: a finished game's moves and stored review; private games for players only (LIVE-5).**
+
+- **Context.** The analysis page could not open a game ("analysis accuracies (no game id)"). The engine
+  stores `white_accuracy`, `black_accuracy` and per-move classifications on the `games` row after a game
+  (F-049); `games.pgn` is never written.
+- **Route.** `GET /api/games/[id]/analysis` (NX-07 order): `requireUser`, the id must be a UUID (else 404,
+  nothing read), then `lib/server/gameAnalysis.loadGameAnalysis` on the admin client:
+  - visibility: a player always; anyone else only when the game has no `game_invites` row (a private
+    game, F-018). A private game is answered 404 to a non-player, so its existence is not revealed; a
+    failing invite check answers 500 (fail closed);
+  - only `completed` games: a game in play is 409, so the page cannot be used for engine help mid-game;
+  - moves: from the stored review when there is one (complete: the engine reviewed the server's own move
+    log), else from the `moves` table ordered by `move_number`; returned as PGN movetext;
+  - DTO allow-list: `id`, `pgn`, and per side `name`, `accuracy`, and the reviewed plies'
+    `ply/san/classification/accuracy`. No ids, tokens or other columns (NX-04).
+- **Page.** `app/analysis/page.tsx` passes its `searchParams` to a client `AnalysisRoute`, which reads a
+  single `game` value; `useGameAnalysis` fetches it, puts its moves on the board (cursor on the last move,
+  every existing navigation works) and the Analysis tab shows a "Game review" block above the engine:
+  each side's name, accuracy and classification counts, or "not reviewed yet".
+- **Design note.** Analysis.dc.html has no accuracy block (its board is always a free board). The block is
+  built only from that page's own vocabulary (panel heading like "Stockfish 16", the FEN/engine well
+  surface, mono figures in the accent colour) and appears only when a game is opened, so the free-board
+  page is pixel-identical to before.
+- **Not done.** Nothing in the app links to `/analysis?game=<id>` yet (the result page keeps its own
+  review); adding links is a UI decision for the page owners.
+- **Proof.** `api/gameAnalysis.test.ts` (401, malformed id, public reviewed and unreviewed games, private
+  game for a stranger and for a player, fail-closed invite check, game in play, not found, DB error,
+  DTO shape) and `features/analysis/gameReview.test.tsx` (moves on the board, accuracies, error, no fetch
+  without `?game=`).
 
