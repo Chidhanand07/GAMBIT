@@ -84,6 +84,8 @@ const PieceSlot = memo(function PieceSlot({ color, type, col, row, animate }: Pi
     );
 });
 
+const HERO_LAST_FILL = { light: 'bg-board-hero-last-light', dark: 'bg-board-hero-last-dark' } as const;
+
 function markFor(sq: Square, props: BoardProps, occupied: boolean): SquareMark {
     if (props.legalDestinations?.includes(sq) && occupied) return 'capture';
     if (props.selectedSquare === sq) return 'selected';
@@ -92,24 +94,31 @@ function markFor(sq: Square, props: BoardProps, occupied: boolean): SquareMark {
     return 'none';
 }
 
+/** Square fill and tint; Home.dc.html paints the hero board's last move as solid gold squares instead. */
+function fillAndMark(mark: SquareMark, light: boolean, theme: BoardTheme, frame: BoardFrame) {
+    const tone = light ? 'light' : 'dark';
+    if (frame === 'hero' && mark === 'last') return { fill: HERO_LAST_FILL[tone], mark: 'none' as const };
+    return { fill: THEMES[theme][tone], mark };
+}
+
 interface SquareContext {
     props: BoardProps;
     theme: BoardTheme;
+    frame: BoardFrame;
     showCoordinates: boolean;
     piece: PlacedPiece | undefined;
 }
 
 /** Everything a square shows, from its square name and on-screen index (0 = top-left). */
-function squareView(sq: Square, index: number, { props, theme, showCoordinates, piece }: SquareContext) {
+function squareView(sq: Square, index: number, { props, theme, frame, showCoordinates, piece }: SquareContext) {
     const col = index % BOARD_SIZE;
     const row = Math.floor(index / BOARD_SIZE);
     const light = (col + row) % 2 === 0;
     const colors = THEMES[theme];
     return {
         square: sq,
-        fill: light ? colors.light : colors.dark,
+        ...fillAndMark(markFor(sq, props, Boolean(piece)), light, theme, frame),
         ink: light ? colors.lightInk : colors.darkInk,
-        mark: markFor(sq, props, Boolean(piece)),
         dot: !piece && Boolean(props.legalDestinations?.includes(sq)),
         rankLabel: showCoordinates && col === 0 ? sq[1] : null,
         fileLabel: showCoordinates && row === BOARD_SIZE - 1 ? sq[0] : null,
@@ -155,7 +164,7 @@ export function Board(props: BoardProps) {
                 {squaresFor(orientation).map((sq, i) => (
                     <BoardSquare
                         key={sq}
-                        {...squareView(sq, i, { props, theme, showCoordinates, piece: bySquare.get(sq) })}
+                        {...squareView(sq, i, { props, theme, frame, showCoordinates, piece: bySquare.get(sq) })}
                         onClick={interactive ? onClick : undefined}
                     />
                 ))}

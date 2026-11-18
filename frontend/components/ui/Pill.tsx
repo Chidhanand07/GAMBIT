@@ -13,13 +13,15 @@ interface PillProps {
     tone?: PillTone;
     /** Leading status dot (the online indicator). */
     dot?: boolean;
+    /** Dot colour: green (online) or gold (the landing "Free to play" badge). */
+    dotTone?: 'success' | 'accent';
     /** `md` is 32px tall (header), `sm` 28px (profile). */
     size?: 'sm' | 'md';
     className?: string;
     children: ReactNode;
 }
 
-export function Pill({ tone = 'success', dot = false, size = 'sm', className, children }: PillProps) {
+export function Pill({ tone = 'success', dot = false, dotTone = 'success', size = 'sm', className, children }: PillProps) {
     return (
         <span
             className={cn(
@@ -29,7 +31,12 @@ export function Pill({ tone = 'success', dot = false, size = 'sm', className, ch
                 className,
             )}
         >
-            {dot && <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />}
+            {dot && (
+                <span
+                    aria-hidden="true"
+                    className={cn('h-2 w-2 rounded-full', dotTone === 'accent' ? 'bg-accent' : 'bg-success')}
+                />
+            )}
             {children}
         </span>
     );

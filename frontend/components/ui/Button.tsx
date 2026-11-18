@@ -2,12 +2,17 @@ import Link from 'next/link';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/design/cn';
 
-export type ButtonVariant = 'primary' | 'outline' | 'ghost' | 'danger' | 'danger-solid';
+export type ButtonVariant = 'primary' | 'primary-flat' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'danger-solid';
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 
 /** Colours per variant (design/Main.dc.html, Game.dc.html). `.gb` is the primary hover lift. */
 const VARIANTS: Record<ButtonVariant, string> = {
     primary: 'gb border-0 bg-accent text-on-accent hover:text-on-accent',
+    /** Landing and auth primary (Home, Signin, Signup `.gb`): brightness on hover, no lift. */
+    'primary-flat': 'gb-flat border-0 bg-accent text-on-accent hover:text-on-accent',
+    /** Landing "Create Account": surface pill with the field border, raised fill on hover/focus. */
+    secondary:
+        'border-1 border-line-field bg-surface text-ink hover:bg-surface-raised hover:text-ink focus-visible:bg-surface-raised',
     outline: 'border-1.5 border-line-muted bg-transparent text-ink',
     ghost: 'border-0 bg-transparent text-accent hover:text-accent',
     danger: 'border-1.5 border-danger bg-transparent text-danger hover:text-danger',

@@ -5,7 +5,6 @@ import SocketProvider from '@/components/SocketProvider'
 import ProfileProvider from '@/components/ProfileProvider'
 import PresenceProvider from '@/components/PresenceProvider'
 import { ToastProvider } from '@/components/Toast'
-import IntroGate from '@/components/IntroGate'
 import PageBackground from '@/components/layout/PageBackground'
 import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
 
@@ -59,16 +58,14 @@ export default function RootLayout({
                     <ProfileProvider>
                         <PresenceProvider>
                             <SocketProvider>
-                                <IntroGate>
-                                    {/* Every mockup (signed in or not) sits on the same root, so it is
-                                        mounted once here and the hover trail survives navigation. */}
-                                    <PageBackground>
-                                        <AppHeaderContainer />
-                                        <main className="flex-1 w-full">
-                                            {children}
-                                        </main>
-                                    </PageBackground>
-                                </IntroGate>
+                                {/* Every mockup (signed in or not) sits on the same root, so it is
+                                    mounted once here and the hover trail survives navigation. */}
+                                <PageBackground>
+                                    <AppHeaderContainer />
+                                    <main className="flex-1 w-full">
+                                        {children}
+                                    </main>
+                                </PageBackground>
                             </SocketProvider>
                         </PresenceProvider>
                     </ProfileProvider>

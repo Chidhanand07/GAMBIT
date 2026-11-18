@@ -40,16 +40,12 @@ afterEach(() => {
 })
 
 describe('landing page', () => {
-    const highlighted = (c: HTMLElement) =>
-        [...c.querySelectorAll<HTMLElement>('.board-inner-frame > div')]
-            .map((d, i) => [i, d.style.background] as const)
-            .filter(([, bg]) => bg.startsWith('rgba(196, 150, 90'))
-            .map(([i]) => i)
-    const pieces = (c: HTMLElement) => [...c.querySelectorAll('.board-inner-frame > div')].map(d => d.textContent || '.').join('')
+    // Redesign (Home.dc.html): the canvas KnightBackground and the animated demo board are gone;
+    // the board is a static King's Gambit position with the last move highlighted.
+    const squareAt = (c: HTMLElement, sq: string) => c.querySelector<HTMLElement>(`[data-square="${sq}"]`)!
 
-    test('renders KnightBackground in landing mode, hero, features and footer links', () => {
+    test('renders the hero, features and footer links', () => {
         render(<Home />)
-        expect(screen.getByTestId('dynamic')).toHaveAttribute('data-mode', 'landing')
         expect(screen.getByText('Free to play')).toBeInTheDocument()
         expect(screen.getByText(/Play Now/).closest('a')).toHaveAttribute('href', '/lobby')
         expect(screen.getByText('Create Account').closest('a')).toHaveAttribute('href', '/signup')
@@ -61,53 +57,39 @@ describe('landing page', () => {
         expect(screen.getByText('© 2026 Gambit')).toBeInTheDocument()
     })
 
-    test('hover handlers restyle CTA and feature cards', () => {
+    test('hover styling of the CTAs and feature cards comes from the mockup classes', () => {
         render(<Home />)
-        const play = screen.getByText(/Play Now/).closest('a')!
-        fireEvent.mouseEnter(play)
-        expect(play.style.background).toBe('var(--accent-hover)')
-        fireEvent.mouseLeave(play)
-        expect(play.style.background).toBe('var(--accent)')
-        const signup = screen.getByText('Create Account').closest('a')!
-        fireEvent.mouseEnter(signup)
-        expect(signup.style.borderColor).toBe('var(--border-accent)')
-        expect(signup.style.background).toBe('var(--bg-hover)')
-        fireEvent.mouseLeave(signup)
-        expect(signup.style.borderColor).toBe('var(--border-strong)')
-        const card = screen.getByText('Bullet Games').parentElement!
-        fireEvent.mouseEnter(card)
-        expect(card.style.transform).toBe('translateY(-2px)')
-        expect(card.style.boxShadow).toBe('0 4px 20px var(--accent-glow)')
-        fireEvent.mouseLeave(card)
-        expect(card.style.transform).toBe('')
-        expect(card.style.borderColor).toBe('var(--border)')
+        expect(screen.getByText(/Play Now/).closest('a')).toHaveClass('gb-flat', 'bg-accent')
+        expect(screen.getByText('Create Account').closest('a')).toHaveClass('hover:bg-surface-raised', 'border-line-field')
+        expect(screen.getByText('Bullet Games').parentElement).toHaveClass('fc')
     })
 
-    test('demo board plays the King\'s Gambit every 900 ms and resets 3 s after the last move', () => {
-        jest.useFakeTimers()
+    test("hero claims: the time-control count comes from the real presets", () => {
+        render(<Home />)
+        expect(screen.getByText('time controls').previousSibling).toHaveTextContent('6')
+        expect(screen.getByText('games available').previousSibling).toHaveTextContent('∞')
+        expect(screen.getByText('always').previousSibling).toHaveTextContent('Free')
+    })
+
+    test("hero board shows the King's Gambit after 4. h4 with h2-h4 highlighted", () => {
         const { container } = render(<Home />)
-        const start = pieces(container)
-        expect(start).toBe('♜♞♝♛♚♝♞♜♟♟♟♟♟♟♟♟' + '.'.repeat(32) + '♙♙♙♙♙♙♙♙♖♘♗♕♔♗♘♖')
-        expect(highlighted(container)).toEqual([])
-        act(() => { jest.advanceTimersByTime(900) })
-        // e2 = index 52, e4 = index 36
-        expect(highlighted(container)).toEqual([36, 52])
-        act(() => { jest.advanceTimersByTime(900 * 7) })
-        expect(highlighted(container)).toEqual([30, 38]) // g5g4
-        expect(pieces(container)).toBe('♜♞♝♛♚♝♞♜♟♟♟♟.♟.♟' + '.'.repeat(20) + '♙♟♟♙' + '.....♘..' + '♙♙♙♙..♙.' + '♖♘♗♕♔♗.♖')
-        act(() => { jest.advanceTimersByTime(900 + 3000) })
-        expect(pieces(container)).toBe(start)
-        expect(highlighted(container)).toEqual([])
+        expect(screen.getByRole('img', { name: "King's Gambit position after 4. h4" })).toBeInTheDocument()
+        expect(squareAt(container, 'h2')).toHaveClass('bg-board-hero-last-dark')
+        expect(squareAt(container, 'h4')).toHaveClass('bg-board-hero-last-dark')
+        expect(squareAt(container, 'g4')).toHaveClass('bg-board-light')
+        expect(squareAt(container, 'h3')).toHaveClass('bg-board-light')
+        expect(squareAt(container, 'h1')).toHaveClass('bg-board-light')
+        expect(container.querySelectorAll('.g-piece-slot')).toHaveLength(31) // white's f-pawn was taken (2... exf4)
+        expect(screen.getByText("King's Gambit · 1. e4 e5 2. f4 exf4 3. Nf3 g5 4. h4")).toBeInTheDocument()
     })
 })
 
 describe('landing demo board timers (F17)', () => {
-    test('one reset is scheduled after the last move, and unmount clears every timer', () => {
+    test('the static board schedules no timers', () => {
         jest.useFakeTimers()
         const { unmount } = render(<Home />)
-        act(() => { jest.advanceTimersByTime(900 * 8) }) // all 8 demo moves played
-        act(() => { jest.advanceTimersByTime(900 * 2) }) // two idle ticks while the reset is pending
-        expect(jest.getTimerCount()).toBe(2) // the move interval + exactly one reset timeout
+        act(() => { jest.advanceTimersByTime(900 * 10) })
+        expect(jest.getTimerCount()).toBe(0)
         unmount()
         expect(jest.getTimerCount()).toBe(0)
     })

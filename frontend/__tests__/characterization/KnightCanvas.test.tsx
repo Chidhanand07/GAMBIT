@@ -1,16 +1,17 @@
 /**
  * Characterization tests (fe-misc, PR 16 track) for the canvas animations
- * components/ui/KnightBackground.tsx and components/ui/KnightIntro.tsx.
+ * components/ui/KnightBackground.tsx. (The KnightIntro canvas intro was replaced by the CSS
+ * splash, components/effects/IntroSplash.tsx; its behaviour is pinned in
+ * __tests__/components/effects/IntroSplash.test.tsx.)
  *
  * jsdom has no canvas, so a recording 2D context logs every draw call and
  * property write. Math.random, performance.now and requestAnimationFrame are
  * driven by the test, so a run is fully deterministic: the digest of the call
  * log pins the exact pixels-to-be across a refactor.
  */
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { createHash } from 'crypto'
 import KnightBackground from '@/components/ui/KnightBackground'
-import KnightIntro, { sampleKnightPerimeter, sampleKnightPoints } from '@/components/ui/KnightIntro'
 
 type LogEntry = (string | number | boolean | null)[]
 let log: LogEntry[] = []
@@ -105,67 +106,3 @@ describe('KnightBackground', () => {
         expect({ entries: log.length, digest: digest() }).toMatchSnapshot()
     })
 })
-
-describe('KnightIntro', () => {
-    test('sampling helpers map silhouette pixels into the destination box', () => {
-        const pts = sampleKnightPoints(400, 1200, 800)
-        const edge = sampleKnightPerimeter(600, 1200, 800)
-        expect(pts).toHaveLength(400)
-        expect(edge).toHaveLength(600)
-        expect(pts[0]).toEqual({ x: 392, y: 192 })
-        expect({ pts: digestOf(pts), edge: digestOf(edge), log: digest() }).toMatchSnapshot()
-    })
-
-    test('full 17.5 s timeline: overlay/intro opacity and onComplete', () => {
-        const onComplete = jest.fn()
-        const { container } = render(<KnightIntro onComplete={onComplete} />)
-        const root = container.firstElementChild as HTMLElement
-        const title = screen.getByText('GAMBIT').parentElement as HTMLElement
-        const opacities: [number, string, string][] = []
-        for (let t = 0; t <= 18000; t += 250) {
-            frame(t === 0 ? 0 : 250)
-            if (t % 1000 === 0) opacities.push([t, root.style.opacity, title.style.opacity])
-        }
-        expect(onComplete).toHaveBeenCalledTimes(1)
-        expect(rafQueue.size).toBe(0)
-        expect(opacities).toMatchSnapshot()
-        expect({ entries: log.length, digest: digest() }).toMatchSnapshot()
-    })
-
-    test('skip button calls onComplete; unmount cancels the frame loop', () => {
-        const onComplete = jest.fn()
-        const { unmount } = render(<KnightIntro onComplete={onComplete} />)
-        frame(16)
-        fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
-        expect(onComplete).toHaveBeenCalledTimes(1)
-        unmount()
-        expect(rafQueue.size).toBe(0)
-    })
-
-    test('F17: Skip stops the frame loop at once, and onComplete never fires a second time', () => {
-        const onComplete = jest.fn()
-        render(<KnightIntro onComplete={onComplete} />)
-        frame(16)
-        fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
-        expect(rafQueue.size).toBe(0)
-        for (let t = 0; t <= 18000; t += 250) frame(250)
-        expect(onComplete).toHaveBeenCalledTimes(1)
-    })
-
-    // F17 (was: '... completes immediately (and still starts the canvas)', rafQueue.size 1):
-    // a completed intro runs no frame loop.
-    test.each([
-        ['reduced motion', () => { (window as any).matchMedia = jest.fn(() => ({ matches: true })) }],
-        ['low-end CPU', () => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }) }],
-    ])('%s completes immediately and starts no frame loop', (_name, setup) => {
-        setup()
-        const onComplete = jest.fn()
-        render(<KnightIntro onComplete={onComplete} />)
-        expect(onComplete).toHaveBeenCalledTimes(1)
-        expect(rafQueue.size).toBe(0)
-    })
-})
-
-function digestOf(v: unknown) {
-    return createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16)
-}

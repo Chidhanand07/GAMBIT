@@ -140,6 +140,7 @@ const config: Config = {
             },
             dropShadow: {
                 piece: v('drop-shadow-piece'),
+                'splash-knight': v('drop-shadow-splash-knight'),
             },
             transitionTimingFunction: scale('ease', ['spring', 'spring-nav', 'piece', 'splash', 'splash-particle']),
             transitionDuration: scale('duration', [

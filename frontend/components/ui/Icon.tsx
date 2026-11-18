@@ -15,6 +15,11 @@ export const ICON_PATHS = {
     signOut: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
     home: 'M3 11l9-8 9 8M5 10v10h14V10',
     arrowRight: 'M5 12h14M12 5l7 7-7 7',
+    chevronRight: 'M9 18l6-6-6-6',
+    bolt: 'M13 2 3 14h9l-1 8 10-12h-9l1-8z',
+    users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+    shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+    globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

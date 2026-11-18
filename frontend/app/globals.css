@@ -121,6 +121,7 @@
     --shadow-trail-trace:    inset 0 0 0 1px rgba(239,191,91,0.4), 0 0 28px rgba(239,191,91,0.28);
     --shadow-splash-particle: 0 0 8px rgba(239,191,91,.8);
     --drop-shadow-piece:     0 1px 1px rgba(0,0,0,0.35);
+    --drop-shadow-splash-knight: 0 0 28px rgba(239,191,91,0.35);
 
     /* Motion */
     --ease-spring:          cubic-bezier(.34,1.56,.64,1);
