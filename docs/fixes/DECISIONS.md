@@ -118,6 +118,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | ADR | Title | PR | Items |
 |---|---|---|---|
 | [F-100](#f-100) | Board coordinates are off by default: the Game and Analysis mockups win over the Settings sample row | v2 | A2-1 |
+| [F-101](#f-101) | Sign in with "Email or username": server-side lookup, one failure message, one timing class | v2 | A2-2 |
 
 ---
 
@@ -2409,3 +2410,43 @@ the Dependabot part of F-057).**
   and the Settings live preview follows the draft value. A stored `showCoordinates: true` keeps
   working; only users with nothing stored see the change. "Reset to defaults" now turns
   coordinates off.
+
+## F-101
+
+**Sign in with "Email or username" (A2-2, `Signin.dc.html`).**
+
+- **Context.** The mockup's first field is "Email or username" (`type="text"`,
+  `autocomplete="username"`). The app signed in from the browser with an e-mail only. A username
+  has to become an e-mail somewhere; doing that in the browser would hand anyone the e-mail of any
+  username.
+- **Decision.** The form posts `{ identifier, password }` to `POST /api/auth/login` (the older
+  `{ email, password }` body is still accepted). The route:
+  1. rate limits per client IP, then per identifier (lower-cased, across IPs) with the existing
+     Upstash limiter (F-046), before any lookup;
+  2. treats an identifier with `@` as an e-mail (usernames cannot contain `@`); otherwise
+     `lib/server/loginIdentity.resolveLoginEmail` finds the profile with the secret-key client by a
+     case-insensitive **exact** match (`ilike` with `_` escaped; `%`, `*`, `\` are refused by the
+     username rule) and reads the auth user's e-mail with `auth.admin.getUserById`. When two
+     names differ only in case (the column is case-sensitive UNIQUE) the exact spelling wins,
+     otherwise nobody matches;
+  3. always runs one admin lookup and one password check: an unknown user is checked against a
+     fresh `<uuid>@login.invalid` address (RFC 2606 reserved TLD) and refused even if that check
+     passed;
+  4. answers every failure with 401 and the same `Invalid email, username or password` (only a
+     correct password on an unconfirmed account gets "Please confirm your email"), after padding
+     the response to at least `FAILED_LOGIN_MIN_MS` (800 ms) from the start of the lookup, so an
+     unknown user, a wrong password and Supabase's own fast "no such e-mail" path share one
+     timing class. Success is not padded.
+  The e-mail is never returned or logged (a test checks every console call). The browser then
+  refetches the profile (the session cookies came back on the response) and navigates as before.
+- **Options rejected.** Resolving in the browser or through a public "email for username"
+  endpoint (enumeration and e-mail disclosure). Also limiting the resolved account's e-mail key
+  on the username path: a 429 there would reveal that a username belongs to an e-mail an attacker
+  had just exhausted. So an account's e-mail and username have separate allowances (2 × 10 per
+  15 min), which the per-IP limit still bounds.
+- **Not changed.** Sign-up's username availability check (`GET /api/users/check-username` on
+  the realtime server) stays as is: usernames are public (profile URLs), it answers only
+  "available or not", and it is already rate limited (`httpUsernameCheck`).
+- **Consequences.** A username login without `SUPABASE_SECRET_KEY` reads as unknown (logged
+  once per request, without the identifier). The message text changed from "Invalid email or
+  password" to "Invalid email, username or password".

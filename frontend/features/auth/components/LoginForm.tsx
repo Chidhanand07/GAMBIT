@@ -22,14 +22,16 @@ export function LoginForm() {
             <OrDivider />
             <form onSubmit={(e) => void login.onSubmit(e)} className="flex flex-col gap-4">
                 <AuthField
-                    id="email"
-                    name="email"
-                    label="Email"
-                    type="email"
+                    id="login"
+                    name="login"
+                    label="Email or username"
+                    type="text"
                     placeholder="you@example.com"
-                    autoComplete="email"
-                    value={login.email}
-                    onChange={(e) => login.onEmail(e.target.value)}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={login.identifier}
+                    onChange={(e) => login.onIdentifier(e.target.value)}
                     required
                     disabled={login.loading}
                 />

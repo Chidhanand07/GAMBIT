@@ -83,10 +83,18 @@ export const schemas = {
             .pipe(z.number().int().min(1))
             .transform((n) => Math.min(n, MAX_LIVE_GAMES)),
     }),
-    login: z.object({
-        email: z.string().min(1).max(MAX_EMAIL_LENGTH),
-        password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
-    }),
+    /**
+     * POST /api/auth/login: `identifier` is an e-mail or a username (Signin.dc.html "Email or
+     * username"). `email` is the older body's name for it and is still accepted (F-101).
+     */
+    login: z
+        .object({
+            identifier: z.string().trim().min(1).max(MAX_EMAIL_LENGTH).optional(),
+            email: z.string().trim().min(1).max(MAX_EMAIL_LENGTH).optional(),
+            password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+        })
+        .transform(({ identifier, email, password }) => ({ identifier: identifier ?? email ?? '', password }))
+        .refine((body) => body.identifier !== ''),
     signup: z.object({
         email: z.string().min(1).max(MAX_EMAIL_LENGTH),
         password: z.string().min(1).max(MAX_PASSWORD_LENGTH),

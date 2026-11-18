@@ -154,27 +154,71 @@ describe('auth/exchange', () => {
 })
 
 describe('login', () => {
-    const fill = (container: HTMLElement, email: string, password: string) => {
-        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: email } })
-        fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: password } })
+    // [F-101] was: the form called the browser Supabase client with { email, password }; it now
+    // posts { identifier, password } to /api/auth/login, which also accepts a username.
+    const fill = (identifier: string, password: string) => {
+        fireEvent.change(screen.getByLabelText('Email or username'), { target: { value: identifier } })
+        fireEvent.change(screen.getByLabelText('Password'), { target: { value: password } })
     }
+    const answer = (status: number, body: unknown = {}) =>
+        fetchMock.mockResolvedValue({ ok: status === 200, status, json: async () => body })
+    const loginCall = (identifier: string, password: string) => ['/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+    }]
 
-    test('bad credentials show an error that clears when the user types again', async () => {
-        auth.signInWithPassword.mockResolvedValue({ error: { message: 'x' } })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
+    test('[F-101] the field is "Email or username": a text input with username autocomplete', () => {
+        render(<LoginPage />)
+        const field = screen.getByLabelText('Email or username')
+        expect(field).toHaveAttribute('type', 'text')
+        expect(field).toHaveAttribute('autocomplete', 'username')
+        expect(field).toHaveAttribute('placeholder', 'you@example.com')
+        expect(field).toBeRequired()
+    })
+
+    test('[F-101] a username is sent to the server as typed (trimmed); the browser client is not used', async () => {
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('  Magnus_C ', 'pw')
         fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
-        expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'pw' })
-        expect(screen.getByText('Invalid email or password')).toBeInTheDocument()
-        fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'pw2' } })
-        expect(screen.queryByText('Invalid email or password')).not.toBeInTheDocument()
+        expect(fetchMock.mock.calls).toEqual([loginCall('Magnus_C', 'pw')])
+        expect(auth.signInWithPassword).not.toHaveBeenCalled()
+        expect(push.mock.calls).toEqual([['/lobby']])
+    })
+
+    test('bad credentials show the server\'s message, which clears when the user types again', async () => {
+        // was: 'Invalid email or password' from the browser client
+        answer(401, { error: 'Invalid email, username or password' })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(fetchMock.mock.calls).toEqual([loginCall('a@b.c', 'pw')])
+        expect(screen.getByText('Invalid email, username or password')).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw2' } })
+        expect(screen.queryByText('Invalid email, username or password')).not.toBeInTheDocument()
+        expect(push).not.toHaveBeenCalled()
+    })
+
+    test('[F-101] 429 says to wait; any other failure is the generic sign-in message', async () => {
+        answer(429, { error: 'rate_limited' })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(screen.getByText('Too many sign-in attempts. Please wait a few minutes and try again.')).toBeInTheDocument()
+        answer(400, { error: 'Email and password are required' })
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(screen.getByText('Invalid email, username or password')).toBeInTheDocument()
     })
 
     test('a thrown sign-in shows the generic error', async () => {
-        auth.signInWithPassword.mockRejectedValue(new Error('net'))
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
+        fetchMock.mockRejectedValue(new Error('net'))
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
         fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(screen.getByText('Something went wrong. Please try again.')).toBeInTheDocument()
@@ -182,9 +226,9 @@ describe('login', () => {
 
     test('success pushes to ?redirect (or /lobby) and refreshes', async () => {
         searchParams = new URLSearchParams('redirect=/join/tok')
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
         fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/join/tok']])
@@ -199,18 +243,18 @@ describe('login', () => {
         ['javascript:alert(1)'],
     ])('success with redirect=%j goes to /lobby, never off-site [S6]', async (redirect) => {
         searchParams = new URLSearchParams({ redirect })
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
         fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/lobby']])
     })
 
     test('success without redirect goes to /lobby', async () => {
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
         fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/lobby']])
@@ -235,10 +279,10 @@ describe('login', () => {
     ])('F17: ?error=%j from the OAuth callback is shown, not dropped', (code, message) => {
         searchParams = new URLSearchParams({ error: code, redirect: '/game/1' })
         window.history.replaceState(null, '', `/login?${searchParams}`)
-        const { container } = render(<LoginPage />)
+        render(<LoginPage />)
         expect(screen.getByText(message)).toBeInTheDocument()
         expect(window.location.search).toBe('?redirect=%2Fgame%2F1')
-        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: 'a' } })
+        fireEvent.change(screen.getByLabelText('Email or username'), { target: { value: 'a' } })
         expect(screen.queryByText(message)).not.toBeInTheDocument()
         window.history.replaceState(null, '', '/')
     })

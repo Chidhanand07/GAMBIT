@@ -10,11 +10,14 @@ const CODE_EXCHANGE_BACKOFF_MS = 1500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** The one message for an unknown user and a wrong password alike (no account enumeration). */
+export const INVALID_LOGIN_MESSAGE = 'Invalid email, username or password';
+
 /** 401 message for a failed password sign-in. */
 export function loginErrorMessage(error: { message: string }): string {
     return error.message.toLowerCase().includes('email not confirmed')
         ? 'Please confirm your email before signing in.'
-        : 'Invalid email or password';
+        : INVALID_LOGIN_MESSAGE;
 }
 
 /** 400 message for a failed admin `createUser`. */
