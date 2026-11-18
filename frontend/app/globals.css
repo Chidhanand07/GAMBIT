@@ -72,6 +72,18 @@
     --color-mark-preview-dot: rgba(20,60,35,0.5);
     --color-mark-preview-hint: rgba(110,200,120,0.5);
 
+    /* Move-review classifications (game result page; no mockup has them). */
+    --color-review-brilliant:   #26C2A3;
+    --color-review-great:       #5B8BB0;
+    --color-review-best:        #749B4F;
+    --color-review-excellent:   #81B64C;
+    --color-review-good:        #A0A0A0;
+    --color-review-book:        #A88865;
+    --color-review-inaccuracy:  #F0C15C;
+    --color-review-mistake:     #E58F2A;
+    --color-review-miss:        #D96BA0;
+    --color-review-blunder:     #CA3431;
+
     /* Colour — pieces (pieceImg() in Main.dc.html) */
     --color-piece-white-fill:   #F6F0E0;
     --color-piece-white-line:   #2A211C;
@@ -433,33 +445,8 @@
   }
 }
 
-/* Legacy tokens: still used by the screens with no mockup (challenge, invite link, offline setup, toasts). */
+/* Base element rules. */
 @layer base {
-  :root {
-    /* Surfaces */
-    --bg-page:      #0F0D0B;
-    --bg-surface:   #1A1714;
-    --bg-elevated:  #231F1B;
-    --bg-hover:     #2A2520;
-
-    /* Accent */
-    --accent:       #C4965A;
-    --accent-hover: #D4A96A;
-
-    /* Text */
-    --text-primary:   #F2EDE6;
-    --text-secondary: #9A8E84;
-    --text-tertiary:  #5E534C;
-
-    /* Borders */
-    --border:        rgba(255,255,255,0.06);
-    --border-strong: rgba(255,255,255,0.12);
-
-    /* Semantic */
-    --green:  #4FA85A;
-    --red:    #C0392B;
-  }
-
   * {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -501,24 +488,22 @@
   /* Thin scrollbars */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
+    scrollbar-color: var(--color-line-strong) transparent;
   }
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+  ::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-line-field); }
 }
 
 @layer utilities {
-  /* Toast slide-up */
-  @keyframes toastIn {
+  /* Toasts (components/Toast.tsx): a short rise; none with reduced motion. */
+  @keyframes g-toast-in {
     from { opacity: 0; transform: translateY(12px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .toast-enter {
-    animation: toastIn 200ms ease forwards;
+  .g-toast-in { animation: g-toast-in var(--duration-200) ease forwards; }
+  @media (prefers-reduced-motion: reduce) {
+    .g-toast-in { animation: none; }
   }
-
-  /* Button press */
-  .btn-press:active { transform: scale(0.97); transition: transform 100ms; }
 }

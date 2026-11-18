@@ -122,6 +122,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-102](#f-102) | Game screen = Game.dc.html: sound lives in Settings, no bell in a game, no "You" chip, typed slots for watchers / rating risk / country | v2 | A2-3 |
 | [F-103](#f-103) | Analysis engine readout rebuilt from the design's "Game info" rows; no Reset (the mockup has none) | v2 | A2-4 |
 | [F-104](#f-104) | Remaining chosen deviations follow the mockups: Mark all read, guest presence, Games row, friend status, preview marks, one Reset | v2 | A2-5 |
+| [F-105](#f-105) | Screens without a mockup are built from the mockups' components; the legacy theme is deleted | v2 | A3 |
 
 ---
 
@@ -2538,3 +2539,35 @@ the Dependabot part of F-057).**
   nothing until Save, and says "Defaults restored." (the profile bar said "Changes discarded.").
 - **Data items on the game page** ("3 watching", "about N rating points") have typed optional
   inputs since F-102.
+
+## F-105
+
+**Screens with no mockup reuse the mockups' components and tokens; the legacy theme is deleted (A3).**
+
+- **Rule used.** No new visual language: every screen without a mockup is assembled from a
+  pattern that some mockup already has. Logic and copy are unchanged (tests that pinned legacy
+  class names now check roles and `aria-pressed` / `aria-checked` instead).
+- **Mapping.**
+  - Not found (`app/not-found.tsx`, new), error (`app/error.tsx`, new), invite and expired invite:
+    the sign-in card (`components/layout/CenteredCard`, which `AuthCard` now wraps unchanged).
+    The error page shows nothing of the error and logs nothing (S14).
+  - Challenge page: Settings' card with option rows (label left; segmented `Tabs` or the
+    `Switch`, now a shared `components/ui/Switch`), the game screen's notice row for
+    sent / declined, the primary pill button.
+  - Invite details: the "Game info" rows (`InfoRow`, F-103).
+  - Offline setup: the lobby's "Play MAVERICK" choices, moved to
+    `features/offline/components/MaverickChoices` (+ `features/offline/choices.ts`) and used by both
+    the lobby card and `/offline` (the lobby re-exports the choices, so its imports still work).
+  - Toasts: the header popover surface that `ChallengeToast` already used, with a coloured left
+    rule per type; errors are `role="alert"`, others `role="status"`.
+  - Loading: `components/ui/Spinner` (line track, gold arc) and `components/layout/PageSkeleton`
+    (card-surface blocks in the page's outline) in a `loading.tsx` for every route that fetches
+    data (lobby, leaderboard, profile, game, game review, settings, challenge, join). Both move
+    only under `motion-safe`.
+  - Game review: already on tokens; its ten classification colours became tokens too
+    (`--color-review-*`), values unchanged.
+- **Legacy theme deleted.** `--bg-page`, `--bg-surface`, `--bg-elevated`, `--bg-hover`,
+  `--accent`, `--accent-hover`, `--text-*`, `--border*`, `--green`, `--red`, the Tailwind names
+  that pointed at them (`page`, `elevated`, `hover`, `text-*`, `border-*`, `accent-hover`), the
+  legacy `rounded-lg`, `shadow-board`, the 0.5px default border width and the `.btn-press` /
+  `.toast-enter` utilities. A test fails if any of them comes back.

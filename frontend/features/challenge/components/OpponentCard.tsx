@@ -1,34 +1,23 @@
 import Link from 'next/link';
+import { Avatar } from '@/components/ui/Avatar';
 import type { ChallengeOpponent } from '../types';
-import { AvatarImage } from '@/components/ui/AvatarImage';
-
-/** The avatar box is w-10. */
-const OPPONENT_AVATAR_PX = 40;
 
 const DEFAULT_RATING = 1200;
 
+/** The player being challenged: avatar, name and handle with the rapid rating (Profile row style). */
 export function OpponentCard({ opponent }: { opponent: ChallengeOpponent }) {
     const name = opponent.display_name || opponent.username;
     return (
-        <div className="px-5 py-4 border-b border-border bg-elevated">
-            <p className="text-xs text-text-tertiary uppercase tracking-wider mb-2">Opponent</p>
-            <Link
-                href={`/profile/${opponent.username}`}
-                className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-            >
-                <div className="w-10 h-10 rounded-full bg-page border border-border-strong flex items-center justify-center overflow-hidden shrink-0">
-                    {opponent.avatar_url ? (
-                        <AvatarImage src={opponent.avatar_url} size={OPPONENT_AVATAR_PX} />
-                    ) : (
-                        <span className="text-accent font-medium">{name[0].toUpperCase()}</span>
-                    )}
-                </div>
-                <div>
-                    <div className="text-text-primary font-medium">{name}</div>
-                    <div className="text-text-tertiary text-xs">
+        <div className="flex flex-col gap-2 px-7 pb-5 pt-[22px]">
+            <span className="text-[13px] font-semibold text-ink-muted">Opponent</span>
+            <Link href={`/profile/${opponent.username}`} className="flex items-center gap-[14px] no-underline">
+                <Avatar name={name} src={opponent.avatar_url} size="md" tone="surface" />
+                <span className="flex min-w-0 flex-col">
+                    <span className="font-semibold">{name}</span>
+                    <span className="font-mono text-[13px] text-ink-muted">
                         @{opponent.username} · {Math.round(opponent.rating_rapid ?? DEFAULT_RATING)} Rapid
-                    </div>
-                </div>
+                    </span>
+                </span>
             </Link>
         </div>
     );

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { LogoTile } from '@/components/ui/KnightMark';
+import { CenteredCard } from '@/components/layout/CenteredCard';
 
 interface AuthCardProps {
     title: string;
@@ -10,18 +10,9 @@ interface AuthCardProps {
 /** The centred auth card (Signin.dc.html / Signup.dc.html): logo tile, heading, then the form. */
 export function AuthCard({ title, subtitle, children }: AuthCardProps) {
     return (
-        <div id="top" className="box-border flex justify-center px-6 pb-24 pt-14">
-            <div className="box-border flex w-full max-w-[440px] flex-col gap-5 rounded-28 border-1 border-line bg-surface p-9 shadow-auth-card">
-                <div className="flex flex-col items-center gap-[10px] text-center">
-                    <LogoTile size="lg" />
-                    <h1 className="m-0 mt-2 font-display text-[32px] font-bold leading-[1.1] tracking-[-0.03em]">
-                        {title}
-                    </h1>
-                    {subtitle && <p className="m-0 text-ink-muted">{subtitle}</p>}
-                </div>
-                {children}
-            </div>
-        </div>
+        <CenteredCard id="top" title={title} subtitle={subtitle}>
+            {children}
+        </CenteredCard>
     );
 }
 

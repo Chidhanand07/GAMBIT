@@ -89,12 +89,14 @@ describe('setup screen', () => {
     test('shows difficulties, colour choices and Start Game; no fetch', () => {
         render(<ComputerPage />)
         expect(screen.getByRole('heading', { name: 'Play MAVERICK' })).toBeInTheDocument()
-        expect(screen.getByText('Plays your style — makes real mistakes')).toBeInTheDocument()
-        expect(screen.getByText('Plays like you, but avoids blunders')).toBeInTheDocument()
-        expect(screen.getByText('Style moves sharpened by Stockfish')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /^Medium/ }).getAttribute('style')).toContain('var(--accent)')
-        expect(screen.getByRole('button', { name: /^Easy/ }).getAttribute('style')).toContain('var(--border)')
-        expect(screen.getByRole('button', { name: /White/ }).getAttribute('style')).toContain('var(--accent)')
+        // [A3] was: the old setup copy and inline legacy-token styles — now the lobby's MAVERICK
+        // choices (Main.dc.html copy, aria-pressed, design tokens)
+        expect(screen.getByText('Plays your style and makes real mistakes.')).toBeInTheDocument()
+        expect(screen.getByText('Plays like you, but avoids blunders.')).toBeInTheDocument()
+        expect(screen.getByText('Your style, sharpened by Stockfish.')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /^Medium/ })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('button', { name: /^Easy/ })).toHaveAttribute('aria-pressed', 'false')
+        expect(screen.getByRole('button', { name: /White/ })).toHaveAttribute('aria-pressed', 'true')
         expect(screen.getByRole('button', { name: /Random/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Black/ })).toBeInTheDocument()
         expect(fetchMock).not.toHaveBeenCalled()
@@ -206,7 +208,7 @@ describe('playing as white', () => {
     test('New game returns to setup keeping the previous choices', () => {
         start({ difficulty: 'Easy' })
         click(screen.getByRole('button', { name: 'New game' }))
-        expect(screen.getByRole('button', { name: /^Easy/ }).getAttribute('style')).toContain('var(--accent)')
+        expect(screen.getByRole('button', { name: /^Easy/ })).toHaveAttribute('aria-pressed', 'true')
     })
 
     test('player checkmate (fool\'s mate reversed) shows win text and plays end sound(true)', async () => {

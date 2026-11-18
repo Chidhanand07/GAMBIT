@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useState } from 'react';
-import { Check, AlertCircle, Info, X } from 'lucide-react';
+import { Icon } from '@/components/ui/Icon';
+import { cn } from '@/lib/design/cn';
 
 type ToastType = 'success' | 'error' | 'info';
 interface Toast { id: number; type: ToastType; message: string; }
@@ -19,26 +20,43 @@ function withoutToast(id: number) {
     return (prev: Toast[]) => prev.filter(t => t.id !== id);
 }
 
-function accentColor(type: ToastType) {
-    return type === 'success' ? 'var(--green)' : type === 'error' ? 'var(--red)' : 'var(--accent)';
-}
+/** Stroked icons in the design's style (24×24, Lucide paths as in the mockups). */
+const TOAST_ICONS: Record<ToastType, string> = {
+    success: 'M20 6 9 17l-5-5',
+    error: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v4M12 16h.01',
+    info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+};
 
+/** The left rule and icon colour per type. */
+const TONES: Record<ToastType, { rule: string; icon: string }> = {
+    success: { rule: 'border-l-success', icon: 'text-success' },
+    error: { rule: 'border-l-danger', icon: 'text-danger' },
+    info: { rule: 'border-l-accent', icon: 'text-accent' },
+};
+
+/**
+ * One toast. No mockup has toasts, so it uses the header popover's surface (as ChallengeToast
+ * does) with a coloured left rule; errors are announced as alerts.
+ */
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+    const tone = TONES[t.type];
     return (
-        <div className="toast-enter pointer-events-auto flex items-start gap-3 rounded-xl px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.4)] min-w-[260px] max-w-[340px]"
-            style={{
-                background: 'var(--bg-elevated)',
-                border: '0.5px solid var(--border-strong)',
-                borderLeft: `3px solid ${accentColor(t.type)}`,
-            }}>
-            <span className="shrink-0 mt-0.5">
-                {t.type === 'success' && <Check size={15} className="text-green-400" />}
-                {t.type === 'error'   && <AlertCircle size={15} className="text-red-400" />}
-                {t.type === 'info'    && <Info size={15} className="text-accent" />}
-            </span>
-            <span className="text-sm leading-snug flex-1" style={{ color: 'var(--text-primary)' }}>{t.message}</span>
-            <button onClick={() => onDismiss(t.id)} className="shrink-0 transition-colors mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                <X size={13} />
+        <div
+            role={t.type === 'error' ? 'alert' : 'status'}
+            className={cn(
+                'g-toast-in pointer-events-auto box-border flex min-w-[260px] max-w-[340px] items-start gap-3 rounded-16 border-1 border-l-[3px] border-line bg-surface-header py-3 pl-4 pr-2 text-ink shadow-popover',
+                tone.rule,
+            )}
+        >
+            <Icon path={TOAST_ICONS[t.type]} size={16} className={cn('mt-[3px] shrink-0', tone.icon)} />
+            <span className="flex-1 text-[14px] leading-snug">{t.message}</span>
+            <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => onDismiss(t.id)}
+                className="-my-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-ink-muted"
+            >
+                <Icon name="close" size={14} />
             </button>
         </div>
     );
@@ -58,7 +76,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return (
         <ToastContext.Provider value={{ toast }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[500] flex flex-col gap-2 pointer-events-none">
+            <div className="pointer-events-none fixed bottom-4 right-4 z-[500] flex max-w-[calc(100vw-32px)] flex-col gap-2">
                 {toasts.map(t => <ToastItem key={t.id} toast={t} onDismiss={dismiss} />)}
             </div>
         </ToastContext.Provider>

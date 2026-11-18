@@ -61,9 +61,10 @@ describe('challenge/[username]', () => {
     }
 
     test('fetches the opponent by encoded username; spinner until it loads', async () => {
-        const { container } = await renderChallenge(null)
+        await renderChallenge(null)
         expect(fetchMock.mock.calls).toEqual([['/api/profile/bob%20b']])
-        expect(container.querySelector('.animate-spin')).not.toBeNull()
+        // [A3] was: a `.animate-spin` div — now the design's Spinner, announced as a status
+        expect(screen.getByRole('status', { name: 'Loading player' })).toBeInTheDocument()
         expect(screen.queryByText('Challenge a Player')).not.toBeInTheDocument()
     })
 
@@ -74,8 +75,10 @@ describe('challenge/[username]', () => {
         expect(screen.getByText('@bob · 1333 Rapid')).toBeInTheDocument()
         expect(screen.getByText('B')).toBeInTheDocument()
         expect(screen.getByText('Bobby').closest('a')).toHaveAttribute('href', '/profile/bob')
-        expect(screen.getByRole('button', { name: '10 min' }).className).toContain('border-accent bg-accent/10')
-        expect(screen.getByRole('button', { name: '⊕ Random' }).className).toContain('border-accent bg-accent/10')
+        // [A3] was: legacy `border-accent bg-accent/10` classes — now the design's segmented Tabs
+        expect(screen.getByRole('button', { name: '10 min' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('button', { name: '⊕ Random' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('switch', { name: 'Rated Game' })).toHaveAttribute('aria-checked', 'true')
         expect(socket.listenedEvents()).toEqual(['challenge_declined', 'challenge_ready'])
     })
 
@@ -88,9 +91,9 @@ describe('challenge/[username]', () => {
 
     test('send emits the exact challenge_request payload, shows the spinner until the ack, then waits for bob [ACKS] [F17]', async () => {
         profile = { id: 'me', username: 'me1', display_name: null }
-        const { container } = await renderChallenge()
+        await renderChallenge()
         fireEvent.click(screen.getByRole('button', { name: '5 min' }))
-        fireEvent.click(container.querySelector('button.relative.w-11')!)
+        fireEvent.click(screen.getByRole('switch', { name: 'Rated Game' }))
         fireEvent.click(screen.getByRole('button', { name: '♚ Black' }))
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
         expect(socket.emitted('challenge_request')).toEqual([
@@ -101,7 +104,7 @@ describe('challenge/[username]', () => {
         // in the same tick). Now the spinner shows while the server has not acknowledged.
         const sendButton = screen.getByRole('button', { name: /Send Challenge/ })
         expect(sendButton).toBeDisabled()
-        expect(sendButton.querySelector('.animate-spin')).not.toBeNull()
+        expect(sendButton.querySelector('[class*="animate-spin"]')).not.toBeNull()
         expect(screen.queryByText('Challenge sent! Waiting for bob to accept…')).not.toBeInTheDocument()
 
         ackChallenge({ ok: true })
@@ -154,7 +157,7 @@ describe('challenge/[username]', () => {
         expect(screen.getByText('@bob · 1200 Rapid')).toBeInTheDocument()
         expect(document.querySelector('img')).toHaveAttribute('src', 'http://img/a.png')
         expect(screen.getByRole('button', { name: /Send Challenge/ })).toBeDisabled()
-        fireEvent.click(screen.getAllByRole('button')[0])
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
         expect(back).toHaveBeenCalledTimes(1)
     })
 })

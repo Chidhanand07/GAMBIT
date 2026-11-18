@@ -1,4 +1,9 @@
-import { Loader2, Swords } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
+import { Spinner } from '@/components/ui/Spinner';
+import { GameNotice } from '@/features/game/components/StatusBanners';
+
+const SWORDS = 'M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2';
 
 interface ChallengeStatusProps {
     opponentUsername: string;
@@ -9,31 +14,28 @@ interface ChallengeStatusProps {
     onSend: () => void;
 }
 
-/** Declined / waiting banners and the send button. */
+/** Declined / waiting notices (the game screen's notice row) and the send button. */
 export function ChallengeStatus({ opponentUsername, sending, sent, declined, signedIn, onSend }: ChallengeStatusProps) {
     const waiting = sent && !declined;
     return (
-        <>
-            {declined && (
-                <div className="px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm text-center">
-                    {opponentUsername} declined the challenge.
-                </div>
-            )}
-
+        <div className="flex flex-col gap-3 border-t-1 border-line px-7 py-5">
+            {declined && <GameNotice tone="danger">{opponentUsername} declined the challenge.</GameNotice>}
             {waiting && (
-                <div className="px-4 py-3 bg-accent/10 border border-accent/30 rounded-lg text-accent text-sm text-center">
-                    Challenge sent! Waiting for {opponentUsername} to accept…
-                </div>
+                <GameNotice tone="accent">Challenge sent! Waiting for {opponentUsername} to accept…</GameNotice>
             )}
-
-            <button
+            <Button
+                size="xl"
+                className="w-full font-bold disabled:cursor-default disabled:opacity-50"
                 onClick={onSend}
                 disabled={sending || waiting || !signedIn}
-                className="w-full py-3.5 bg-accent hover:bg-accent-hover disabled:opacity-60 text-surface font-bold text-base rounded-xl transition-colors flex items-center justify-center gap-2"
             >
-                {sending ? <Loader2 size={16} className="animate-spin" /> : <Swords size={16} strokeWidth={1.5} />}
+                {sending ? (
+                    <Spinner size="sm" className="border-transparent border-t-on-accent" />
+                ) : (
+                    <Icon path={SWORDS} />
+                )}
                 {waiting ? 'Challenge Sent…' : 'Send Challenge'}
-            </button>
-        </>
+            </Button>
+        </div>
     );
 }

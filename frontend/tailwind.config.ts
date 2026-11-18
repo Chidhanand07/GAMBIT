@@ -33,10 +33,7 @@ const config: Config = {
                     DEFAULT: v('color-line'),
                     ...scale('color-line', ['subtle', 'strong', 'muted', 'row', 'field']),
                 },
-                accent: {
-                    DEFAULT: v('color-accent'),
-                    hover: v('accent-hover'), // legacy, used by the challenge and invite pages
-                },
+                accent: v('color-accent'),
                 ink: {
                     DEFAULT: v('color-ink'),
                     ...scale('color-ink', ['muted', 'faint', 'disabled', 'placeholder', 'bright']),
@@ -81,12 +78,6 @@ const config: Config = {
                     'glyph-neo',
                 ]),
 
-                // ── Legacy tokens: pages not yet moved to the redesign (HANDOFF §8 step 4) ──
-                page: v('bg-page'),
-                elevated: v('bg-elevated'),
-                hover: v('bg-hover'),
-                text: { primary: v('text-primary'), secondary: v('text-secondary'), tertiary: v('text-tertiary') },
-                border: { DEFAULT: v('border'), strong: v('border-strong') },
             },
             fontFamily: {
                 sans: [v('font-inter'), 'Inter', 'system-ui', 'sans-serif'],
@@ -102,13 +93,9 @@ const config: Config = {
                 medium: '500',
             },
             borderRadius: {
-                // legacy
-                lg: '14px',
-                // redesign
                 ...scale('radius', ['3', '4', '10', '12', '14', '16', '20', '24', '28', 'pill']),
             },
             boxShadow: {
-                board: '0 8px 32px rgba(0,0,0,0.5)', // legacy
                 ...scale('shadow', [
                     'header',
                     'popover',
@@ -157,7 +144,6 @@ const config: Config = {
                 'nav-pill-in': `gslide ${v('duration-560')} ${v('ease-spring-nav')} 80ms backwards`,
             },
             borderWidth: {
-                DEFAULT: '0.5px', // legacy
                 1: '1px',
                 1.5: '1.5px',
                 2: '2px',
