@@ -118,7 +118,24 @@ describe('joining a game', () => {
         expect(sync).toEqual({
             fen: START_FEN, moveLog: [], whiteMs: 300000, blackMs: 290000,
             activeSide: 'w', clockActive: false, whiteId: 'white-user', blackId: 'black-user',
+            // A player sees how many watch; nobody does yet [F-130].
+            spectators: 0,
         });
+    });
+
+    test('a spectator joining is counted and announced to the players [F-130]', async () => {
+        await setGame('game-1', makeGame());
+        const white = await connect('white-user');
+        white.emit('join_game', 'game-1');
+        await once(white, 'game_state_sync');
+        const viewer = await connect('viewer');
+        const announced = once(white, 'spectators_changed');
+        viewer.emit('join_game', 'game-1');
+        expect(await once(viewer, 'game_state_sync')).toMatchObject({ spectators: 1 });
+        expect(await announced).toEqual({ game_id: 'game-1', count: 1 });
+        const left = once(white, 'spectators_changed');
+        viewer.emit('leave_game', 'game-1');
+        expect(await left).toEqual({ game_id: 'game-1', count: 0 });
     });
 
     test('a joining client sees the running clock already counted down', async () => {

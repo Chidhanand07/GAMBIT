@@ -483,6 +483,60 @@ test('spectate joins only existing games', async () => {
     expect(client.joined).toEqual(['game_g']);
 });
 
+describe('spectator counts [F-130]', () => {
+    const spectatorsPort = () => ({ watch: jest.fn(async () => 3), count: jest.fn(async () => 2) });
+
+    test('a non-player at a live board is counted and gets the count in game_state_sync', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const spectators = spectatorsPort();
+        const svc = createGameService({ ...ctx, spectators });
+        const client = fakeClient('s9');
+        await svc.joinGame('g', client, 'stranger');
+        expect(spectators.watch).toHaveBeenCalledWith('g', 'stranger', 's9');
+        expect(client.emitted[0].args[0]).toMatchObject({ spectators: 3 });
+    });
+
+    test('a player is never counted as a spectator but sees how many watch', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const spectators = spectatorsPort();
+        const svc = createGameService({ ...ctx, spectators });
+        const client = fakeClient('s1');
+        await svc.joinGame('g', client, 'white-user');
+        expect(spectators.watch).not.toHaveBeenCalled();
+        expect(client.emitted[0].args[0]).toMatchObject({ spectators: 2 });
+    });
+
+    test('a finished game counts nobody', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g', status: 'completed', result: 'white' }) });
+        const spectators = spectatorsPort();
+        await createGameService({ ...ctx, spectators }).joinGame('g', fakeClient(), 'stranger');
+        expect(spectators.watch).not.toHaveBeenCalled();
+    });
+
+    test('a failing count never keeps anyone from the board: the state is sent without it', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const spectators = { watch: jest.fn(async () => Promise.reject(new Error('redis down'))), count: jest.fn() };
+        const client = fakeClient();
+        await createGameService({ ...ctx, spectators }).joinGame('g', client, 'stranger');
+        expect(client.emitted[0].event).toBe('game_state_sync');
+        expect(client.emitted[0].args[0]).not.toHaveProperty('spectators');
+    });
+
+    test('spectate_game counts the viewer too', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const spectators = spectatorsPort();
+        await createGameService({ ...ctx, spectators }).spectate('g', fakeClient('s5'), 'viewer');
+        expect(spectators.watch).toHaveBeenCalledWith('g', 'viewer', 's5');
+    });
+
+    test('without the port no count is sent (unchanged payload)', async () => {
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
+        const client = fakeClient();
+        await ctx.svc.joinGame('g', client, 'stranger');
+        expect(client.emitted[0].args[0]).not.toHaveProperty('spectators');
+    });
+});
+
 describe('clock around a disconnect [G8, G9]', () => {
     const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 

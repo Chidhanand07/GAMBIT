@@ -12,6 +12,8 @@ test('there is a schema for every client → server event (and none for `authent
             'leave_queue',
             'join_game',
             'spectate_game',
+            'leave_game',
+            'spectator_counts',
             'make_move',
             'resign',
             'send_message',
@@ -168,5 +170,20 @@ describe('time-control ranges (shared model) [TIME-CONTROL]', () => {
         expect(ok('join_queue', { time_control: '10', increment: limits.maxIncrementSeconds + 1 })).toBe(false);
         expect(ok('join_queue', { time_control: '10', increment: 1.5 })).toBe(false);
         expect(ok('join_queue', { time_control: '10', increment: -1 })).toBe(false);
+    });
+});
+
+describe('spectator events [F-130]', () => {
+    test('leave_game takes a game id', () => {
+        expect(ok('leave_game', 'game-1')).toBe(true);
+        expect(ok('leave_game', 'x.or(1)')).toBe(false);
+    });
+
+    test('spectator_counts takes at most 20 valid game ids', () => {
+        expect(ok('spectator_counts', { game_ids: [] })).toBe(true);
+        expect(ok('spectator_counts', { game_ids: Array.from({ length: 20 }, (_, i) => `g${i}`) })).toBe(true);
+        expect(ok('spectator_counts', { game_ids: Array.from({ length: 21 }, (_, i) => `g${i}`) })).toBe(false);
+        expect(ok('spectator_counts', { game_ids: ['a,b'] })).toBe(false);
+        expect(ok('spectator_counts', {})).toBe(false);
     });
 });

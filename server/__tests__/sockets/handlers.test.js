@@ -326,3 +326,68 @@ describe('the countdown needs every instance to agree the player is gone [MULTI-
         expect(d.gameService.handleDisconnect.mock.calls).toEqual([['u1', 'g']]);
     });
 });
+
+describe('spectator events [F-130]', () => {
+    /** Like `connect`, but keeps every listener of an event (disconnect has two). */
+    function connectAll(d) {
+        let onConnection;
+        registerSocketHandlers({ on: (event, cb) => (onConnection = cb), use: () => {} }, d);
+        const listeners = {};
+        const socket = {
+            id: 'sock-1',
+            data: { userId: 'u1', tokenExpiresAt: Date.now() + 3_600_000 },
+            on: (event, cb) => (listeners[event] ??= []).push(cb),
+            join: jest.fn(),
+            leave: jest.fn(),
+            emit: jest.fn(),
+            disconnect: jest.fn(),
+        };
+        onConnection(socket);
+        const fire = (event, ...args) => Promise.all(listeners[event].map((cb) => cb(...args)));
+        return { socket, listeners, fire };
+    }
+
+    const spectatorDeps = () => ({
+        ...deps(),
+        spectatorService: {
+            unwatch: jest.fn(async () => true),
+            unwatchAll: jest.fn(async () => {}),
+            counts: jest.fn(async (ids) => Object.fromEntries(ids.map((id) => [id, 4]))),
+        },
+    });
+
+    test('leave_game stops watching and leaves the room; a player socket keeps its room', async () => {
+        const d = spectatorDeps();
+        const { socket, fire } = connectAll(d);
+        const ack = jest.fn();
+        await fire('leave_game', 'g', ack);
+        expect(d.spectatorService.unwatch).toHaveBeenCalledWith('g', 'sock-1');
+        expect(socket.leave).toHaveBeenCalledWith('game_g');
+        expect(ack).toHaveBeenCalledWith({ ok: true });
+
+        d.spectatorService.unwatch.mockResolvedValue(false);
+        socket.leave.mockClear();
+        await fire('leave_game', 'g', jest.fn());
+        expect(socket.leave).not.toHaveBeenCalled();
+    });
+
+    test('spectator_counts acks the counts; a bad payload is refused', async () => {
+        const d = spectatorDeps();
+        const { fire } = connectAll(d);
+        const ack = jest.fn();
+        await fire('spectator_counts', { game_ids: ['g1', 'g2'] }, ack);
+        expect(ack).toHaveBeenCalledWith({ ok: true, counts: { g1: 4, g2: 4 } });
+        const bad = jest.fn();
+        await fire('spectator_counts', { game_ids: 'g1' }, bad);
+        expect(bad).toHaveBeenCalledWith({ ok: false, error: 'invalid_payload' });
+    });
+
+    test('a disconnect stops every watch of the socket, and the session cleanup still runs', async () => {
+        const d = spectatorDeps();
+        const { fire, listeners } = connectAll(d);
+        expect(listeners.disconnect).toHaveLength(2);
+        await fire('disconnect');
+        expect(d.spectatorService.unwatchAll).toHaveBeenCalledWith('sock-1');
+        expect(d.matchmaking.leaveQueueBySocket).toHaveBeenCalledWith('sock-1');
+    });
+});

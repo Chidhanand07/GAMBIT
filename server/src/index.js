@@ -39,6 +39,9 @@ const { createGameFinalizer } = require('./services/gameFinalizer');
 const { createGameService } = require('./services/gameService');
 const { createChatService } = require('./services/chatService');
 const { createSocialService } = require('./services/socialService');
+const { createSpectatorService } = require('./services/spectatorService');
+const { createSpectatorsRepository } = require('./repositories/spectatorsRepository');
+const { SPECTATOR_TTL_MS } = require('./domain/spectators');
 const { createProfileService } = require('./services/profileService');
 const { createTokenVerifier } = require('./services/tokenVerifier');
 const { createOriginPolicy } = require('./services/originPolicy');
@@ -119,6 +122,11 @@ const resultOutboxWorker = createResultOutboxWorker({
     reviewService,
     emitter,
 });
+// Who watches each game, shared by every instance (ADR F-130).
+const spectatorService = createSpectatorService({
+    repo: createSpectatorsRepository(redis, { ttlMs: SPECTATOR_TTL_MS }),
+    emitter,
+});
 const gameService = createGameService({
     gameStore,
     gamesRepo,
@@ -128,6 +136,7 @@ const gameService = createGameService({
     sessions,
     emitter,
     finalizer,
+    spectators: spectatorService,
 });
 
 // Start single global clock ticker (replaces all per-game setInterval timers)
@@ -169,6 +178,7 @@ registerSocketHandlers(io, {
     gameService,
     chatService,
     socialService,
+    spectatorService,
     verifyToken: tokenVerifier.verify,
     tokenDeadline: tokenVerifier.deadline,
     rateLimit: createSocketRateLimit({ limiter: rateLimiter }),
@@ -178,12 +188,14 @@ registerSocketHandlers(io, {
 function start() {
     // Only a running server re-drives stuck results; requiring this module (tests) does not.
     resultOutboxWorker.start();
+    spectatorService.start();
     const shutdown = createShutdown({
         readiness,
         stopTimers: () => {
             matchmaking.destroy();
             stopGlobalClock();
             resultOutboxWorker.stop();
+            spectatorService.stop();
         },
         notifyClients: () => io.emit('server_shutdown', { reconnect: true }),
         closeSockets: () => io.close(),

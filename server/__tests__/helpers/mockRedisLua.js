@@ -93,6 +93,35 @@ const LUA_EMULATIONS = {
         return 1;
     },
 
+    // src/repositories/spectatorsRepository.js (checked against real Redis by spectators.contract.test.js).
+    // PEXPIRE on the sorted set is not emulated: the mock's zsets have no TTL.
+    specJoin(r, [game, games], [member, expiresAt, now, _keyTtl, gameId]) {
+        r.zremBelow(game, now);
+        const added = r.zadd(game, Number(expiresAt), member);
+        r.sadd(games, gameId);
+        return [added, r.zrange(game)];
+    },
+
+    specLeave(r, [game, games], [member, now, gameId]) {
+        const changed = r.zrem(game, member) + r.zremBelow(game, now);
+        const members = r.zrange(game);
+        if (members.length === 0) r.srem(games, gameId);
+        return [changed, members];
+    },
+
+    specPrune(r, [game, games], [now, gameId]) {
+        const removed = r.zremBelow(game, now);
+        const members = r.zrange(game);
+        if (members.length === 0) r.srem(games, gameId);
+        return [removed, members];
+    },
+
+    specRefresh(r, [game], [member, expiresAt]) {
+        if (r.zscore(game, member) === null) return 0;
+        r.zadd(game, Number(expiresAt), member);
+        return 1;
+    },
+
     outboxUnlock(r, [lock], [token]) {
         if (r.get(lock) === token) return r.del(lock);
         return 0;

@@ -54,6 +54,17 @@ function createRedisMock() {
             return had ? 1 : 0;
         },
         zscore(key, member) { const z = zsets.get(key); return z?.has(member) ? String(z.get(member)) : null; },
+        /** ZREMRANGEBYSCORE key -inf max: drop members scored at or below `max`; how many went. */
+        zremBelow(key, max) {
+            const z = zsets.get(key);
+            if (!z) return 0;
+            const gone = [...z.entries()].filter(([, score]) => score <= Number(max)).map(([m]) => m);
+            for (const m of gone) z.delete(m);
+            if (z.size === 0) zsets.delete(key);
+            return gone.length;
+        },
+        sadd(key, member) { if (!sets.has(key)) sets.set(key, new Set()); const s = sets.get(key); const had = s.has(member); s.add(member); return had ? 0 : 1; },
+        srem(key, member) { return sets.get(key)?.delete(member) ? 1 : 0; },
         zcard(key) { return zsets.get(key)?.size ?? 0; },
         /** Members by score, ties by member (as Redis orders them). */
         zrange(key) {

@@ -19,4 +19,6 @@ export interface LiveGame {
     started_at: string | null;
     white: LiveGamePlayer;
     black: LiveGamePlayer;
+    /** Viewers watching, from the game server (F-130); absent until counted. */
+    watching?: number;
 }

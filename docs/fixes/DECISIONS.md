@@ -150,6 +150,12 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | ADR | Title | PR | Items |
 |---|---|---|---|
 
+**Redesign v2, live data** (branch `feat/design-data-live`; PR column = B2).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-130](#f-130) | Spectator counts in Redis with a heartbeat; the lobby reads them over its socket | B2 | LIVE-1 |
+
 ---
 
 ## F-001
@@ -3117,3 +3123,46 @@ their owner (B1 item 8).**
   URL; nothing the browser sends feeds it (NODE-10).
 - Tests: `model.test.ts` (badges, thresholds), `api/profile.test.ts` (standing from
   `leaderboard_rank` on the best pool; null cases), `ProfilePage.test.tsx` (Overview shows them).
+
+## F-130
+
+**Spectator counts live in Redis with a heartbeat; the lobby reads them over its socket (LIVE-1).**
+
+- **Context.** Game.dc.html shows "3 watching" under the title and Main.dc.html shows "N watching" on every
+  live game. `games.spectator_count` was never written, so the redesign left both unwired. With several
+  replicas (F-059) a count kept in process memory would show each replica's share only.
+- **Store.** Per game a sorted set `{spec}:game:<id>`, member `<userId>:<socketId>`, score = the time the
+  member lapses; plus `{spec}:games`, the games that may have spectators. Four Lua scripts (join, leave,
+  prune, refresh) so a join, a leave and a prune never interleave. The count is the number of distinct
+  viewers (two tabs count once); players are never members.
+- **Crash safety: heartbeat, not a per-key TTL.** Each instance remembers only its own watching sockets and
+  moves their scores forward every 20 s (`SPECTATOR_HEARTBEAT_MS`); a member not refreshed for 60 s
+  (`SPECTATOR_TTL_MS`) has lapsed. The same heartbeat prunes every listed game and announces any drop, so a
+  crashed replica's viewers disappear within ~80 s without any replica knowing which one died. A live
+  watcher pruned during a long pause is put back by its own heartbeat. The set key itself expires after two
+  TTLs of silence.
+- **Protocol.** A non-player `join_game` (or `spectate_game`) on an active game adds the socket;
+  `game_state_sync` carries `spectators`; every change is broadcast as `spectators_changed { game_id, count }`
+  to `game_<id>`, which the Socket.IO Redis adapter delivers on every replica. New client events:
+  `leave_game` (the game page unmounts; it only affects a watching socket, never a player's links or rooms)
+  and `spectator_counts { game_ids ≤ 20 }`, acked `{ ok, counts }`. A disconnect stops every watch.
+- **Lobby: read over the socket, not in `/api/games/live`.** Options: (a) the Next route calls a new
+  authenticated game-server endpoint (needs a server-side game-server URL, a shared secret or the user's
+  access token, timeouts, and a second service on the lobby's critical path); (b) the Next route reads
+  Redis (the web app only has Upstash REST for rate limits, F-046, not the game server's Redis); (c) the
+  browser, which already holds an authenticated socket to the game server, asks for the counts of the
+  games it was just given. (c) adds no secret, no env var and no server-to-server call, and a failure only
+  hides the count. Chosen: (c). `/api/games/live` is unchanged; `useLiveGames` merges the counts.
+- **Failure policy.** The count is cosmetic: a failed count is logged and the board still loads (an
+  exception to F-042's "errors propagate", which is about game state). A failed lobby read shows no count;
+  nothing is ever made up.
+- **Not done.** `games.spectator_count` stays unused (not dropped: other readers may exist). Counts for a
+  private game can be read by anyone who knows its UUID; the number is not sensitive and ids are not
+  guessable.
+- **Proof.** `domain/spectators.test.js`; `repositories/spectators.contract.test.js` (Redis mock and real
+  Redis: shared add, leave, lapse and prune, refresh never resurrects); `services/spectatorService.test.js`
+  (two services over one store: shared count, second tab, crashed instance, re-add after a pause);
+  `integration/spectatorsTwoInstances.test.js` (two full instances over one real Redis: viewers on both,
+  players see every change, a killed instance's viewer is pruned by the survivor); socket, schema and
+  frontend tests.
+

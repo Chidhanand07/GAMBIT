@@ -11,6 +11,7 @@
  */
 const { z } = require('zod');
 const { isValidTimeControl } = require('../services/timeControlRules');
+const { MAX_COUNT_REQUEST } = require('../services/spectatorRules');
 
 const MAX_ID_LENGTH = 64;
 const MAX_TIME_CONTROL_LENGTH = 16;
@@ -60,6 +61,10 @@ const schemas = {
     leave_queue: z.unknown(),
     join_game: id,
     spectate_game: id,
+    // Stop watching (the game page closed). A player's socket is not affected (F-130).
+    leave_game: id,
+    // The lobby's live list asks how many watch each game (F-130).
+    spectator_counts: z.object({ game_ids: z.array(id).max(MAX_COUNT_REQUEST) }),
     // Only the squares and the promotion piece are read. A client `fen`, `san`,
     // `move` or `captured` is stripped: the server computes all of them (S1).
     make_move: z.object({

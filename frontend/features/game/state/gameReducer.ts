@@ -54,6 +54,8 @@ export interface GameState {
     focus: boolean;
     /** Set by the server after the first move; the display clock only ticks while true. */
     clockActive: boolean;
+    /** Viewers watching ("N watching"); null until the server has said (F-130). */
+    spectators: number | null;
 }
 
 const DEFAULT_CLOCK_SECONDS = 600;
@@ -87,6 +89,7 @@ export function createInitialGameState(): GameState {
         confirm: null,
         focus: false,
         clockActive: false,
+        spectators: null,
     };
 }
 
@@ -102,8 +105,10 @@ export type GameAction =
           whiteMs: number;
           blackMs: number;
           clockActive: boolean;
+          spectators?: number;
       }
     | { type: 'clockActivated' }
+    | { type: 'spectatorsChanged'; count: number }
     | { type: 'moveReceived'; fen: string; from: Square; to: Square; san: string; whiteMs?: number; blackMs?: number }
     | { type: 'moveCommitted'; fen: string; from: Square; to: Square }
     | { type: 'moveRejected' }
@@ -158,8 +163,10 @@ const handlers: Handlers = {
         whiteTime: msToSeconds(a.whiteMs),
         blackTime: msToSeconds(a.blackMs),
         clockActive: a.clockActive,
+        ...(a.spectators === undefined ? {} : { spectators: a.spectators }),
     }),
     clockActivated: (s) => ({ ...s, clockActive: true }),
+    spectatorsChanged: (s, a) => ({ ...s, spectators: a.count }),
     moveReceived: (s, a) => ({
         ...s,
         ...noSelection(),

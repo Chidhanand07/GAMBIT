@@ -16,7 +16,7 @@ afterEach(() => {
 
 test('reads GET /api/games/live on mount', async () => {
     fetchMock.mockResolvedValue(ok([g('a')]))
-    const { result } = renderHook(() => useLiveGames())
+    const { result } = renderHook(() => useLiveGames(null))
     expect(result.current).toEqual([])
     await waitFor(() => expect(result.current).toEqual([g('a')]))
     expect(fetchMock).toHaveBeenCalledWith('/api/games/live')
@@ -25,7 +25,7 @@ test('reads GET /api/games/live on mount', async () => {
 test('refreshes every LIVE_GAMES_REFRESH_MS and keeps the last list when a refresh fails', async () => {
     jest.useFakeTimers()
     fetchMock.mockResolvedValueOnce(ok([g('a')]))
-    const { result } = renderHook(() => useLiveGames())
+    const { result } = renderHook(() => useLiveGames(null))
     await act(async () => {})
     expect(result.current).toEqual([g('a')])
 
@@ -42,9 +42,42 @@ test('refreshes every LIVE_GAMES_REFRESH_MS and keeps the last list when a refre
 test('stops refreshing on unmount', async () => {
     jest.useFakeTimers()
     fetchMock.mockResolvedValue(ok([]))
-    const { unmount } = renderHook(() => useLiveGames())
+    const { unmount } = renderHook(() => useLiveGames(null))
     await act(async () => {})
     unmount()
     act(() => { jest.advanceTimersByTime(LIVE_GAMES_REFRESH_MS * 3) })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+describe('watcher counts from the game server [F-130]', () => {
+    /** A socket whose `spectator_counts` ack is `answer`. */
+    const fakeSocket = (answer: unknown) => ({
+        emit: jest.fn((_event: string, _payload: unknown, ack: (a: unknown) => void) => ack(answer)),
+    })
+
+    test('asks spectator_counts for the listed games and merges the counts', async () => {
+        fetchMock.mockResolvedValue(ok([g('a'), g('b')]))
+        const socket = fakeSocket({ ok: true, counts: { a: 3, b: 0 } })
+        const { result } = renderHook(() => useLiveGames(socket as any))
+        await waitFor(() => expect(result.current).toEqual([{ ...g('a'), watching: 3 }, { ...g('b'), watching: 0 }]))
+        expect(socket.emit).toHaveBeenCalledWith('spectator_counts', { game_ids: ['a', 'b'] }, expect.any(Function))
+    })
+
+    test('a refused or malformed answer shows no count (never a made-up one)', async () => {
+        fetchMock.mockResolvedValue(ok([g('a')]))
+        const refusing = fakeSocket({ ok: false, error: 'rate_limited' })
+        const refused = renderHook(() => useLiveGames(refusing as any))
+        await waitFor(() => expect(refused.result.current).toEqual([g('a')]))
+        const garbled = fakeSocket({ ok: true, counts: { a: 'many' } })
+        const malformed = renderHook(() => useLiveGames(garbled as any))
+        await waitFor(() => expect(malformed.result.current).toEqual([g('a')]))
+        expect(malformed.result.current[0]).not.toHaveProperty('watching')
+    })
+
+    test('no socket: the list without counts', async () => {
+        fetchMock.mockResolvedValue(ok([g('a')]))
+        const { result } = renderHook(() => useLiveGames(null))
+        await waitFor(() => expect(result.current).toEqual([g('a')]))
+        expect(result.current[0]).not.toHaveProperty('watching')
+    })
 })

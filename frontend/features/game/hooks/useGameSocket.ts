@@ -6,7 +6,7 @@
 import { useEffect, useEffectEvent } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { Profile } from '@/types/profile';
-import { createGameSocketHandlers, joinGameRoom, type SocketHandlerContext } from './gameSocketHandlers';
+import { createGameSocketHandlers, joinGameRoom, leaveGameRoom, type SocketHandlerContext } from './gameSocketHandlers';
 
 type LiveContext = Omit<SocketHandlerContext, 'socket' | 'gameId'>;
 
@@ -62,6 +62,7 @@ export function useGameSocket(options: Options): void {
         return () => {
             for (const [event, handler] of handlers) socket.off(event, handler);
             dispose();
+            if (socket.connected) leaveGameRoom(socket, gameId);
         };
     }, [socket, signedIn, gameId]);
 }

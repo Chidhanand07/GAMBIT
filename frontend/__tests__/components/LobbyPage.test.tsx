@@ -158,6 +158,16 @@ test('live games list both players with ratings and a Watch link to the game', a
     expect(screen.getByRole('link', { name: 'Watch alice vs bob' })).toHaveAttribute('href', '/game/live-1')
 })
 
+test('each live game shows how many watch it, from the game server (Main.dc.html) [F-130]', async () => {
+    socket.emit.mockImplementation((event: string, _payload: unknown, ack?: (a: unknown) => void) => {
+        if (event === 'spectator_counts') ack?.({ ok: true, counts: { 'live-1': 4 } })
+    })
+    render(<LobbyPage />)
+    expect(await screen.findByText('4 watching')).toBeInTheDocument()
+    expect(socket.emit).toHaveBeenCalledWith('spectator_counts', { game_ids: ['live-1'] }, expect.any(Function))
+    socket.emit.mockReset()
+})
+
 test('creating a private game shows an invite link and joins its room', async () => {
     render(<LobbyPage />)
     await userEvent.click(screen.getByRole('button', { name: 'Friend' }))

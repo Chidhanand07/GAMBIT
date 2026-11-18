@@ -197,7 +197,7 @@ describe('mount', () => {
         expect(socket.listenedEvents()).toEqual([
             'chat_message', 'clock_sync', 'connect', 'disconnect', 'game_end', 'game_state_sync',
             'move_made', 'move_rejected', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
-            'rematch_declined', 'rematch_ready', 'rematch_request',
+            'rematch_declined', 'rematch_ready', 'rematch_request', 'spectators_changed',
         ])
     })
 

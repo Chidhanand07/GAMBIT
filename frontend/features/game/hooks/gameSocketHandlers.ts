@@ -16,6 +16,7 @@ import type {
     MoveRejectedPayload,
     RatingUpdatedPayload,
     RematchRequestPayload,
+    SpectatorsChangedPayload,
 } from '@/types/socket';
 import type { GameAction } from '../state/gameReducer';
 import { playMoveSoundFor } from '../utils/moveEffects';
@@ -56,6 +57,11 @@ export function joinGameRoom(socket: Socket, gameId: string): void {
     socket.emit('join_game', gameId);
 }
 
+/** Leaving the page stops watching; the server ignores it for a player's own game (F-130). */
+export function leaveGameRoom(socket: Socket, gameId: string): void {
+    socket.emit('leave_game', gameId);
+}
+
 function onGameStateSync(ctx: SocketHandlerContext) {
     return (data: GameStateSyncPayload) => {
         ctx.chessRef.current.load(data.fen);
@@ -74,6 +80,7 @@ function onGameStateSync(ctx: SocketHandlerContext) {
             whiteMs: data.whiteMs,
             blackMs: data.blackMs,
             clockActive: data.clockActive,
+            spectators: data.spectators,
         });
         ctx.clockSyncedRef.current = true;
     };
@@ -212,5 +219,11 @@ function handlerList(ctx: SocketHandlerContext, expiry: RematchExpiry): Array<[s
         ['opponent_reconnected', () => ctx.markReconnected()],
         ['clock_sync', onClockSync(ctx)],
         ['move_rejected', onMoveRejected(ctx)],
+        [
+            'spectators_changed',
+            (data: SpectatorsChangedPayload) => {
+                if (data.game_id === ctx.gameId) dispatch({ type: 'spectatorsChanged', count: data.count });
+            },
+        ],
     ];
 }

@@ -39,7 +39,7 @@ function useInviteDialog(timeControl: ReturnType<typeof useTimeControlSelection>
 export function useLobby() {
     const timeControl = useTimeControlSelection();
     const activeGame = useActiveGame();
-    const liveGames = useLiveGames();
+    const liveGames = useLiveGames(useSocket());
     const [stage, setStage] = useState<LobbyStage>('none');
     const [difficulty, setDifficulty] = useState<Difficulty>('medium');
     const [side, setSide] = useState<ColorChoice>('w');

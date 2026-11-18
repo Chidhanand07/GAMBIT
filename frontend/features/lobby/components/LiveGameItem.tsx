@@ -31,6 +31,9 @@ export function LiveGameItem({ game }: { game: LiveGame }) {
                 <PlayerLine player={game.black} swatch="box-content border-1 border-line-muted bg-on-accent" />
             </div>
             <div className="flex items-center justify-end gap-2">
+                {typeof game.watching === 'number' && (
+                    <span className="mr-auto text-[13px] text-ink-muted">{game.watching} watching</span>
+                )}
                 <Button
                     href={`/game/${game.id}`}
                     variant="outline"
