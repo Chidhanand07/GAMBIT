@@ -23,7 +23,7 @@ export interface StatusInput {
 }
 
 /** Server reasons that read badly as a sentence on their own. */
-const REASON_TEXT: Record<string, string> = { Time: 'Out of time', Abandonment: 'Abandoned' };
+const REASON_TEXT: Record<string, string> = { Time: 'Out of time', Abandonment: 'Abandoned', Agreement: 'Draw agreed' };
 
 const other = (c: PlayerColor): PlayerColor => (c === 'white' ? 'black' : 'white');
 

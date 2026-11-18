@@ -13,12 +13,26 @@ import { GameActionsGrid, type GameActionsProps } from './GameActions';
 import { GameInfoCard } from './GameInfoCard';
 import { GameSeat } from './GameSeat';
 import { PromotionPicker } from './PromotionPicker';
+import { canOfferDraw } from '../utils/drawOffer';
+import { RequestPrompt } from './RequestPrompt';
 import { StatusBanners } from './StatusBanners';
+
+/** Draw button state for a player: their own offer stands, or the server would take one now. */
+function drawState({ myColor, drawOffer, lastDrawOfferPly, moveList }: GameScreen['state']) {
+    if (myColor === 'spectator') return { drawOffered: false, canOfferDraw: false };
+    const pending = drawOffer !== null;
+    const plies = moveList.length;
+    return {
+        drawOffered: drawOffer === myColor,
+        canOfferDraw: canOfferDraw({ color: myColor, plies, pending, lastOfferPly: lastDrawOfferPly[myColor] }),
+    };
+}
 
 export function gameActions({ state, controls }: GameScreen): GameActionsProps {
     return {
         isPlayer: state.myColor !== 'spectator',
         over: state.gameOver !== null,
+        ...drawState(state),
         onFlip: controls.onFlip,
         onDraw: controls.onDraw,
         onResign: controls.onResign,
@@ -40,6 +54,7 @@ export function BoardArea({ screen }: { screen: GameScreen }) {
                 showOpponentDisconnected={disconnect.opponentDisconnected && !state.gameOver}
                 disconnectCountdown={disconnect.disconnectCountdown}
             />
+            <IncomingRequests screen={screen} />
             <GameSeat seat={view.top} />
             <Board
                 fen={screen.displayFen}
@@ -58,6 +73,20 @@ export function BoardArea({ screen }: { screen: GameScreen }) {
             </Board>
             <GameSeat seat={view.bottom} />
         </>
+    );
+}
+
+/** The opponent's standing draw offer, waiting for this player's answer. */
+function IncomingRequests({ screen }: { screen: GameScreen }) {
+    const { state, view } = screen;
+    const me = state.myColor;
+    if (me === 'spectator' || state.gameOver || !state.drawOffer || state.drawOffer === me) return null;
+    return (
+        <RequestPrompt
+            text={`${view.opponentName} offers a draw`}
+            onAccept={screen.acceptDraw}
+            onDecline={screen.declineDraw}
+        />
     );
 }
 

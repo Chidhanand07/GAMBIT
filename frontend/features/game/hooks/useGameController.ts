@@ -39,6 +39,7 @@ export function useGameController(gameId: string) {
     // Settings → "Move sounds" (F-102): the game page has no sound control of its own.
     const soundOn = useBoardPrefs().sound;
     const notify = (message: string) => toast(message, 'error');
+    const inform = (message: string) => toast(message, 'info');
     const [state, dispatch] = useReducer(gameReducer, undefined, createInitialGameState);
     const { moveListRef, ...refs } = useGameRefs();
     const { chessRef, clockSyncedRef, lastProcessedFenRef } = refs;
@@ -52,7 +53,7 @@ export function useGameController(gameId: string) {
     useMoveListAutoScroll(moveListRef, state.moveList, board.isLive);
     useGameSocket({
         ...{ socket, myProfile, gameId, myColor, soundOn, router, dispatch },
-        ...{ chessRef, clockSyncedRef, lastProcessedFenRef, markDisconnected, markReconnected },
+        ...{ chessRef, clockSyncedRef, lastProcessedFenRef, markDisconnected, markReconnected, inform },
     });
     useGameClock({
         fen: state.fen,

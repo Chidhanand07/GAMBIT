@@ -24,6 +24,9 @@ test('there is a schema for every client → server event (and none for `authent
             'challenge_request',
             'challenge_accept',
             'challenge_decline',
+            'draw_offer',
+            'draw_accept',
+            'draw_decline',
         ].sort(),
     );
 });
@@ -64,7 +67,13 @@ describe('make_move', () => {
     });
 
     test('client-computed fields never reach the service: fen, san, move and captured are stripped [S1]', () => {
-        const parsed = schemas.make_move.parse({ ...move, fen: 'client-fen', san: 'Qxf7#', move: 'd1f7', captured: true });
+        const parsed = schemas.make_move.parse({
+            ...move,
+            fen: 'client-fen',
+            san: 'Qxf7#',
+            move: 'd1f7',
+            captured: true,
+        });
         expect(parsed).toEqual(move);
     });
 });
@@ -72,7 +81,9 @@ describe('make_move', () => {
 describe('resign (there is no game_end schema: clients cannot report results) [S3]', () => {
     test('needs only the game id; a claimed result is stripped', () => {
         expect(schemas.game_end).toBeUndefined();
-        expect(schemas.resign.parse({ game_id: 'g1', result: 'White wins', winner_id: 'me' })).toEqual({ game_id: 'g1' });
+        expect(schemas.resign.parse({ game_id: 'g1', result: 'White wins', winner_id: 'me' })).toEqual({
+            game_id: 'g1',
+        });
         expect(ok('resign', {})).toBe(false);
     });
 });
@@ -81,7 +92,11 @@ describe('send_message [G6]', () => {
     const parse = (payload) => schemas.send_message.safeParse(payload);
 
     test('reads the `text` the web client sends, trimmed', () => {
-        expect(parse({ game_id: 'g1', from: 'me', text: '  hi  ' }).data).toEqual({ game_id: 'g1', from: 'me', text: 'hi' });
+        expect(parse({ game_id: 'g1', from: 'me', text: '  hi  ' }).data).toEqual({
+            game_id: 'g1',
+            from: 'me',
+            text: 'hi',
+        });
     });
 
     test('an older `message` field is accepted as the text; `text` wins when both are sent', () => {
@@ -104,7 +119,10 @@ describe('send_message [G6]', () => {
     ])('rejects %s', (_label, payload) => expect(ok('send_message', payload)).toBe(false));
 
     test('a client-supplied sender id is stripped', () => {
-        expect(parse({ game_id: 'g1', text: 'hi', from_user_id: 'victim' }).data).toEqual({ game_id: 'g1', text: 'hi' });
+        expect(parse({ game_id: 'g1', text: 'hi', from_user_id: 'victim' }).data).toEqual({
+            game_id: 'g1',
+            text: 'hi',
+        });
     });
 });
 
@@ -154,7 +172,20 @@ describe('time-control ranges (shared model) [TIME-CONTROL]', () => {
         ['rematch_request', { to_user_id: 'u2' }],
         ['challenge_request', { to_user_id: 'u2' }],
     ];
-    const BAD = ['0', '-5', 'rapid', '1.5', '10+', '+3', ' 10', `${limits.maxMinutes + 1}`, `10+${limits.maxIncrementSeconds + 1}`, 0, -1, 2.5];
+    const BAD = [
+        '0',
+        '-5',
+        'rapid',
+        '1.5',
+        '10+',
+        '+3',
+        ' 10',
+        `${limits.maxMinutes + 1}`,
+        `10+${limits.maxIncrementSeconds + 1}`,
+        0,
+        -1,
+        2.5,
+    ];
     const GOOD = ['1', '10', '5+3', '1440', `10+${limits.maxIncrementSeconds}`, 10];
 
     describe.each(EVENTS)('%s', (event, base) => {

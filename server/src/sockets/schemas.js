@@ -76,6 +76,11 @@ const schemas = {
     resign: z.object({ game_id: id }),
     // What resigning would cost the asking player (F-133).
     rating_estimate: z.object({ game_id: id }),
+
+    // Draw offers name only the game: the side is the verified user's (ADR F-151).
+    draw_offer: z.object({ game_id: id }),
+    draw_accept: z.object({ game_id: id }),
+    draw_decline: z.object({ game_id: id }),
     // The web client sends `text`. An older `message` field is read as the text
     // too. Either way the result is one trimmed, non-empty, bounded string (G6).
     send_message: z

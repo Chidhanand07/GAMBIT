@@ -1,5 +1,6 @@
 // Handlers for the server events the game page listens to: the 13 legacy ones in their original
-// registration order, then `move_rejected` (the server refused our move; a resync follows).
+// registration order, then `move_rejected` (the server refused our move; a resync follows), then
+// the requests between the players (requestSocketHandlers: draw offers).
 // Built once per join (useGameSocket); render-dependent fields are read from `ctx` when an event arrives.
 import type { Dispatch, MutableRefObject } from 'react';
 import type { Socket } from 'socket.io-client';
@@ -21,6 +22,7 @@ import type {
 } from '@/types/socket';
 import type { GameAction } from '../state/gameReducer';
 import { playMoveSoundFor } from '../utils/moveEffects';
+import { requestHandlerList, requestsSyncedFrom } from './requestSocketHandlers';
 
 /** Clocks and flags are optional here so older payloads (and tests) without them still type-check. */
 type MoveMadeEvent = Omit<MoveMadePayload, 'whiteMs' | 'blackMs' | 'flags' | 'captured' | 'move'> & {
@@ -48,6 +50,8 @@ export interface SocketHandlerContext {
     lastProcessedFenRef: MutableRefObject<string | null>;
     markDisconnected: (timeoutSeconds: number) => void;
     markReconnected: () => void;
+    /** Shows the player a short note (an info toast), e.g. "Draw declined". */
+    inform?: (message: string) => void;
 }
 
 /** The server's refusal when a player of this game turned "Allow spectators" off (ADR F-140). */
@@ -97,6 +101,7 @@ function onGameStateSync(ctx: SocketHandlerContext) {
             clockActive: data.clockActive,
             spectators: data.spectators,
         });
+        ctx.dispatch(requestsSyncedFrom(data));
         ctx.clockSyncedRef.current = true;
     };
 }
@@ -240,5 +245,6 @@ function handlerList(ctx: SocketHandlerContext, expiry: RematchExpiry): Array<[s
                 if (data.game_id === ctx.gameId) dispatch({ type: 'spectatorsChanged', count: data.count });
             },
         ],
+        ...requestHandlerList(ctx),
     ];
 }

@@ -173,6 +173,14 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-161](#f-161) | The Overview's Away slot (F-104) is fed by presence's away set; the profile-only `friendStatus` goes | STACK | AWAY-WIRING |
 | [F-162](#f-162) | Finished games open on `/analysis?game=<id>`: profile Games "Review" and the result page's "Open in analysis" | STACK | ANALYSIS-LINKS |
 
+**Redesign v2, track B4 — game actions** (branch `v2/game-actions`; PR column = B4).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-150](#f-150) | Draw offers are approved: the owner kept the "Draw offers approved" line in the brief | B4 | DRAW-OFFER |
+| [F-151](#f-151) | Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the finalizer | B4 | DRAW-OFFER |
+| [F-165](#f-165) | An accepted draw offer is stored as `end_reason = 'agreement'` (CHECK extended); profile counts it as "Stalemate or draw" | STACK | DRAW-OFFER |
+
 ---
 
 ## F-001
@@ -3606,3 +3614,71 @@ context.** (Track B3, item 5; SOLID-01.)
 - Tests: `accountStore.test.ts` (no request without a session), `authChanges.test.ts` (lazy, never
   the eager client), `HomeSettingsPages.test.tsx` (its client double has a session),
   `presencePrivacy.test.tsx` and `PresenceProvider.test.tsx` (wait for the lazy client).
+
+## F-150
+
+**Draw offers are approved: the owner kept the "Draw offers approved" line in the brief (DRAW-OFFER).**
+
+- **Context.** `design/DRAW-OFFER-PROPOSAL.md` said nothing in `server/` changes before approval,
+  and F-009 had recorded "no draw-offer events: the UI has neither". The redesign put a Draw button
+  with a confirmation dialog on the game page, wired to a `TODO(draw-offer)` no-op.
+- **Decision.** The owner approved draw offers by keeping the "Draw offers approved" line in the
+  track brief. The proposal is implemented as written (F-151); this supersedes F-009 for draws.
+  Abort events are still not added.
+
+## F-151
+
+**Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the
+finalizer (DRAW-OFFER).**
+
+- **State.** `drawOffer: { by, at, ply } | null` and `lastDrawOfferPly: { white?, black? }` live in
+  the Redis game JSON and are written only through `mutateGame`'s compare-and-set (multi-replica
+  safe). No migration. `games.draw_offer` and its PATCH path are left untouched (separate cleanup).
+- **Rule** (`domain/drawOffer.js`, pure). Not before both sides have moved; one standing offer at a
+  time (`draw_offer_pending`); a side may offer again only after two moves of its own since its last
+  offer (`draw_offer_too_soon`). A move, an accept, a decline and the end of the game clear the
+  offer (`domain/pendingRequests.js`, applied in `stateAfterMove` and in the finalizer's
+  transition); a move by the receiver is therefore an implicit decline.
+- **Events** (all acked, zod-validated `{ game_id }`, the actor is the verified user):
+  `draw_offer` → `draw_offered { game_id, by, ply }` to the room; `draw_accept` →
+  `finalizer.endGameIf` with a decider that re-checks the offer inside the same transition, so the
+  row, rating, review and `game_end` ("Draw", reason `Agreement`) are the single finalizer's; a
+  mate, flag fall or resignation that commits first wins and the accept is answered
+  `game_not_active` (or `no_pending_request` when a move cleared the offer); `draw_decline` →
+  `draw_declined { game_id, by }`. `game_state_sync` carries `drawOffer` and `lastDrawOfferPly` only
+  when set, so the payload of a game without offers is unchanged.
+- **Limits.** `draw_offer` has its own rate rule `socketOffer` (10 per minute per user); accept and
+  decline use `socketEvent` like resign.
+- **Client.** The confirm dialog (or Draw directly when the confirmation setting is off) emits
+  `draw_offer` with `emitWithAck`; `ACK_POLICY`: `draw_offer` and `draw_accept` are never re-sent,
+  `draw_decline` is retried once and a repeat answered `no_pending_request` counts as done. The Draw
+  button reads "Draw offered" and is disabled while my offer stands, and is disabled whenever the
+  mirrored rule (`features/game/utils/drawOffer.ts`) says the server would refuse. An incoming offer
+  shows "<opponent> offers a draw" with Decline / Accept above the board (visible in focus mode; the
+  mockup has no incoming state, so it reuses the notice surface and pill buttons). "Draw declined" is
+  an info toast for the offering player. The end status reads "Draw agreed. The game is a draw.",
+  the mockup's wording.
+- **Rollout.** Server first (new events only), then the web app. Rolling the server back makes the
+  client's acks time out ("The server did not answer", F-065).
+- **Proof.** `__tests__/domain/drawOffer.test.js`, `services/drawOfferService.test.js` (every
+  rejection, the accept/mate race both ways, a move clearing the offer, reconnect),
+  `characterization/drawOffer.test.js` (events and acks through the real server),
+  `integration/drawOfferTwoInstances.test.js` (offer on A, accept on B, one `game_end`, rated once;
+  accept racing the mate across replicas), frontend `features/game/drawOffer.test.tsx` and the
+  game page characterization.
+
+## F-165
+
+**An agreed draw has its own stored end reason (found while stacking B4 on B1).**
+
+- **Context.** B1 (F-124) stores how a game ended in `games.end_reason`, a code from a fixed list
+  enforced by a CHECK and by `END_REASON_CODE` on the game server (B1's test pins that every
+  adjudication reason has a code). B4's draw offers (F-151) end a game with the new
+  `REASON.AGREEMENT`, which had no code: the stacked test failed, and the CHECK would have refused it.
+- **Decision.** Folded into the draw-offer commit so it passes on its own: migration
+  `20261118400000_end_reason_agreement.sql` re-creates the CHECK with `'agreement'` added;
+  `END_REASON_CODE[REASON.AGREEMENT] = 'agreement'`; the profile's "How games end" counts it under
+  the mockup's "Stalemate or draw" row (Profile.dc.html has no separate row).
+- **Rollout.** The migration before the game server that offers draws.
+- Tests: server `adjudication.test.js` (code list, was without `agreement`), frontend
+  `gameFactsLength.test.ts`, pgTAP `090_end_reason_agreement`.

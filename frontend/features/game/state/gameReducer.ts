@@ -3,6 +3,13 @@
 // does not mention keep their identity so effects keyed on them re-run at the same moments.
 import { Chess, type Square } from 'chess.js';
 import type { GameWithPlayers, PlayerColor, SeatColor } from '@/types/game';
+import {
+    clearedRequests,
+    createInitialRequests,
+    requestHandlers,
+    type RequestsAction,
+    type RequestsState,
+} from './requests';
 
 export interface MovePair {
     from: Square;
@@ -25,7 +32,7 @@ export type RematchState = 'idle' | 'sent' | 'received' | 'declined';
 /** The open confirmation dialog (Game.dc.html Draw / Resign), if any. */
 export type ConfirmDialog = 'draw' | 'resign' | null;
 
-export interface GameState {
+export interface GameState extends RequestsState {
     fen: string;
     gameData: GameWithPlayers | null;
     myColor: SeatColor;
@@ -90,6 +97,7 @@ export function createInitialGameState(): GameState {
         focus: false,
         clockActive: false,
         spectators: null,
+        ...createInitialRequests(),
     };
 }
 
@@ -128,7 +136,8 @@ export type GameAction =
     | { type: 'rematchStateSet'; value: RematchState }
     | { type: 'confirmSet'; value: ConfirmDialog }
     | { type: 'focusToggled' }
-    | { type: 'flipToggled' };
+    | { type: 'flipToggled' }
+    | RequestsAction;
 
 type ActionOf<K extends GameAction['type']> = Extract<GameAction, { type: K }>;
 type Handlers = { [K in GameAction['type']]: (state: GameState, action: ActionOf<K>) => GameState };
@@ -170,6 +179,7 @@ const handlers: Handlers = {
     moveReceived: (s, a) => ({
         ...s,
         ...noSelection(),
+        ...clearedRequests(),
         fen: a.fen,
         fenSnapshots: [...s.fenSnapshots, a.fen],
         viewIndex: null,
@@ -201,7 +211,12 @@ const handlers: Handlers = {
             ? { ...s, whiteTime: Math.max(0, s.whiteTime - 1) }
             : { ...s, blackTime: Math.max(0, s.blackTime - 1) },
     // A confirmation still open when the game ends no longer applies.
-    gameEnded: (s, a) => ({ ...s, confirm: null, gameOver: { result: a.info.result, reason: a.info.reason } }),
+    gameEnded: (s, a) => ({
+        ...s,
+        ...clearedRequests(),
+        confirm: null,
+        gameOver: { result: a.info.result, reason: a.info.reason },
+    }),
     ratingChanged: (s, a) =>
         a.side === 'white' ? { ...s, whiteRatingChange: a.change } : { ...s, blackRatingChange: a.change },
     chatReceived: (s, a) => ({ ...s, chatLog: [...s.chatLog, a.line] }),
@@ -213,6 +228,7 @@ const handlers: Handlers = {
     confirmSet: (s, a) => ({ ...s, confirm: a.value }),
     focusToggled: (s) => ({ ...s, focus: !s.focus }),
     flipToggled: (s) => ({ ...s, flipped: !s.flipped }),
+    ...requestHandlers,
 };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {

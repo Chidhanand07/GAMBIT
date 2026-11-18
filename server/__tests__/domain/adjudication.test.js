@@ -98,6 +98,8 @@ test('the reason strings are the ones shown to players', () => {
         TIME: 'Time',
         ABANDONMENT: 'Abandonment',
         ABORTED: 'Aborted',
+        // Draw offer accepted [DRAW-OFFER].
+        AGREEMENT: 'Agreement',
     });
 });
 
@@ -112,15 +114,18 @@ describe('endReasonCode: the stored games.end_reason [F-124]', () => {
         [REASON.TIME, 'timeout'],
         [REASON.ABANDONMENT, 'abandonment'],
         [REASON.ABORTED, 'aborted'],
+        [REASON.AGREEMENT, 'agreement'],
     ])('%s → %s', (reason, code) => {
         expect(endReasonCode(reason)).toBe(code);
     });
 
     test('every reason has a code, and the codes are the ones the database CHECK accepts', () => {
         expect(Object.keys(END_REASON_CODE).sort()).toEqual(Object.values(REASON).sort());
+        // F-165 (was: without 'agreement'): an accepted draw offer (F-151) has its own code.
         expect(Object.values(END_REASON_CODE).sort()).toEqual([
             'abandonment',
             'aborted',
+            'agreement',
             'checkmate',
             'fifty_move_rule',
             'insufficient_material',

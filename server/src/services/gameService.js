@@ -17,6 +17,7 @@ const { gameStateFromRow } = require('../domain/gameState');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom, playerRoom } = require('./emitter');
+const { createDrawOffers } = require('./drawOfferService');
 const { createGameFinalizer } = require('./gameFinalizer');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
@@ -190,7 +191,21 @@ function sendState(ctx, game, client, spectators) {
         whiteId: game.whiteId,
         blackId: game.blackId,
         ...(spectators === undefined ? {} : { spectators }),
+
+        ...requestsView(game),
     });
+}
+
+/**
+ * The standing requests a reconnecting client must see, only when there are any
+ * (an older client ignores the extra keys): the draw offer and each side's last offer.
+ * @param {any} game
+ */
+function requestsView(game) {
+    return {
+        ...(game.drawOffer ? { drawOffer: { by: game.drawOffer.by } } : {}),
+        ...(game.lastDrawOfferPly ? { lastDrawOfferPly: game.lastDrawOfferPly } : {}),
+    };
 }
 
 /**
@@ -348,6 +363,7 @@ function createGameService(deps) {
         resign: (data, userId) => resign(ctx, data, userId),
         /** @type {(userId: string | undefined, gameId: string | undefined) => Promise<void>} */
         handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
+        ...createDrawOffers(ctx),
     };
 }
 

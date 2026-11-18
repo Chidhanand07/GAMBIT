@@ -109,6 +109,9 @@ export interface ClientToServerEvents {
     challenge_request: (payload: ChallengeRequestPayload) => void;
     challenge_accept: (payload: ChallengeAcceptPayload) => void;
     challenge_decline: (payload: ChallengeDeclinePayload) => void;
+    draw_offer: (payload: GameIdPayload) => void;
+    draw_accept: (payload: GameIdPayload) => void;
+    draw_decline: (payload: GameIdPayload) => void;
 }
 
 // ── server → client ──────────────────────────────────────────────────────────
@@ -149,12 +152,29 @@ export interface GameStateSyncPayload {
     blackId: string;
     /** Viewers watching a live game (F-130); absent when the server could not count them. */
     spectators?: number;
+    /** Present only while a draw offer stands (ADR F-151). */
+    drawOffer?: { by: PlayerColor };
+    /** Moves played when each side last offered a draw; present once anyone has offered. */
+    lastDrawOfferPly?: Partial<Record<PlayerColor, number>>;
 }
 
 /** A live game's spectator count changed (F-130). */
 export interface SpectatorsChangedPayload {
     game_id: string;
     count: number;
+}
+
+/** A player offered a draw (`ply`: moves played at that moment). */
+export interface DrawOfferedPayload {
+    game_id: string;
+    by: PlayerColor;
+    ply: number;
+}
+
+/** A player declined the standing draw offer. */
+export interface DrawDeclinedPayload {
+    game_id: string;
+    by: PlayerColor;
 }
 
 /** An accepted move, broadcast to the room. Every field is computed by the server. */
@@ -234,6 +254,8 @@ export interface ServerToClientEvents {
     clock_sync: (payload: ClockSyncPayload) => void;
     move_made: (payload: MoveMadePayload) => void;
     move_rejected: (payload: MoveRejectedPayload) => void;
+    draw_offered: (payload: DrawOfferedPayload) => void;
+    draw_declined: (payload: DrawDeclinedPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;
     rating_updated: (payload: RatingUpdatedPayload) => void;

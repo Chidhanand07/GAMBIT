@@ -11,6 +11,7 @@
  */
 const { activeRemainingMs, clocksAfterMove } = require('../domain/clock');
 const { playMove } = require('../domain/chessRules');
+const { clearedRequests } = require('../domain/pendingRequests');
 const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
 const { isDailyTimeControl } = require('../domain/preferences');
@@ -26,7 +27,8 @@ const { log } = require('../observability/log');
 
 /**
  * State after `played`: the mover's clock is charged (plus increment), the
- * move is appended to the log as UCI + SAN + FEN, and the side to move flips.
+ * move is appended to the log as UCI + SAN + FEN, the side to move flips, and
+ * any standing request between the players (a draw offer) lapses.
  * @param {any} game
  * @param {PlayedMove} played
  * @param {number} at
@@ -36,6 +38,7 @@ function stateAfterMove(game, played, at) {
     const clocks = clocksAfterMove({ ...game, activeSide: movedSide }, at);
     return {
         ...game,
+        ...clearedRequests(game),
         fen: played.fen,
         whiteClockMs: clocks.whiteMs,
         blackClockMs: clocks.blackMs,

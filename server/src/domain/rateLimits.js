@@ -21,6 +21,8 @@ const RULES = Object.freeze({
     socketQueueJoin: { limit: 10, windowMs: MINUTE },
     /** Challenges and rematch requests notify another person: kept low. */
     socketChallenge: { limit: 10, windowMs: MINUTE },
+    /** Draw offers and takeback requests interrupt the opponent: a few a minute. */
+    socketOffer: { limit: 10, windowMs: MINUTE },
     /** Any other socket event (join, resign, accepts, …). */
     socketEvent: { limit: 60, windowMs: 10 * SECOND },
     /** HTTP: the engine proxy costs CPU on the engine. */
@@ -38,6 +40,7 @@ const SOCKET_EVENT_RULES = Object.freeze({
     join_queue: 'socketQueueJoin',
     challenge_request: 'socketChallenge',
     rematch_request: 'socketChallenge',
+    draw_offer: 'socketOffer',
 });
 
 /** HTTP route prefixes with a rule; routes not listed are not limited here. */

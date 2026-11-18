@@ -38,7 +38,8 @@ let profile: any = null
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
 jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 2, onlineUserIds: new Set(['opp']) }) }))
-jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast: jest.fn() }) }))
+const mockToast = jest.fn()
+jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast: mockToast }) }))
 
 import GamePage from '@/app/game/[id]/page'
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
@@ -209,12 +210,14 @@ describe('mount', () => {
             'chat_message', 'clock_sync', 'connect', 'disconnect', 'game_end', 'game_state_sync',
             'move_made', 'move_rejected', 'opponent_disconnected', 'opponent_reconnected', 'rating_updated',
             'rematch_declined', 'rematch_ready', 'rematch_request', 'spectators_changed',
-        ])
+            // [DRAW-OFFER]
+            'draw_declined', 'draw_offered',
+        ].sort())
     })
 
     test('unmount removes every handler it registered', async () => {
         const { unmount } = await renderGame()
-        const registered = socket.on.mock.calls.slice(-14)
+        const registered = socket.on.mock.calls.slice(-16)
         unmount()
         expect(socket.listenedEvents()).toEqual([])
         for (const [event, handler] of registered) {
@@ -503,7 +506,8 @@ describe('server events', () => {
     test('game_end with a Draw result says the game is a draw', async () => {
         await renderGame()
         socket.serverSends('game_end', { game_id: 'g1', result: 'Draw', reason: 'Agreement' })
-        expect(await screen.findByText('Agreement. The game is a draw.')).toBeInTheDocument()
+        // Was: "Agreement. The game is a draw." Now the mockup's wording [DRAW-OFFER].
+        expect(await screen.findByText('Draw agreed. The game is a draw.')).toBeInTheDocument()
     })
 
     test('an aborted game is nobody\'s loss and is not rated [FIRST-MOVE]', async () => {
@@ -888,23 +892,74 @@ describe('resign', () => {
     })
 })
 
+/** Both sides have moved (1. e4 e5): a draw may be offered [DRAW-OFFER]. */
+const bothMoved = () =>
+    socket.serverSends('game_state_sync', {
+        fen: AFTER_E4_E5,
+        moveLog: [
+            { move: 'e2e4', fen: AFTER_E4, san: 'e4' },
+            { move: 'e7e5', fen: AFTER_E4_E5, san: 'e5' },
+        ],
+        whiteMs: 300_000, blackMs: 300_000, activeSide: 'w', clockActive: true, whiteId: 'me', blackId: 'opp',
+    })
+const drawButton = () => screen.getAllByRole('button', { name: /^Draw/ })[0]
+
 describe('draw', () => {
-    test('Draw asks for confirmation naming the opponent; confirming emits nothing yet (no server draw flow)', async () => {
+    // Was: confirming emitted nothing (no server draw flow). Now it emits draw_offer [DRAW-OFFER].
+    test('Draw asks for confirmation naming the opponent; confirming emits draw_offer { game_id }', async () => {
         await renderGame()
-        click(screen.getAllByRole('button', { name: 'Draw' })[0])
+        bothMoved()
+        click(drawButton())
         const dialog = screen.getByRole('alertdialog', { name: 'Offer a draw to Bob?' })
         socket.emit.mockClear()
         click(within(dialog).getByRole('button', { name: 'Offer draw' }))
-        // TODO(draw-offer): expect draw_offer once the server flow is approved (design/DRAW-OFFER-PROPOSAL.md).
-        expect(socket.emit).not.toHaveBeenCalled()
+        expect(socket.emitted('draw_offer')).toEqual([{ game_id: 'g1' }])
         expect(fetchMock).toHaveBeenCalledTimes(1) // the game load only: no PATCH of games.draw_offer
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
         expect(screen.getByText('Your move')).toBeInTheDocument()
     })
 
+    test('Draw is disabled before both sides have moved', async () => {
+        await renderGame()
+        expect(drawButton()).toBeDisabled()
+    })
+
+    test('my standing offer: the button reads "Draw offered" and is disabled until the server clears it', async () => {
+        await renderGame()
+        bothMoved()
+        socket.serverSends('draw_offered', { game_id: 'g1', by: 'white', ply: 2 })
+        expect(screen.getAllByRole('button', { name: 'Draw offered' })[0]).toBeDisabled()
+        socket.serverSends('draw_declined', { game_id: 'g1', by: 'black' })
+        expect(mockToast).toHaveBeenCalledWith('Draw declined', 'info')
+        // Two more own moves are needed before the next offer.
+        expect(drawButton()).toBeDisabled()
+    })
+
+    test('an incoming offer shows Accept / Decline; Accept emits draw_accept, Decline emits draw_decline', async () => {
+        await renderGame()
+        bothMoved()
+        socket.serverSends('draw_offered', { game_id: 'g1', by: 'black', ply: 2 })
+        expect(screen.getByText('Bob offers a draw')).toBeInTheDocument()
+        socket.emit.mockClear()
+        click(screen.getByRole('button', { name: 'Accept' }))
+        expect(socket.emitted('draw_accept')).toEqual([{ game_id: 'g1' }])
+        click(screen.getByRole('button', { name: 'Decline' }))
+        expect(socket.emitted('draw_decline')).toEqual([{ game_id: 'g1' }])
+        expect(screen.queryByText('Bob offers a draw')).not.toBeInTheDocument()
+    })
+
+    test('a move clears an incoming offer', async () => {
+        await renderGame()
+        bothMoved()
+        socket.serverSends('draw_offered', { game_id: 'g1', by: 'black', ply: 2 })
+        socket.serverSends('move_made', { game_id: 'g1', from: 'g1', to: 'f3', fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', san: 'Nf3', whiteMs: 1, blackMs: 1 })
+        expect(screen.queryByText('Bob offers a draw')).not.toBeInTheDocument()
+    })
+
     test('Cancel closes the draw confirmation', async () => {
         await renderGame()
-        click(screen.getAllByRole('button', { name: 'Draw' })[0])
+        bothMoved()
+        click(drawButton())
         click(screen.getByRole('button', { name: 'Cancel' }))
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
@@ -918,12 +973,14 @@ describe('confirm resign and draw off (Settings)', () => {
         expect(socket.emitted('resign')).toEqual([{ game_id: 'g1' }])
     })
 
-    test('Draw opens no dialog and still sends nothing (no server draw flow yet)', async () => {
+    // Was: Draw sent nothing (no server draw flow). Now it offers at once [DRAW-OFFER].
+    test('Draw opens no dialog and emits draw_offer at once', async () => {
         await renderGameWithSettings({ confirmResignDraw: false })
+        bothMoved()
         socket.emit.mockClear()
-        click(screen.getAllByRole('button', { name: 'Draw' })[0])
+        click(drawButton())
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-        expect(socket.emit).not.toHaveBeenCalled()
+        expect(socket.emitted('draw_offer')).toEqual([{ game_id: 'g1' }])
     })
 })
 

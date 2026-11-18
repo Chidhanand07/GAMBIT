@@ -38,6 +38,8 @@ const MESSAGES: Readonly<Record<string, string>> = {
     preferences_unavailable: "This player's settings could not be checked. Please try again.",
     profile_not_found: 'Your profile could not be found. Please sign in again.',
     rate_limited: 'Too many requests. Please wait a moment and try again.',
+    draw_offer_pending: 'A draw offer is already waiting for an answer.',
+    draw_offer_too_soon: 'You can offer a draw once both sides have moved, and again after two more of your moves.',
     [ACK_TIMEOUT_CODE]: 'The server did not answer. Check your connection and try again.',
 };
 
@@ -82,6 +84,7 @@ export const ACK_POLICY: Readonly<Record<string, RetryRule>> = {
     // The answer consumes the pending request: a repeat that finds nothing means "done".
     challenge_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
     rematch_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
+    draw_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
     // Not idempotent: a repeat would be a second move, message or notification, or would be
     // refused after the first one started a game. Never re-sent.
     make_move: { retryOnce: false },
@@ -91,6 +94,9 @@ export const ACK_POLICY: Readonly<Record<string, RetryRule>> = {
     challenge_accept: { retryOnce: false },
     rematch_request: { retryOnce: false },
     rematch_accept: { retryOnce: false },
+    // A repeated offer is refused as pending or too soon; a repeated accept would find the game over.
+    draw_offer: { retryOnce: false },
+    draw_accept: { retryOnce: false },
 };
 
 const NO_RETRY: RetryRule = { retryOnce: false };
