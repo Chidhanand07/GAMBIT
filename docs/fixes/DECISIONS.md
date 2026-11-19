@@ -160,6 +160,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-133](#f-133) | The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service | B2 | LIVE-4 |
 | [F-134](#f-134) | `/analysis?game=<id>`: a finished game's moves and stored review, private games for players only | B2 | LIVE-5 |
 | [F-161](#f-161) | The Overview's Away slot (F-104) is fed by presence's away set; the profile-only `friendStatus` goes | STACK | AWAY-WIRING |
+| [F-162](#f-162) | Finished games open on `/analysis?game=<id>`: profile Games "Review" and the result page's "Open in analysis" | STACK | ANALYSIS-LINKS |
 
 ---
 
@@ -3293,3 +3294,21 @@ their owner (B1 item 8).**
 - Tests: `ProfilePage.test.tsx` ("the Overview friends card shows Online, Away and Offline"),
   `OverviewFriends.test.tsx` and `lobbyModel.test.ts` (presence sets instead of id sets),
   `presenceStatus.test.ts` (the former `friendStatus` cases).
+
+## F-162
+
+**Finished games link to the analysis board (stacking follow-up c).**
+
+- **Context.** B2 made `/analysis?game=<id>` open a finished game with its stored review (F-134) but
+  left it unlinked. Profile.dc.html's Games rows have a "Review" button whose link is
+  `Analysis.dc.html`; the app sent it to `/game/<id>` (the live game page, which for a finished game
+  redirects to the result review).
+- **Decision.** `features/analysis/links.analysisGameHref(id)` builds `/analysis?game=<id>` (id
+  URI-encoded, F12). The profile Games row's Review uses it for a `completed` game; an aborted game
+  (no moves to analyse; the analysis route answers 409 for anything not completed) keeps `/game/<id>`.
+  The result page (no mockup; inferred from Game.dc.html) gets an outline "Open in analysis" button
+  above "Back to lobby", from the same button vocabulary. Game.dc.html's game-over card has only
+  Rematch and New game, so the game page gets no new link. The Overview's Recent games rows have no
+  Review affordance in the mockup and stay as they are.
+- Tests: `ProfilePage.test.tsx` (Review → `/analysis?game=g-row`, was `/game/g-row`; aborted row keeps
+  `/game/<id>`), `GameResultPage.test.tsx` ("Open in analysis"), `features/analysis/links.test.ts`.

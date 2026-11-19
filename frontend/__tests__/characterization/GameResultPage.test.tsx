@@ -179,6 +179,12 @@ describe('review screen', () => {
         expect(within(blackCard).getByText('Mistake').parentElement!.nextSibling!.textContent).toBe('2')
     })
 
+    test('"Open in analysis" opens this game on the analysis board [F-162]', async () => {
+        await renderPage('g1')
+        expect(screen.getByRole('link', { name: 'Open in analysis' })).toHaveAttribute('href', '/analysis?game=g1')
+        expect(screen.getByRole('link', { name: 'Back to lobby' })).toHaveAttribute('href', '/lobby')
+    })
+
     test('starts at ply 0 with the start position and Starting position caption', async () => {
         const { container } = await renderPage()
         expect(screen.getByText('Starting position')).toBeInTheDocument()

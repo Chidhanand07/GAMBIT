@@ -7,6 +7,7 @@ import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
 import { opponentRating, ratingChange, signedChange } from '../gameRow';
+import { analysisGameHref } from '@/features/analysis/links';
 import { gameHref, profileHref } from '../links';
 import { GAME_FILTERS, gameRowDetail, type GameFilter } from '../model';
 import { EMPTY, LIST_CARD, LIST_ROW } from './styles';
@@ -69,6 +70,13 @@ function scoreNote(game: ProfileGameRow, profileId: string): string {
     return change === null ? date : `${signedChange(change)} · ${date}`;
 }
 
+/**
+ * Where a row's Review goes: a finished game opens on the analysis board (Profile.dc.html links
+ * Review to Analysis.dc.html; F-162), any other game on its own page.
+ */
+const reviewHref = (game: ProfileGameRow): string =>
+    game.status === 'completed' ? analysisGameHref(game.id) : gameHref(game.id);
+
 /** One Games-tab row: result badge, colour and opponent, speed, the player's accuracy, score and Review. */
 function GameRow({ game, profileId }: { game: ProfileGameRow; profileId: string }) {
     const isWhite = game.white_id === profileId;
@@ -95,7 +103,7 @@ function GameRow({ game, profileId }: { game: ProfileGameRow; profileId: string 
                 <span className="text-[12px] text-ink-muted">{scoreNote(game, profileId)}</span>
             </span>
             <Link
-                href={gameHref(game.id)}
+                href={reviewHref(game)}
                 className="box-border flex min-h-[40px] w-[84px] items-center justify-center rounded-pill border-1.5 border-line-muted text-[14px] font-semibold text-ink no-underline"
             >
                 Review

@@ -445,7 +445,19 @@ describe('games tab', () => {
         expect(screen.getByText('91%')).toBeInTheDocument()
         expect(screen.queryByText('64%')).not.toBeInTheDocument()
         expect(screen.getByText('Rapid · 10 min')).toBeInTheDocument()
-        expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/game/g-row')
+        // F-162 (was: '/game/g-row'): Profile.dc.html's Review opens the analysis board.
+        expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/analysis?game=g-row')
+    })
+
+    test('Review opens a finished game on the analysis board, an aborted one on its game page [F-162]', async () => {
+        routes['/api/profile/bob/games?limit=15&offset=0'] = {
+            games: [game('g-done'), game('g-abort', { status: 'aborted', result: 'aborted', winner_id: null })],
+        }
+        await renderProfile()
+        click(tab(/^Games/))
+        await settle()
+        const hrefs = screen.getAllByRole('link', { name: 'Review' }).map((a) => a.getAttribute('href'))
+        expect(hrefs).toEqual(['/analysis?game=g-done', '/game/g-abort'])
     })
 
     test('loss and draw rows; time controls are bucketed bullet<=2, blitz<=5, rapid<=15, else classical', async () => {
