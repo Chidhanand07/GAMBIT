@@ -59,17 +59,43 @@ export interface Badge {
 }
 
 const GAME_MILESTONES = [500, 100, 30, 10] as const;
-const WIN_MILESTONES = [100, 50, 10] as const;
+/** A run of wins counts as a streak badge from this length ("First win" covers a single win). */
+const MIN_STREAK_BADGE = 2;
+/** "Top N" is earned on the leaderboard's visible list (its top 50). */
+export const TOP_RANK_BADGE_LIMIT = 50;
 
-/** Achievements earned from the lifetime counters (first win, games and wins milestones). */
-export function achievements(record: ProfileRecord): Badge[] {
-    const badges: Badge[] = [];
-    if (record.wins > 0) badges.push({ glyph: '♞︎', name: 'First win', note: 'Won your first game' });
-    const wins = WIN_MILESTONES.find((n) => record.wins >= n);
-    if (wins) badges.push({ glyph: '♛︎', name: `${wins} wins`, note: `Won ${wins} games` });
+type BadgeStats = Pick<ProfileStats, 'facts' | 'standing'> | null;
+
+function streakBadge(stats: BadgeStats): Badge | null {
+    const streak = stats?.facts?.longestWinStreak ?? 0;
+    if (streak < MIN_STREAK_BADGE) return null;
+    return { glyph: '\u265B\uFE0E', name: `${streak} in a row`, note: 'Best win streak' };
+}
+
+function topBadge(stats: BadgeStats): Badge | null {
+    const standing = stats?.standing;
+    if (!standing || standing.rank < 1 || standing.rank > TOP_RANK_BADGE_LIMIT) return null;
+    return {
+        glyph: '\u265A\uFE0E',
+        name: `Top ${standing.rank}`,
+        note: `${SPEED_BUCKET_LABELS[standing.pool]} leaderboard`,
+    };
+}
+
+/**
+ * The Achievements card of Profile.dc.html, in its order: First win, "N in a row" (the longest
+ * win streak over the finished games), the games milestone and "Top N" (the place on the
+ * leaderboard of the profile's best pool, F-160). A badge is shown only once it is earned;
+ * the streak and the rank come from the stats, so they appear once those have loaded.
+ */
+export function achievements(record: ProfileRecord, stats: BadgeStats = null): Badge[] {
+    const badges: (Badge | null)[] = [];
+    if (record.wins > 0) badges.push({ glyph: '\u265E\uFE0E', name: 'First win', note: 'Won your first game' });
+    badges.push(streakBadge(stats));
     const games = GAME_MILESTONES.find((n) => record.gamesPlayed >= n);
-    if (games) badges.push({ glyph: '♜︎', name: `${games} games`, note: `Played ${games} games` });
-    return badges;
+    if (games) badges.push({ glyph: '\u265C\uFE0E', name: `${games} games`, note: `Played ${games} games` });
+    badges.push(topBadge(stats));
+    return badges.filter((b): b is Badge => b !== null);
 }
 
 export function matchesFriendSearch(friend: Pick<Friend, 'username' | 'display_name'>, query: string): boolean {

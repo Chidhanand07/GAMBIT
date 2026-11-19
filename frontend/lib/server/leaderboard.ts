@@ -71,3 +71,25 @@ export async function viewerStanding(
         pool: poolOf(row, field),
     };
 }
+
+/** A profile's place on one pool's board (F-160). */
+export interface PoolStanding {
+    pool: SpeedBucket;
+    rank: number;
+}
+
+/**
+ * A profile's rank on the board of its best pool (the pool its "All" rating comes from), for the
+ * profile's "Top N" achievement (F-160). Null without a rated game, without a rank there, or when
+ * the read fails.
+ */
+export async function bestPoolStanding(
+    admin: SupabaseClient,
+    row: StandingRow & { id: string },
+): Promise<PoolStanding | null> {
+    const pool = allRatingPool(row);
+    if (!pool) return null;
+    const { data, error } = await admin.rpc('leaderboard_rank', { p_profile_id: row.id, p_board: pool });
+    if (error || typeof data !== 'number') return null;
+    return { pool, rank: data };
+}

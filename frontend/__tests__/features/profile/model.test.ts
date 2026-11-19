@@ -63,13 +63,38 @@ describe('heroChips [F-127]', () => {
     });
 });
 
-describe('achievements', () => {
+// F-160 (was: 'first win, highest wins and games milestones reached' → ['First win', '50 wins',
+// '100 games']): the badges are Profile.dc.html's four, First win, "N in a row", the games
+// milestone and "Top N", the streak and rank from the stats; the wins milestone is not in the mockup.
+describe('achievements [F-160]', () => {
     test('nothing without wins or games', () => {
         expect(achievements(record(5, 0))).toEqual([]);
     });
-    test('first win, highest wins and games milestones reached', () => {
-        expect(achievements(record(120, 55)).map((b) => b.name)).toEqual(['First win', '50 wins', '100 games']);
+    test('first win and the games milestone from the record alone', () => {
+        expect(achievements(record(120, 55)).map((b) => b.name)).toEqual(['First win', '100 games']);
         expect(achievements(record(12, 1)).map((b) => b.name)).toEqual(['First win', '10 games']);
+    });
+    test("the mockup's four badges, glyphs and notes, from the streak and the best pool's rank", () => {
+        const stats = {
+            facts: { averageAccuracy: null, longestWinStreak: 4, mostActiveDay: null },
+            standing: { pool: 'blitz' as const, rank: 15 },
+        };
+        expect(achievements(record(32, 20), stats)).toEqual([
+            { glyph: '\u265E\uFE0E', name: 'First win', note: 'Won your first game' },
+            { glyph: '\u265B\uFE0E', name: '4 in a row', note: 'Best win streak' },
+            { glyph: '\u265C\uFE0E', name: '30 games', note: 'Played 30 games' },
+            { glyph: '\u265A\uFE0E', name: 'Top 15', note: 'Blitz leaderboard' },
+        ]);
+    });
+    test('a single win is no streak; a rank past the top 50 or no rank earns no "Top" badge', () => {
+        const names = (streak: number, standing: { pool: 'rapid'; rank: number } | null) =>
+            achievements(record(10, 3), {
+                facts: { averageAccuracy: null, longestWinStreak: streak, mostActiveDay: null },
+                standing,
+            }).map((b) => b.name);
+        expect(names(1, { pool: 'rapid', rank: 51 })).toEqual(['First win', '10 games']);
+        expect(names(2, null)).toEqual(['First win', '2 in a row', '10 games']);
+        expect(names(2, { pool: 'rapid', rank: 50 })).toEqual(['First win', '2 in a row', '10 games', 'Top 50']);
     });
 });
 

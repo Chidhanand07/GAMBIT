@@ -16,6 +16,9 @@ interface StatsResult {
     failed: boolean;
 }
 
+/** The Stats tab, and the Overview whose Achievements show the win streak and rank (F-160). */
+const STATS_TABS: readonly ProfileTab[] = ['overview', 'stats'];
+
 async function loadStats(username: string): Promise<ProfileStats> {
     const res = await fetchProfileStats(username);
     if (!res.ok) throw new Error(`stats request failed: ${res.status}`);
@@ -23,8 +26,8 @@ async function loadStats(username: string): Promise<ProfileStats> {
 }
 
 /**
- * Stats tab data, fetched the first time the tab is shown for a profile and
- * then kept. A failed request (status or network) becomes `failed`, which the
+ * Stats data, fetched the first time the Overview or Stats tab is shown for a
+ * profile and then kept. A failed request (status or network) becomes `failed`, which the
  * tab shows with a Retry button instead of an endless spinner (F12).
  */
 export function useProfileStats({ username, activeTab, profile }: ProfileStatsArgs) {
@@ -35,7 +38,7 @@ export function useProfileStats({ username, activeTab, profile }: ProfileStatsAr
     const loaded = own?.stats != null;
 
     useEffect(() => {
-        if (activeTab !== 'stats' || !profileId || loaded) return;
+        if (!STATS_TABS.includes(activeTab) || !profileId || loaded) return;
         let current = true;
         void loadStats(username)
             .then((stats) => ({ profileId, stats, failed: false }))

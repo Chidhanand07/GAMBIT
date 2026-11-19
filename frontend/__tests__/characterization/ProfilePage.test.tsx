@@ -116,13 +116,16 @@ describe('initial load', () => {
     })
 
     // Redesign: the Overview's Friends card (Profile.dc.html) also loads the profile's friends.
-    test('other profile: then fetches recent games (limit 5), friend status and friends, nothing else', async () => {
+    // F-160 (was: without '/api/profile/bob/stats'): the Overview's Achievements need the win
+    // streak and the leaderboard rank, which come with the stats.
+    test('other profile: then fetches recent games (limit 5), friend status, friends and stats, nothing else', async () => {
         await renderProfile()
         expect(urls().slice().sort()).toEqual([
             '/api/friends/status/bob',
             '/api/friends?userId=u-bob',
             '/api/profile/bob',
             '/api/profile/bob/games?limit=5&offset=0',
+            '/api/profile/bob/stats',
             '/api/profile/me',
         ])
         expect(callFor('/api/profile/bob/games?limit=5&offset=0')![1]).toEqual({ cache: 'no-store' })
@@ -288,6 +291,19 @@ describe('header and overview tab', () => {
         expect(screen.getByText('vs Unknown')).toBeInTheDocument()
         expect(screen.getByText('3+2')).toBeInTheDocument()
         expect(screen.getAllByText('Jan 5, 2024')).toHaveLength(4)
+    })
+
+    test('Achievements: "N in a row" and "Top N" from the stats, as Profile.dc.html draws them [F-160]', async () => {
+        routes['/api/profile/bob/stats'] = {
+            facts: { averageAccuracy: null, longestWinStreak: 4, mostActiveDay: null },
+            standing: { pool: 'blitz', rank: 15 },
+        }
+        await renderProfile()
+        expect(screen.getByText('Achievements')).toBeInTheDocument()
+        expect(screen.getByText('4 in a row')).toBeInTheDocument()
+        expect(screen.getByText('Best win streak')).toBeInTheDocument()
+        expect(screen.getByText('Top 15')).toBeInTheDocument()
+        expect(screen.getByText('Blitz leaderboard')).toBeInTheDocument()
     })
 
     test('recent games: empty or failed response shows "No completed games yet."', async () => {
@@ -519,11 +535,13 @@ describe('stats tab', () => {
         expect(urls().filter(u => u === '/api/profile/bob/stats')).toHaveLength(1)
     })
 
+    // F-160 (was: only the first request fails): the Overview loads the stats too, and opening the
+    // Stats tab after a failed Overview load tries once more, so the first two requests fail here.
     test('F12: a failed stats request shows an error with Retry instead of a spinner forever', async () => {
         let calls = 0
         routes['/api/profile/bob/stats'] = () => {
             calls++
-            return calls === 1 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
+            return calls <= 2 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
         }
         await renderProfile()
         click(screen.getByRole('button', { name: 'Stats' }))

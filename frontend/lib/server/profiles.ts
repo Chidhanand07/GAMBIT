@@ -8,8 +8,8 @@ const DEFAULT_RATING = 1200;
 const MAX_USERNAME_SUFFIX = 99;
 const MAX_USERNAME_BASE_LENGTH = 15;
 
-const STATS_COLUMNS =
-    'id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical';
+const STATS_COLUMNS = `id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical,
+    rated_games_bullet, rated_games_blitz, rated_games_rapid, rated_games_classical`;
 
 /** Columns of a freshly created profile row (signup, /api/profile/me auto-create, OAuth). */
 export function newProfileRow(id: string, username: string) {

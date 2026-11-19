@@ -124,6 +124,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-125](#f-125) | "All" = best pool with ≥ 1 rated game; `leaderboard_rank` for any place; friends carry every pool | B1 | RANKINGS |
 | [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
 | [F-127](#f-127) | Public-profile fields (city, website, favourites, pronouns, style, experience): CHECK + zod, owner-only grants | B1 | PROFILE-FIELDS |
+| [F-160](#f-160) | Achievements "N in a row" and "Top N" from the longest win streak and the best pool's `leaderboard_rank` | STACK | ACHIEVEMENTS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3093,3 +3094,26 @@ their owner (B1 item 8).**
 - **Not done.** The design's visibility toggles (show country, rating history, recent games, friends)
   are privacy settings, not profile fields; they stay out until they are enforced server-side.
 - pgTAP `064_profile_extra_fields.test.sql`.
+
+## F-160
+
+**The profile's "N in a row" and "Top N" achievements come from real data (stacking follow-up a).**
+
+- **Context.** Profile.dc.html's Achievements card shows four badges: First win (♞), "4 in a row" /
+  "Best win streak" (♛), "30 games" / "Played 30 games" (♜) and "Top 15" / "Blitz leaderboard" (♚).
+  B1 shipped First win and the games milestone, plus a "N wins" milestone the mockup does not have,
+  because the streak and the rank were not on the Overview.
+- **Decision.** "N in a row" is the longest win streak the stats route already computes from the
+  finished games (`facts.longestWinStreak`, oldest first, aborted games skipped); it is earned from 2
+  (a single win is "First win"). "Top N" is the profile's place on the board of its best pool: the
+  pool its "All" rating comes from (`allRatingPool`, F-125), ranked by `public.leaderboard_rank`
+  through the service-role client; the stats route returns it as `standing: { pool, rank }` (null
+  without a rated game, without a rank, or when the read fails). It is earned while the place is on
+  the leaderboard's visible list (rank ≤ 50). The "N wins" badge is dropped: it is not in the design.
+- **Loading.** The Overview now fetches the stats (once per profile, shared with the Stats tab), so
+  the two stats-derived badges appear when that read returns; a failed read leaves them out (the
+  Stats tab still shows its error and Retry).
+- **Not a client value.** The rank is read on the server from the database for the profile in the
+  URL; nothing the browser sends feeds it (NODE-10).
+- Tests: `model.test.ts` (badges, thresholds), `api/profile.test.ts` (standing from
+  `leaderboard_rank` on the best pool; null cases), `ProfilePage.test.tsx` (Overview shows them).

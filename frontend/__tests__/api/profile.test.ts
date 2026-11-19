@@ -262,6 +262,33 @@ describe('GET /api/profile/[username]/stats', () => {
         })
     })
 
+    test("standing: the rank on the best pool's board from leaderboard_rank, for the Top N badge [F-160]", async () => {
+        const p = uid('p')
+        db.queue('profiles', {
+            data: { id: p, games_played: 9, wins: 5, losses: 4, draws: 0, rating_blitz: 1650, rating_rapid: 1700,
+                    rated_games_blitz: 6, rated_games_rapid: 0, rated_games_bullet: 3, rating_bullet: 1500 },
+            error: null,
+        })
+        db.queue('rpc:leaderboard_rank', { data: 15, error: null })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        // rapid's 1700 has no rated game behind it, so the best pool is blitz
+        expect(db.op(db.callsFor('rpc:leaderboard_rank')[0], 'rpc')).toEqual(['leaderboard_rank', { p_profile_id: p, p_board: 'blitz' }])
+        expect(body.standing).toEqual({ pool: 'blitz', rank: 15 })
+        expect(String(db.op(db.callsFor('profiles')[0], 'select')![0])).toContain('rated_games_blitz')
+    })
+
+    test('standing is null without a rated game (no rank read) or when the rank read fails [F-160]', async () => {
+        db.queue('profiles', { data: { id: uid('p'), games_played: 0, wins: 0, losses: 0, draws: 0 }, error: null })
+        const first = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(first.body.standing).toBeNull()
+        expect(db.callsFor('rpc:leaderboard_rank')).toHaveLength(0)
+
+        db.queue('profiles', { data: { id: uid('p'), games_played: 1, wins: 1, losses: 0, draws: 0, rating_rapid: 1210, rated_games_rapid: 1 }, error: null })
+        db.queue('rpc:leaderboard_rank', { data: null, error: { message: 'down' } })
+        const second = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(second.body.standing).toBeNull()
+    })
+
     test('best win per pool and overall: the highest opponent rating at the time among wins [F-122]', async () => {
         const p = uid('p')
         const x = uid('x')

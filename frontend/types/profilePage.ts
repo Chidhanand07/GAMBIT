@@ -92,4 +92,9 @@ export interface ProfileStats {
     /** Per pool, the highest opponent rating (at the time) the player beat; null without one (F-122). */
     bestWins?: Partial<Record<SpeedBucket, number | null>>;
     facts?: ProfileFacts;
+    /**
+     * The profile's place on the leaderboard of its best pool (the pool its "All" rating comes
+     * from), F-160; null when it has no rated game or is not ranked.
+     */
+    standing?: { pool: SpeedBucket; rank: number } | null;
 }
