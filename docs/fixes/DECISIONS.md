@@ -129,6 +129,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
 | [F-113](#f-113) | Intro splash: composited wordmark, Escape, 44 px Replay hit area | v2 | C |
 | [F-114](#f-114) | Landing metadata: canonical, share images, icons, robots, sitemap, JSON-LD from NEXT_PUBLIC_SITE_URL | v2 | C |
+| [F-115](#f-115) | Landing e2e (Playwright) and the Landing (Lighthouse) workflow, not required yet | v2 | C |
 | [F-116](#f-116) | Bundle analyzer behind ANALYZE=true (webpack build) | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
@@ -2753,3 +2754,25 @@ the Dependabot part of F-057).**
 - **Result for `/`.** Initial chunks: Next/React runtime, 8 KB gz of shared app UI (header, nav,
   icons), 7 KB tailwind-merge, 6 KB layout providers and 1 KB for the page (the splash). No
   Supabase, socket.io, chess.js or audio.
+
+## F-115
+
+**Landing end-to-end tests and the `Landing (Lighthouse)` workflow (not a required check yet).**
+
+- **Decision.**
+  - `frontend/playwright.config.ts` with projects chromium, firefox, webkit and iphone (iPhone 13,
+    WebKit, touch), against `next start` on port 3203. Tests in `frontend/e2e/landing/`: every call
+    to action, the splash (first visit, Skip, Escape, ends by itself, once per session, Replay and its
+    44 px hit area, reduced motion), zero console errors/warnings and no hydration mismatch, metadata,
+    share images and icons, JSON-LD, robots.txt, sitemap.xml, and an Event-Timing INP check (< 200 ms,
+    Chromium). The parity track adds its own Playwright config; the lead reconciles the two.
+  - `.github/workflows/landing-lighthouse.yml` ("Landing (Lighthouse)"): a production build, then
+    Lighthouse CI (`@lhci/cli` 0.16.1 through npx, no new dependency) three times: mobile simulated
+    (`lighthouserc.json`: performance ≥ 0.95, accessibility, best practices and SEO = 1, CLS = 0,
+    TBT ≤ 200 ms, no console errors; LCP ≤ 2 s as a warning, see F-111), mobile with applied
+    throttling (`lighthouserc.applied.json`: LCP ≤ 2 s, CLS = 0, TBT ≤ 200 ms as errors) and desktop.
+    The landing e2e runs on chromium, firefox and webkit.
+  - It is **not** a required status check yet: Lighthouse's simulated mobile score varies by a few
+    points between runs on shared CI machines. Make it required once it has been stable on `preprod`.
+- **Signed-in e2e** needs the test Supabase project (`frontend/.env.test.local`) and is pending; the
+  signed-in variant is covered by component tests.
