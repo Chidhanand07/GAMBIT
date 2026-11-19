@@ -134,6 +134,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-146](#f-146) | `premoves` / `allow_takebacks` stored as typed preference columns for the game server | B3 | SETTINGS-PREFS |
 | [F-147](#f-147) | Piece sets Gambit / Classic / Line art: SVG artwork and the mockup's Unicode glyphs, via a piece-set context | B3 | PIECE-SETS |
 | [F-163](#f-163) | One leaderboard: the opt-out view carries B1's columns and `leaderboard_rank` counts only listed players | STACK | LEADERBOARD-AGREE |
+| [F-164](#f-164) | `delete_account` re-checked on the stacked schema; a uuid-column guard joins the FK guard | STACK | DELETE-ACCOUNT |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3559,3 +3560,25 @@ context.** (Track B3, item 5; SOLID-01.)
   grants, opted-out player neither listed nor ranked nor counted, opting back in, rank = list place);
   `accountTabs.test.tsx` (preview rank from `/api/leaderboard/me`, was the top-50 list; beyond 50; no
   rank); `api/misc.test.ts` (list and count read `leaderboard_profiles`).
+
+## F-164
+
+**`delete_account` still covers every user reference once B1, B2 and B4 are stacked (follow-up e).**
+
+- **Check.** On the stacked schema (all migrations replayed in order on a scratch Postgres 17) the only
+  references to `public.profiles` are the ones F-145 handles: `games.white_id/black_id/winner_id`
+  (nulled), `messages.user_id` (deleted), and the cascading `friendships`, `notifications`,
+  `user_preferences`. B1 added columns, a view and functions but no new reference: the rating
+  snapshots (`white/black_rating_before/after`, `rating_category`, `rated_at`), `end_reason`, the
+  per-pool counters and `rating_all` live on `games`/`profiles` rows; `leaderboard_profiles` and
+  `leaderboard_rank` read `profiles`, so a deleted profile simply leaves them. B2 and B4 keep their
+  state in Redis (spectators, presence, draw/takeback/premove requests) and add no tables. The
+  function needed no change.
+- **Decision.** The kept game keeps its snapshot and end reason (the opponent's history and rating
+  chart need them; the deleted side is anonymised to NULL, so the numbers name nobody). pgTAP 081 now
+  covers B1's data in its fixtures (a rated game with snapshot and end reason, per-pool counters and
+  profile fields) and checks that the deleted player leaves the leaderboard view and ranks while the
+  opponent moves up. A second guard lists every `uuid` column of every public table: a user id
+  stored without a foreign key (which the FK guard cannot see) fails the test until it is listed and
+  handled by `delete_account`.
+- pgTAP `081_delete_account` (22 → 28 assertions; no assertion removed).
