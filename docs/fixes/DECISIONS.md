@@ -183,6 +183,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-152](#f-152) | Takebacks: undo own last move (two plies after a reply), opponent's per-game opt-in, per-ply clock snapshots, `moves` rows deleted | B4 | TAKEBACK |
 | [F-153](#f-153) | Premoves: one queued move per player in Redis, played in the opponent's move transaction at zero thinking time | B4 | PREMOVE |
 | [F-166](#f-166) | Takebacks and premoves follow the players' stored preferences, read by the game server; the per-game `takeback_pref` declaration is removed | STACK | GAME-PREFS |
+| [F-167](#f-167) | The game server keeps DELETE on `moves` and UPDATE on every `games` column the game actions write; no migration needed, pinned by pgTAP | STACK | GAME-ACTIONS-GRANTS |
 
 ---
 
@@ -3819,3 +3820,24 @@ move (PREMOVE).**
   reads `user_preferences`; still nothing written), two-instance takeback (no seeded prefs);
   frontend `takeback.test.tsx` (no `useTakebackPref`, no `takeback_prefs` handler/ack),
   `GamePage.test.tsx` (button from the sync; nothing declared), `api/settings.test.ts` (one copy).
+
+## F-167
+
+**The game actions still have their database privileges after B1's grant changes (follow-up g).**
+
+- **Check.** B1 revoked the browser roles' writes on `moves` (F-123) and replaced `service_role`'s
+  table-wide INSERT/UPDATE on `games` with column grants that leave out the rating snapshot (F-120).
+  B4's takeback rollback deletes the undone plies (`movesRepository.deleteAfter`: `DELETE FROM moves
+  WHERE game_id = … AND move_number > …`) and stores the restored `fen` and clocks; draw offers,
+  takebacks and premoves end games through the finalizer's row (`status`, `result`, `winner_id`,
+  `ended_at`, `final_fen`, clocks, `end_reason`). On all migrations replayed in order, `service_role`
+  keeps DELETE (and INSERT) on `moves` and UPDATE on every one of those `games` columns; B4 adds no
+  `games` column, so F-120's "new server-written columns need an explicit grant" does not apply. The
+  only schema change the game actions needed is F-165's `end_reason = 'agreement'`.
+- **Decision.** No migration and no security-definer function. pgTAP
+  `091_game_actions_privileges` pins the privileges (and that the browser roles cannot delete moves)
+  and runs the rollback's statements as `service_role`, so a later grant change that breaks them fails
+  CI.
+- **Caveat.** Checked on a local Postgres 17 replay whose `auth` schema and Supabase roles are stubs
+  with Supabase's default privileges on `public`; the "Database (Supabase)" CI job runs it on the real
+  stack.
