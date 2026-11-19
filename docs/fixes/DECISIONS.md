@@ -125,6 +125,12 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-105](#f-105) | Screens without a mockup are built from the mockups' components; the legacy theme is deleted | v2 | A3 |
 | [F-106](#f-106) | Accessibility at parity: focus ring, reduced motion, AA contrast fixes, notifications panel as a dialog, axe tests | v2 | A4 |
 
+**Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
+
 ---
 
 ## F-001
@@ -2610,3 +2616,30 @@ the Dependabot part of F-057).**
   with notifications open, 404, error, a loading skeleton and the challenge toast. `region` is off
   (pages render without the root layout's landmarks) and `color-contrast` is off (no layout in
   jsdom; covered by the token test).
+## F-110
+
+**Home.dc.html is the landing page (`/`); its signed-in and signed-out variants; what the hero claims.**
+
+- **Context.** `design/design/Home.dc.html` is the only mockup of `/`. It is drawn with a signed-in
+  header (avatar, bell, "1 online") and yet the hero offers "Create Account". The signed-out header
+  exists only in `Signin.dc.html`. The brief asks for real numbers only and for every call to action to
+  go to the right place for both kinds of viewer.
+- **Decision.**
+  - `/` is Home.dc.html, pixel for pixel: intro splash, header, hero, "Why Gambit", footer.
+  - Signed out: the header is the Signin.dc.html guest header ("Sign in", "Create account"); the hero
+    shows "Play Now" → `/lobby` (the proxy sends a guest to `/login?redirect=%2Flobby`) and "Create
+    Account" → `/signup`. Parity is measured against Home.dc.html with Signin's guest header in place.
+  - Signed in: the header is the account cluster of Home.dc.html; "Play Now" → `/lobby` with no detour;
+    the second hero button becomes **"My Profile"** → `/profile/<username>` (the label of the account
+    menu's own item), same style and size. A verified viewer whose profile row cannot be read gets no
+    second button rather than a sign-up offer.
+  - Footer: Play → `/lobby`, Leaderboard → `/leaderboard`, Analysis → `/analysis`, Offline →
+    `/offline` (play the computer offline).
+  - Live numbers: the only live number Home.dc.html shows is "N online" in the signed-in header; it
+    already comes from Supabase presence (at least 1: the viewer). The guest header shows no number in
+    the design, so no new public endpoint is needed.
+  - Claims, each kept because it is literally true and drawn: "∞ games available" (no game cap exists),
+    "6 time controls" (computed: the 5 lobby presets + Custom; a test fails if that stops being 6) and
+    "Free always" (nothing in the app is paid).
+- **Why.** A signed-in player offered "Create Account" is a dead end; the closest drawn element is the
+  account menu's "My Profile". Everything else follows the mockups as drawn.
