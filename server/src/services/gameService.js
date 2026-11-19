@@ -10,14 +10,19 @@
  * Clocks are persisted in one column pair, `white_clock_ms` / `black_clock_ms`
  * (G2): the same pair the restore reads.
  */
-const { clocksAt, freezeClocks, isClockRunning, resumeClocks } = require('../domain/clock');
-const { adjudicate, REASON } = require('../domain/adjudication');
+const { freezeClocks, resumeClocks } = require('../domain/clock');
+const { REASON } = require('../domain/adjudication');
 const { clockVerdict } = require('../domain/clockVerdict');
 const { gameStateFromRow } = require('../domain/gameState');
 const { isParticipant, playerRejection, REJECTION } = require('../domain/moveAuthorization');
 const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../domain/result');
 const { gameRoom, playerRoom } = require('./emitter');
+const { createDrawOffers } = require('./drawOfferService');
 const { createGameFinalizer } = require('./gameFinalizer');
+const { createPremoves } = require('./premoveService');
+const { createTakebacks } = require('./takebackService');
+const { sendState } = require('./gameStateSync');
+const { syncedTakebackPrefs } = require('./gameplayPreferences');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
 
@@ -47,7 +52,7 @@ async function spectatorAllowed(ctx, game) {
  *   removeActiveGame: Function }} gameStore
  * @property {{ findForRestore: Function, updateById: Function, updateIfActive: Function,
  *   finishIfActive: Function }} gamesRepo
- * @property {{ insert: Function }} movesRepo
+ * @property {{ insert: Function, deleteAfter: Function }} movesRepo
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame' | 'forgetGame'>} sessions
@@ -55,8 +60,9 @@ async function spectatorAllowed(ctx, game) {
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {SpectatorsPort} [spectators] live spectator counts (F-130); without it none are sent
  * @property {() => number} [now]
- * @property {PreferencesPort} [preferences] the players' "Allow spectators" and notification switches
- *   (ADR F-140); index.js always passes it. Without it everyone may watch and nobody is notified.
+ * @property {PreferencesPort} [preferences] the players' "Allow spectators", notification and gameplay
+ *   switches (ADR F-140, F-166); index.js always passes it. Without it everyone may watch, nobody is
+ *   notified, and takebacks and premoves are allowed.
  */
 
 /**
@@ -64,6 +70,7 @@ async function spectatorAllowed(ctx, game) {
  * @property {(playerIds: string[]) => Promise<boolean>} spectatingAllowed
  * @property {(n: { userId: string, column: import('../domain/preferences').NotificationColumn,
  *   type: string, payload: object }) => Promise<boolean>} notify
+ * @property {(userIds: string[]) => Promise<Map<string, { premoves: boolean, allowTakebacks: boolean }>>} [gameplayOf]
  */
 
 /**
@@ -133,7 +140,10 @@ async function joinGame(ctx, gameId, client, userId) {
         // Visible to every instance: is any socket of this player still at this board?
         client.join(playerRoom(gameId, userId));
     }
-    sendState(ctx, game, client, await viewerCount(ctx, game, userId, client.id));
+    const spectators = await viewerCount(ctx, game, userId, client.id);
+    // Each player's stored "Allow takeback requests", so the board knows whether to offer one (F-166).
+    const takebackPrefs = await syncedTakebackPrefs(ctx.preferences, game);
+    sendState(ctx.now(), game, client, { viewerId: userId, spectators, takebackPrefs });
 }
 
 /**
@@ -154,43 +164,6 @@ async function viewerCount({ spectators }, game, userId, socketId) {
         log.error(`[spectators] game ${game.id}:`, /** @type {Error} */ (e).message);
         return undefined;
     }
-}
-
-/**
- * Send `client` the authoritative view of `game`: the result when it is over,
- * otherwise position, move log and clocks (`game_state_sync`).
- * @param {GameCtx} ctx
- * @param {any} game
- * @param {ClientPort} client
- * @param {number} [spectators] how many watch, when known
- */
-function sendState(ctx, game, client, spectators) {
-    // If game is already completed in Redis, notify joining client
-    if (game.status === 'completed') {
-        client.emit('game_end', {
-            game_id: game.id,
-            result: resultLabel(game.result),
-            reason: game.reason || 'Game over',
-            white_id: game.whiteId,
-            black_id: game.blackId,
-        });
-        return;
-    }
-
-    // Real remaining time (frozen while a player is disconnected or before the first move).
-    const { whiteMs, blackMs } = clocksAt(game, ctx.now());
-
-    client.emit('game_state_sync', {
-        fen: game.fen,
-        moveLog: game.moveLog || [],
-        whiteMs,
-        blackMs,
-        activeSide: game.activeSide,
-        clockActive: isClockRunning(game),
-        whiteId: game.whiteId,
-        blackId: game.blackId,
-        ...(spectators === undefined ? {} : { spectators }),
-    });
 }
 
 /**
@@ -235,8 +208,9 @@ async function reconnect({ gameStore, sessions, emitter, now }, userId, client) 
 async function makeMove(ctx, data, userId, client) {
     const outcome = await ctx.moves.submit(data, userId);
     if (outcome.accepted) {
-        const verdict = adjudicate(outcome.played.position);
-        // The game ended with this move, at this move's time: the opponent's clock is not charged.
+        // The game ended with this move (or the opponent's premove right after it), at that
+        // move's time: the opponent's clock is not charged.
+        const verdict = outcome.verdict ?? outcome.premove?.verdict ?? null;
         if (verdict) await ctx.finalizer.endGame(data.game_id, verdict, outcome.state.lastMoveAt);
         return { ok: true };
     }
@@ -247,7 +221,7 @@ async function makeMove(ctx, data, userId, client) {
         const at = ctx.now();
         await ctx.finalizer.endGameIf(data.game_id, (game) => clockVerdict(game, at), at);
     } else if (outcome.game) {
-        sendState(ctx, outcome.game, client);
+        sendState(ctx.now(), outcome.game, client, { viewerId: userId });
     }
     return { ok: false, error: outcome.reason };
 }
@@ -348,6 +322,9 @@ function createGameService(deps) {
         resign: (data, userId) => resign(ctx, data, userId),
         /** @type {(userId: string | undefined, gameId: string | undefined) => Promise<void>} */
         handleDisconnect: (userId, gameId) => handleDisconnect(ctx, userId, gameId),
+        ...createDrawOffers(ctx),
+        ...createTakebacks(ctx),
+        ...createPremoves(ctx),
     };
 }
 

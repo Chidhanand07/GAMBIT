@@ -32,12 +32,13 @@ function makeCtx(over: Partial<SocketHandlerContext> = {}) {
 
 beforeEach(() => jest.clearAllMocks())
 
-test('registers the legacy 13 events in order, plus move_rejected [S1]', () => {
+test('registers the legacy 13 events in order, plus move_rejected [S1], then the draw-offer [DRAW-OFFER], takeback [TAKEBACK] and premove [PREMOVE] events', () => {
     const { handlers } = makeCtx()
     expect([...handlers.keys()]).toEqual([
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
-        'move_rejected', 'spectators_changed',
+        'move_rejected', 'spectators_changed', 'draw_offered', 'draw_declined',
+        'takeback_requested', 'takeback_declined', 'takeback_applied', 'premove_discarded',
     ])
 })
 
@@ -159,6 +160,8 @@ test('game_state_sync: position first, history only when the log is non-empty, t
     expect(dispatched()).toEqual([
         { type: 'positionSet', fen: AFTER_E4 },
         { type: 'stateSynced', history: null, whiteMs: 1000, blackMs: 2000, clockActive: true },
+        // [DRAW-OFFER] no offer in the sync: none stands.
+        { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: {}, takeback: null, takebackPrefs: {}, premove: null },
     ])
     expect(ctx.lastProcessedFenRef.current).toBe(AFTER_E4)
     expect(ctx.clockSyncedRef.current).toBe(true)
@@ -171,4 +174,37 @@ test('clock_sync subtracts lag from the side to move only', () => {
     expect(dispatched()).toEqual([{ type: 'clockSynced', whiteMs: 123_000, blackMs: 60_000 }])
     expect(ctx.clockSyncedRef.current).toBe(true)
     ;(Date.now as jest.Mock).mockRestore()
+})
+
+describe('draw offers [DRAW-OFFER]', () => {
+    test('game_state_sync carries a standing offer and the last offer plies', () => {
+        const { fire, dispatched } = makeCtx()
+        fire('game_state_sync', {
+            fen: AFTER_E4, moveLog: [], whiteMs: 1, blackMs: 1, clockActive: true,
+            drawOffer: { by: 'black' }, lastDrawOfferPly: { black: 4 },
+        })
+        expect(dispatched()).toContainEqual({ type: 'requestsSynced', drawOffer: 'black', lastDrawOfferPly: { black: 4 }, takeback: null, takebackPrefs: {}, premove: null })
+    })
+
+    test('draw_offered records who offered and when, for this game only', () => {
+        const { fire, dispatched } = makeCtx()
+        fire('draw_offered', { game_id: 'other', by: 'black', ply: 2 })
+        fire('draw_offered', { game_id: 'g1', by: 'black', ply: 2 })
+        expect(dispatched()).toEqual([{ type: 'drawOffered', by: 'black', ply: 2 }])
+    })
+
+    test('draw_declined clears the offer; the offering player gets a "Draw declined" note', () => {
+        const inform = jest.fn()
+        const { fire, dispatched } = makeCtx({ myColor: 'white', inform })
+        fire('draw_declined', { game_id: 'g1', by: 'black' })
+        expect(dispatched()).toEqual([{ type: 'drawOfferCleared' }])
+        expect(inform).toHaveBeenCalledWith('Draw declined')
+    })
+
+    test('the decliner and spectators get no note', () => {
+        const inform = jest.fn()
+        makeCtx({ myColor: 'black', inform }).fire('draw_declined', { game_id: 'g1', by: 'black' })
+        makeCtx({ myColor: 'spectator', inform }).fire('draw_declined', { game_id: 'g1', by: 'black' })
+        expect(inform).not.toHaveBeenCalled()
+    })
 })

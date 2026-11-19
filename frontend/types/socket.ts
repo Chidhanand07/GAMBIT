@@ -6,6 +6,16 @@
 import type { Game, MoveLogEntry, PlayerColor } from './game';
 import type { Profile } from './profile';
 import type { TimeControl } from './timeControl';
+import type {
+    DrawDeclinedPayload,
+    DrawOfferedPayload,
+    PremoveDiscardedPayload,
+    TakebackAppliedPayload,
+    TakebackDeclinedPayload,
+    TakebackRequestedPayload,
+} from './gameRequests';
+
+export type * from './gameRequests';
 
 type ChallengeColor = PlayerColor | 'random';
 
@@ -109,6 +119,14 @@ export interface ClientToServerEvents {
     challenge_request: (payload: ChallengeRequestPayload) => void;
     challenge_accept: (payload: ChallengeAcceptPayload) => void;
     challenge_decline: (payload: ChallengeDeclinePayload) => void;
+    draw_offer: (payload: GameIdPayload) => void;
+    draw_accept: (payload: GameIdPayload) => void;
+    draw_decline: (payload: GameIdPayload) => void;
+    takeback_request: (payload: GameIdPayload) => void;
+    takeback_accept: (payload: GameIdPayload) => void;
+    takeback_decline: (payload: GameIdPayload) => void;
+    premove_set: (payload: MakeMovePayload) => void;
+    premove_cancel: (payload: GameIdPayload) => void;
 }
 
 // ── server → client ──────────────────────────────────────────────────────────
@@ -149,6 +167,16 @@ export interface GameStateSyncPayload {
     blackId: string;
     /** Viewers watching a live game (F-130); absent when the server could not count them. */
     spectators?: number;
+    /** Present only while a draw offer stands (ADR F-151). */
+    drawOffer?: { by: PlayerColor };
+    /** Moves played when each side last offered a draw; present once anyone has offered. */
+    lastDrawOfferPly?: Partial<Record<PlayerColor, number>>;
+    /** Present only while a takeback request stands (ADR F-152). */
+    takeback?: { by: PlayerColor; plies: number };
+    /** Each player's "Allow takeback requests" setting, as declared for this game. */
+    takebackPrefs?: Partial<Record<PlayerColor, boolean>>;
+    /** This player's own queued premove; sent to its owner only (ADR F-153). */
+    premove?: { from: string; to: string; promotion?: string };
 }
 
 /** A live game's spectator count changed (F-130). */
@@ -234,6 +262,12 @@ export interface ServerToClientEvents {
     clock_sync: (payload: ClockSyncPayload) => void;
     move_made: (payload: MoveMadePayload) => void;
     move_rejected: (payload: MoveRejectedPayload) => void;
+    draw_offered: (payload: DrawOfferedPayload) => void;
+    draw_declined: (payload: DrawDeclinedPayload) => void;
+    takeback_requested: (payload: TakebackRequestedPayload) => void;
+    takeback_declined: (payload: TakebackDeclinedPayload) => void;
+    takeback_applied: (payload: TakebackAppliedPayload) => void;
+    premove_discarded: (payload: PremoveDiscardedPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;
     rating_updated: (payload: RatingUpdatedPayload) => void;

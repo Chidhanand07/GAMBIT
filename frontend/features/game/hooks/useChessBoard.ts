@@ -9,6 +9,7 @@ import type { Socket } from 'socket.io-client';
 import type { GameAction, GameState } from '../state/gameReducer';
 import { isPromotionMove, playMoveSoundFor } from '../utils/moveEffects';
 import { emitWithAck, rejectionMessage } from '@/lib/socket/ack';
+import { canPremove, premoveClick } from './usePremove';
 
 interface Options {
     gameId: string;
@@ -22,12 +23,16 @@ interface Options {
     autoQueen?: boolean;
     /** Play move sounds (Settings → "Move sounds"). */
     soundOn: boolean;
+    /** Queue a move while it is the opponent's turn (the premoves setting, ADR F-153). */
+    premoves?: boolean;
 }
 
 export interface ChessBoardControls {
     displayChess: Chess;
     isLive: boolean;
     isMyTurn: () => boolean;
+    /** Clicks queue or cancel a premove now (the opponent is to move and premoves are on). */
+    premoveActive: boolean;
     commitMove: (from: Square, to: Square, promotion: string) => void;
     handleSquareClick: (sq: Square) => void;
     goToMove: (index: number | null) => void;
@@ -93,7 +98,11 @@ export function useChessBoard(opts: Options): ChessBoardControls {
         commitMove(from, sq, 'q');
     };
 
+    const premoveOpts = { ...opts, enabled: opts.premoves };
+    const premoveActive = canPremove(premoveOpts, isMyTurn());
+
     const handleSquareClick = (sq: Square) => {
+        if (premoveActive) return premoveClick(premoveOpts, sq);
         if (!isMyTurn()) return;
         const chess = chessRef.current;
         if (selectedSq) {
@@ -110,5 +119,5 @@ export function useChessBoard(opts: Options): ChessBoardControls {
 
     const goToMove = (index: number | null) => dispatch({ type: 'historyViewed', index });
 
-    return { displayChess, isLive, isMyTurn, commitMove, handleSquareClick, goToMove };
+    return { displayChess, isLive, isMyTurn, premoveActive, commitMove, handleSquareClick, goToMove };
 }

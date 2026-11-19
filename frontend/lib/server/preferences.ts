@@ -44,6 +44,14 @@ export interface PreferencesPatch {
     gameplay?: Partial<AccountPreferences['gameplay']>;
 }
 
+/**
+ * The Gameplay card's "Premoves" and "Allow takeback requests" switches are play settings in the
+ * browser, but the game server enforces the typed columns `premoves` / `allow_takebacks` (ADR
+ * F-146, F-166). The columns are the one stored copy: the payload's play settings show them, and
+ * a play update writes them (unless the same PATCH names them under `gameplay`).
+ */
+const GAMEPLAY_PLAY_KEYS = ['premoves', 'allowTakebacks'] as const;
+
 /** A row (or no row) as the API payload; no row = the defaults, `stored: false`. */
 export function toPreferencesPayload(row: Row | null): PreferencesPayload {
     if (!row) return { stored: false, play: {}, ...structuredClone(DEFAULT_ACCOUNT_PREFERENCES) };
@@ -53,13 +61,21 @@ export function toPreferencesPayload(row: Row | null): PreferencesPayload {
         for (const [field, column] of Object.entries<string>(COLUMNS[section])) raw[section][field] = row[column];
     }
     const play = row.play && typeof row.play === 'object' ? (row.play as Record<string, unknown>) : {};
-    return { stored: true, play: { ...parseSettings(play) }, ...parseAccountPreferences(raw) };
+    const account = parseAccountPreferences(raw);
+    return { stored: true, play: { ...parseSettings(play), ...account.gameplay }, ...account };
 }
 
 /** The columns a PATCH writes; null when it changes nothing. `play` is normalised with parseSettings. */
 export function preferencesUpdateFromPatch(patch: PreferencesPatch): Row | null {
     const update: Row = {};
-    if (patch.play) update.play = { ...parseSettings(patch.play) };
+    if (patch.play) {
+        const play: Record<string, unknown> = { ...parseSettings(patch.play) };
+        for (const key of GAMEPLAY_PLAY_KEYS) {
+            if (typeof patch.play[key] === 'boolean') update[COLUMNS.gameplay[key]] = patch.play[key];
+            delete play[key];
+        }
+        update.play = play;
+    }
     for (const section of SECTIONS) {
         const values = (patch[section] ?? {}) as Record<string, unknown>;
         for (const [field, column] of Object.entries<string>(COLUMNS[section])) {

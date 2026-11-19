@@ -62,6 +62,7 @@ const config: Config = {
                     'check',
                     'selected',
                     'capture',
+                    'premove',
                     'dot',
                     'preview-dot',
                     'preview-hint',

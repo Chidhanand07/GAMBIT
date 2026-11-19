@@ -1,5 +1,5 @@
 // Player commands that emit to the realtime server: chat, resign, rematch request/accept/decline.
-// There is no draw command yet: the server has no draw-offer flow (design/DRAW-OFFER-PROPOSAL.md).
+// Draw offers are in requestCommands.ts.
 // The server knows who is acting from the socket handshake, so payloads only name the *other*
 // player. A rematch accept/decline names the requester; the server answers the request it stored.
 import type { Dispatch } from 'react';
@@ -23,7 +23,7 @@ export interface CommandContext {
  * Emit and wait for the ack, with the timeout and retry rule of lib/socket/ack (F-065): tell the
  * player when the server refused or never answered, then run `then` (ACKS, NODE-13).
  */
-function send(ctx: CommandContext, event: string, payload: unknown, then?: () => void): void {
+export function send(ctx: CommandContext, event: string, payload: unknown, then?: () => void): void {
     if (!ctx.socket) return;
     emitWithAck(ctx.socket, event, payload, {
         onRejected: (code) => {

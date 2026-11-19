@@ -44,6 +44,14 @@ const promotion = z.enum(['q', 'r', 'b', 'n']);
 const color = z.enum(['white', 'black', 'random']);
 const name = z.string().max(MAX_NAME_LENGTH);
 
+/** Squares and promotion piece only: the server computes everything else (S1). */
+const moveRequest = z.object({
+    game_id: id,
+    from: square,
+    to: square,
+    promotion: promotion.optional(),
+});
+
 const matchTerms = {
     time_control: timeControl.nullish(),
     is_rated: z.boolean().nullish(),
@@ -67,15 +75,22 @@ const schemas = {
     spectator_counts: z.object({ game_ids: z.array(id).max(MAX_COUNT_REQUEST) }),
     // Only the squares and the promotion piece are read. A client `fen`, `san`,
     // `move` or `captured` is stripped: the server computes all of them (S1).
-    make_move: z.object({
-        game_id: id,
-        from: square,
-        to: square,
-        promotion: promotion.optional(),
-    }),
+    make_move: moveRequest,
     resign: z.object({ game_id: id }),
     // What resigning would cost the asking player (F-133).
     rating_estimate: z.object({ game_id: id }),
+
+    // Draw offers name only the game: the side is the verified user's (ADR F-151).
+    draw_offer: z.object({ game_id: id }),
+    draw_accept: z.object({ game_id: id }),
+    draw_decline: z.object({ game_id: id }),
+    // The caller's own setting "Allow takeback requests", declared per game (ADR F-152).
+    takeback_request: z.object({ game_id: id }),
+    takeback_accept: z.object({ game_id: id }),
+    takeback_decline: z.object({ game_id: id }),
+    // A move queued for the opponent's turn: validated like a move (ADR F-153).
+    premove_set: moveRequest,
+    premove_cancel: z.object({ game_id: id }),
     // The web client sends `text`. An older `message` field is read as the text
     // too. Either way the result is one trimmed, non-empty, bounded string (G6).
     send_message: z

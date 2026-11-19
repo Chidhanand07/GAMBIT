@@ -58,6 +58,12 @@ describe('endings [F-124]', () => {
         ]);
     });
 
+    test('an agreed draw (F-165) counts as "Stalemate or draw"', () => {
+        const rows = endings([g({ result: 'draw', end_reason: 'agreement' })], ME);
+        expect(rows.find((r) => r.name === 'Stalemate or draw')?.count).toBe(1);
+        expect(rows.map((r) => r.name)).not.toContain(NOT_RECORDED);
+    });
+
     test('no Not recorded row when every game has a reason', () => {
         expect(endings([g({ result: 'white', end_reason: 'timeout' })], ME).map((r) => r.name)).not.toContain(NOT_RECORDED);
     });

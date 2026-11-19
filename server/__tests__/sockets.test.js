@@ -120,6 +120,8 @@ describe('joining a game', () => {
             activeSide: 'w', clockActive: false, whiteId: 'white-user', blackId: 'black-user',
             // A player sees how many watch; nobody does yet [F-130].
             spectators: 0,
+            // F-166: each player's stored "Allow takeback requests" (both off by default).
+            takebackPrefs: { white: false, black: false },
         });
     });
 

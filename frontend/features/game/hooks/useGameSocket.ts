@@ -44,6 +44,7 @@ function liveHandlerContext(socket: Socket, gameId: string, live: () => LiveCont
         },
         markDisconnected: (timeoutSeconds) => live().markDisconnected(timeoutSeconds),
         markReconnected: () => live().markReconnected(),
+        inform: (message) => live().inform?.(message),
     };
 }
 

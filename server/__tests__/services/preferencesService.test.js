@@ -286,3 +286,16 @@ describe('gameplay switches (ADR F-146)', () => {
         expect(preferencesOf({ premoves: true, allow_takebacks: true })).toMatchObject({ premoves: true, allow_takebacks: true });
     });
 });
+
+describe('gameplayOf: the switches the game server enforces (ADR F-166)', () => {
+    test('per user from the stored row; users without a row have both off', async () => {
+        const got = await prefsSetup({ rows: { w: { premoves: true, allow_takebacks: true } } }).svc.gameplayOf(['w', 'b']);
+        expect(got.get('w')).toEqual({ premoves: true, allowTakebacks: true });
+        expect(got.get('b')).toEqual({ premoves: false, allowTakebacks: false });
+    });
+
+    test('fails closed: a read error turns every switch off', async () => {
+        const got = await prefsSetup({ readError: { message: 'down' } }).svc.gameplayOf(['w']);
+        expect(got.get('w')).toEqual({ premoves: false, allowTakebacks: false });
+    });
+});

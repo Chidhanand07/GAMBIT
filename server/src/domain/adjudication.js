@@ -16,6 +16,8 @@ const REASON = Object.freeze({
     TIME: 'Time',
     ABANDONMENT: 'Abandonment',
     ABORTED: 'Aborted',
+    /** Both players agreed to a draw (draw_offer + draw_accept, ADR F-151). */
+    AGREEMENT: 'Agreement',
 });
 
 /**
@@ -33,6 +35,7 @@ const END_REASON_CODE = Object.freeze({
     [REASON.TIME]: 'timeout',
     [REASON.ABANDONMENT]: 'abandonment',
     [REASON.ABORTED]: 'aborted',
+    [REASON.AGREEMENT]: 'agreement',
 });
 
 /**

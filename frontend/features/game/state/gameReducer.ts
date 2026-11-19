@@ -3,10 +3,29 @@
 // does not mention keep their identity so effects keyed on them re-run at the same moments.
 import { Chess, type Square } from 'chess.js';
 import type { GameWithPlayers, PlayerColor, SeatColor } from '@/types/game';
+import {
+    allClearedRequests,
+    clearedRequests,
+    createInitialRequests,
+    requestHandlers,
+    type RequestsAction,
+    type RequestsState,
+} from './requests';
 
 export interface MovePair {
     from: Square;
     to: Square;
+}
+
+/** The position a takeback returned to (ADR F-152), from the server's `takeback_applied`. */
+export interface RestoredPosition {
+    fen: string;
+    fens: string[];
+    sans: string[];
+    lastMove: MovePair | null;
+    whiteMs: number;
+    blackMs: number;
+    clockActive: boolean;
 }
 
 export interface GameOverInfo {
@@ -25,7 +44,7 @@ export type RematchState = 'idle' | 'sent' | 'received' | 'declined';
 /** The open confirmation dialog (Game.dc.html Draw / Resign), if any. */
 export type ConfirmDialog = 'draw' | 'resign' | null;
 
-export interface GameState {
+export interface GameState extends RequestsState {
     fen: string;
     gameData: GameWithPlayers | null;
     myColor: SeatColor;
@@ -90,6 +109,7 @@ export function createInitialGameState(): GameState {
         focus: false,
         clockActive: false,
         spectators: null,
+        ...createInitialRequests(),
     };
 }
 
@@ -111,6 +131,7 @@ export type GameAction =
     | { type: 'spectatorsChanged'; count: number }
     | { type: 'moveReceived'; fen: string; from: Square; to: Square; san: string; whiteMs?: number; blackMs?: number }
     | { type: 'moveCommitted'; fen: string; from: Square; to: Square }
+    | { type: 'takebackApplied'; restored: RestoredPosition }
     | { type: 'moveRejected' }
     | { type: 'squareSelected'; square: Square; dests: Square[] }
     | { type: 'selectionCleared' }
@@ -128,7 +149,8 @@ export type GameAction =
     | { type: 'rematchStateSet'; value: RematchState }
     | { type: 'confirmSet'; value: ConfirmDialog }
     | { type: 'focusToggled' }
-    | { type: 'flipToggled' };
+    | { type: 'flipToggled' }
+    | RequestsAction;
 
 type ActionOf<K extends GameAction['type']> = Extract<GameAction, { type: K }>;
 type Handlers = { [K in GameAction['type']]: (state: GameState, action: ActionOf<K>) => GameState };
@@ -142,6 +164,13 @@ const msToSeconds = (ms: number) => Math.round(ms / MS_PER_SECOND);
  */
 function syncedSeconds(prev: number, ms: number): number {
     return Math.abs(prev * MS_PER_SECOND - ms) > CLOCK_SYNC_TOLERANCE_MS ? msToSeconds(ms) : prev;
+}
+
+/** The colour to move in a FEN ('w' → white); null for a FEN without a side field. */
+function sideToMoveOf(fen: string): PlayerColor | null {
+    const side = fen.split(' ')[1];
+    if (side === 'w') return 'white';
+    return side === 'b' ? 'black' : null;
 }
 
 /** Fresh empty destination list each time, as the legacy `setLegalDests([])` did. */
@@ -170,6 +199,9 @@ const handlers: Handlers = {
     moveReceived: (s, a) => ({
         ...s,
         ...noSelection(),
+        ...clearedRequests(),
+        // The opponent's move resolves my premove (the server played or dropped it); my own does not.
+        premove: sideToMoveOf(a.fen) === s.myColor ? null : s.premove,
         fen: a.fen,
         fenSnapshots: [...s.fenSnapshots, a.fen],
         viewIndex: null,
@@ -184,6 +216,21 @@ const handlers: Handlers = {
         fen: a.fen,
         lastMove: { from: a.from, to: a.to },
         pendingPromotion: null,
+    }),
+    // The server rolled the game back: its position, history and clocks replace ours.
+    takebackApplied: (s, { restored: r }) => ({
+        ...s,
+        ...noSelection(),
+        ...allClearedRequests(),
+        fen: r.fen,
+        fenSnapshots: r.fens,
+        moveList: r.sans,
+        lastMove: r.lastMove,
+        viewIndex: null,
+        pendingPromotion: null,
+        whiteTime: msToSeconds(r.whiteMs),
+        blackTime: msToSeconds(r.blackMs),
+        clockActive: r.clockActive,
     }),
     // The server refused the optimistic move; game_state_sync (sent right after) restores the position.
     moveRejected: (s) => ({ ...s, ...noSelection(), lastMove: null, pendingPromotion: null }),
@@ -201,7 +248,12 @@ const handlers: Handlers = {
             ? { ...s, whiteTime: Math.max(0, s.whiteTime - 1) }
             : { ...s, blackTime: Math.max(0, s.blackTime - 1) },
     // A confirmation still open when the game ends no longer applies.
-    gameEnded: (s, a) => ({ ...s, confirm: null, gameOver: { result: a.info.result, reason: a.info.reason } }),
+    gameEnded: (s, a) => ({
+        ...s,
+        ...allClearedRequests(),
+        confirm: null,
+        gameOver: { result: a.info.result, reason: a.info.reason },
+    }),
     ratingChanged: (s, a) =>
         a.side === 'white' ? { ...s, whiteRatingChange: a.change } : { ...s, blackRatingChange: a.change },
     chatReceived: (s, a) => ({ ...s, chatLog: [...s.chatLog, a.line] }),
@@ -213,6 +265,7 @@ const handlers: Handlers = {
     confirmSet: (s, a) => ({ ...s, confirm: a.value }),
     focusToggled: (s) => ({ ...s, focus: !s.focus }),
     flipToggled: (s) => ({ ...s, flipped: !s.flipped }),
+    ...requestHandlers,
 };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {

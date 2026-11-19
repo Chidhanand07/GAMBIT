@@ -173,6 +173,18 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-161](#f-161) | The Overview's Away slot (F-104) is fed by presence's away set; the profile-only `friendStatus` goes | STACK | AWAY-WIRING |
 | [F-162](#f-162) | Finished games open on `/analysis?game=<id>`: profile Games "Review" and the result page's "Open in analysis" | STACK | ANALYSIS-LINKS |
 
+**Redesign v2, track B4 — game actions** (branch `v2/game-actions`; PR column = B4).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-150](#f-150) | Draw offers are approved: the owner kept the "Draw offers approved" line in the brief | B4 | DRAW-OFFER |
+| [F-151](#f-151) | Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the finalizer | B4 | DRAW-OFFER |
+| [F-165](#f-165) | An accepted draw offer is stored as `end_reason = 'agreement'` (CHECK extended); profile counts it as "Stalemate or draw" | STACK | DRAW-OFFER |
+| [F-152](#f-152) | Takebacks: undo own last move (two plies after a reply), opponent's per-game opt-in, per-ply clock snapshots, `moves` rows deleted | B4 | TAKEBACK |
+| [F-153](#f-153) | Premoves: one queued move per player in Redis, played in the opponent's move transaction at zero thinking time | B4 | PREMOVE |
+| [F-166](#f-166) | Takebacks and premoves follow the players' stored preferences, read by the game server; the per-game `takeback_pref` declaration is removed | STACK | GAME-PREFS |
+| [F-167](#f-167) | The game server keeps DELETE on `moves` and UPDATE on every `games` column the game actions write; no migration needed, pinned by pgTAP | STACK | GAME-ACTIONS-GRANTS |
+
 ---
 
 ## F-001
@@ -3606,3 +3618,226 @@ context.** (Track B3, item 5; SOLID-01.)
 - Tests: `accountStore.test.ts` (no request without a session), `authChanges.test.ts` (lazy, never
   the eager client), `HomeSettingsPages.test.tsx` (its client double has a session),
   `presencePrivacy.test.tsx` and `PresenceProvider.test.tsx` (wait for the lazy client).
+
+## F-150
+
+**Draw offers are approved: the owner kept the "Draw offers approved" line in the brief (DRAW-OFFER).**
+
+- **Context.** `design/DRAW-OFFER-PROPOSAL.md` said nothing in `server/` changes before approval,
+  and F-009 had recorded "no draw-offer events: the UI has neither". The redesign put a Draw button
+  with a confirmation dialog on the game page, wired to a `TODO(draw-offer)` no-op.
+- **Decision.** The owner approved draw offers by keeping the "Draw offers approved" line in the
+  track brief. The proposal is implemented as written (F-151); this supersedes F-009 for draws.
+  Abort events are still not added.
+
+## F-151
+
+**Server-side draw offers: state in Redis, one offer per side per two own moves, accepted through the
+finalizer (DRAW-OFFER).**
+
+- **State.** `drawOffer: { by, at, ply } | null` and `lastDrawOfferPly: { white?, black? }` live in
+  the Redis game JSON and are written only through `mutateGame`'s compare-and-set (multi-replica
+  safe). No migration. `games.draw_offer` and its PATCH path are left untouched (separate cleanup).
+- **Rule** (`domain/drawOffer.js`, pure). Not before both sides have moved; one standing offer at a
+  time (`draw_offer_pending`); a side may offer again only after two moves of its own since its last
+  offer (`draw_offer_too_soon`). A move, an accept, a decline and the end of the game clear the
+  offer (`domain/pendingRequests.js`, applied in `stateAfterMove` and in the finalizer's
+  transition); a move by the receiver is therefore an implicit decline.
+- **Events** (all acked, zod-validated `{ game_id }`, the actor is the verified user):
+  `draw_offer` → `draw_offered { game_id, by, ply }` to the room; `draw_accept` →
+  `finalizer.endGameIf` with a decider that re-checks the offer inside the same transition, so the
+  row, rating, review and `game_end` ("Draw", reason `Agreement`) are the single finalizer's; a
+  mate, flag fall or resignation that commits first wins and the accept is answered
+  `game_not_active` (or `no_pending_request` when a move cleared the offer); `draw_decline` →
+  `draw_declined { game_id, by }`. `game_state_sync` carries `drawOffer` and `lastDrawOfferPly` only
+  when set, so the payload of a game without offers is unchanged.
+- **Limits.** `draw_offer` has its own rate rule `socketOffer` (10 per minute per user); accept and
+  decline use `socketEvent` like resign.
+- **Client.** The confirm dialog (or Draw directly when the confirmation setting is off) emits
+  `draw_offer` with `emitWithAck`; `ACK_POLICY`: `draw_offer` and `draw_accept` are never re-sent,
+  `draw_decline` is retried once and a repeat answered `no_pending_request` counts as done. The Draw
+  button reads "Draw offered" and is disabled while my offer stands, and is disabled whenever the
+  mirrored rule (`features/game/utils/drawOffer.ts`) says the server would refuse. An incoming offer
+  shows "<opponent> offers a draw" with Decline / Accept above the board (visible in focus mode; the
+  mockup has no incoming state, so it reuses the notice surface and pill buttons). "Draw declined" is
+  an info toast for the offering player. The end status reads "Draw agreed. The game is a draw.",
+  the mockup's wording.
+- **Rollout.** Server first (new events only), then the web app. Rolling the server back makes the
+  client's acks time out ("The server did not answer", F-065).
+- **Proof.** `__tests__/domain/drawOffer.test.js`, `services/drawOfferService.test.js` (every
+  rejection, the accept/mate race both ways, a move clearing the offer, reconnect),
+  `characterization/drawOffer.test.js` (events and acks through the real server),
+  `integration/drawOfferTwoInstances.test.js` (offer on A, accept on B, one `game_end`, rated once;
+  accept racing the mate across replicas), frontend `features/game/drawOffer.test.tsx` and the
+  game page characterization.
+
+## F-165
+
+**An agreed draw has its own stored end reason (found while stacking B4 on B1).**
+
+- **Context.** B1 (F-124) stores how a game ended in `games.end_reason`, a code from a fixed list
+  enforced by a CHECK and by `END_REASON_CODE` on the game server (B1's test pins that every
+  adjudication reason has a code). B4's draw offers (F-151) end a game with the new
+  `REASON.AGREEMENT`, which had no code: the stacked test failed, and the CHECK would have refused it.
+- **Decision.** Folded into the draw-offer commit so it passes on its own: migration
+  `20261118400000_end_reason_agreement.sql` re-creates the CHECK with `'agreement'` added;
+  `END_REASON_CODE[REASON.AGREEMENT] = 'agreement'`; the profile's "How games end" counts it under
+  the mockup's "Stalemate or draw" row (Profile.dc.html has no separate row).
+- **Rollout.** The migration before the game server that offers draws.
+- Tests: server `adjudication.test.js` (code list, was without `agreement`), frontend
+  `gameFactsLength.test.ts`, pgTAP `090_end_reason_agreement`.
+
+## F-152
+
+**Takebacks: what is undone, who may ask, how the clocks and the `moves` rows follow (TAKEBACK).**
+
+- **What is undone.** A player asks to undo *their own* last move. If the opponent has not replied
+  (it is the opponent's turn) that is one ply; if the opponent has replied (the requester is to move)
+  it is two plies, the reply and the requester's move, so the requester is to move again. This is the
+  mockup's `takeback` (Game.dc.html removes two plies when it is your turn). A request with no move of
+  the requester's to undo is refused `takeback_nothing_to_undo`.
+- **Who may ask.** The Settings mockup's "Allow takeback requests — Opponents may ask to take back a
+  move" (default off) is the *receiver's* setting. Settings are browser-only on this branch
+  (`features/settings/store.ts`, no server storage), so the client declares it per game with
+  `takeback_pref { game_id, allow }`; the server stores `takebackPrefs[color]` in the Redis game
+  state, broadcasts `takeback_prefs` to the room, and refuses requests to a player who has not
+  allowed them (`takebacks_disabled`; absent = not allowed, so an older client is never asked). The
+  client sends nothing while the setting is off. Rated games are not treated differently: neither the
+  mockups nor the settings say so, and the opponent's consent is required either way.
+- **Limits.** One standing request (`takeback_pending`); a 15 s cooldown per side after each request,
+  whatever the answer (`takeback_cooldown`); `takeback_request` has the `socketOffer` rate rule. Any
+  move, an answer and the end of the game clear the request; an accept checks inside the same
+  compare-and-set that the request still stands for the current position, so a move or an ending that
+  commits first wins (`no_pending_request` / `game_not_active`).
+- **Rolling back** (`domain/takeback.js`, pure). Position = the FEN of the last kept ply (or
+  `startFen`); `moveLog` sliced; clocks = the snapshot stored with that ply — every move now appends
+  `{ whiteMs, blackMs }` (after the increment) to `clockLog`, kept in step with `moveLog`; back at the
+  start position the starting clocks. The clock runs from the moment of the accept (`lastMoveAt =
+  now`); back at the start it is stopped and the first-move window reopens (`startedAt = now`), so the
+  first-move abort rule does not fire on a game that was just rewound. A log without snapshots (a game
+  restored from its `games` row after a Redis loss) keeps the clocks as they stand. The room gets
+  `takeback_applied { plies, fen, moveLog, whiteMs, blackMs, activeSide, clockActive }`.
+- **Database.** Move rows can be deleted: `service_role` keeps Supabase's default table privileges on
+  `moves` (no migration revokes them). After Redis commits, the server deletes the rows with
+  `move_number > kept` (`movesRepository.deleteAfter`) and writes the restored `fen` and clocks to the
+  `games` row, fire-and-forget with logging, exactly like moves are persisted. Chosen over "mark in
+  Redis, rewrite at finalization" because the `moves` table is read during the game (stale-game
+  detection, F-044) and a crash before finalization would leave undone moves in it. **Residual risk:**
+  a move's own insert still in flight when its takeback commits (it would have to take longer than the
+  request + accept round trip) would land after the delete and leave one stale row; not observed,
+  logged here.
+- **Client.** A Takeback button joins Flip / Draw / Resign (a four-column row) only when the opponent
+  allows takebacks, so the default screen is the mockup's three buttons; it reads "Requested" while my
+  request stands. An incoming request shows "<opponent> asks to take back their last move / the last
+  two moves" with Decline / Accept above the board. "Takeback declined" and "A move was taken back" are
+  info toasts. `ACK_POLICY`: request and accept are never re-sent; decline and `takeback_pref` retry
+  once. The settings preview shows a "Takebacks on/off" chip (Settings.dc.html `statusChips`).
+- **Proof.** `domain/takeback.test.js`, `services/takebackService.test.js` (each rejection, both
+  undo depths, clocks restored, persistence, a move clearing the request, reconnect),
+  `integration/takebackTwoInstances.test.js` (request on A, accept on B, Redis and the `moves` rows
+  agree; an accept racing a move across replicas: exactly one wins), frontend
+  `features/game/takeback.test.tsx` and the game page characterization.
+
+## F-153
+
+**Premoves: one queued move per player in Redis, played in the same transaction as the opponent's
+move (PREMOVE).**
+
+- **State.** `premove: { by, from, to, promotion? } | null` in the Redis game state, set by
+  `premove_set` (validated like `make_move`: squares and promotion only) and cleared by
+  `premove_cancel`, both through `mutateGame`'s compare-and-set. Refused when it is the caller's
+  own turn (`premove_your_turn`) or the from-square holds no piece of theirs (`illegal_premove`);
+  full legality cannot be known before the opponent moves. A new premove replaces the old one.
+  It is private: acked, never broadcast, and only the owner's `game_state_sync` carries it
+  (`premoveView`, so `sendState` now takes the viewer's verified id).
+- **Playing it.** Inside the same `mutateGame` callback that applies the opponent's move
+  (`moveRecorder.decide` → `domain/premove.resolvePremove`): if that move ended the game the
+  premove lapses silently; otherwise it is tried with the server's rules on the new position —
+  legal → applied with `stateAfterMove` at the *same instant*, so the owner is charged zero
+  thinking time and still gets the increment; illegal → dropped and `premove_discarded
+  { game_id, reason }` is sent to the owner's `player:<game>:<user>` room only. One write, so no
+  replica can see the opponent's move without the premove's resolution. The room gets two
+  `move_made` events in order; the two `moves` rows are inserted in order (the second after the
+  first settles, so the `games` row ends on the final position). The finalizer's verdict is taken
+  on the premove's position when it ends the game (mate by premove). The end of the game and an
+  accepted takeback clear a queued premove (`ALL_REQUEST_KEYS`); an ordinary move does not (the
+  move the premove waits for resolves it). The pure move-state function moved from the move
+  recorder to `domain/moveState.js` so the domain can reuse it.
+- **Rate limit.** `premove_set` / `premove_cancel` use the move rule (`socketMove`).
+- **Setting.** The Settings mockup's "Premoves — Queue a move while it is the opponent turn"
+  (default off) is browser-only like every setting on this branch, so it gates the client: with it
+  off the board ignores clicks on the opponent's turn and nothing is sent. The server needs no
+  copy: a player who never sends `premove_set` never has a premove.
+- **Client.** On the opponent's turn a click on one of my pieces selects it with geometric
+  destinations (`utils/premoveDests.ts`: other pieces do not block, castling squares from the home
+  square), a click on a destination queues it (`premove_set`; a pawn to the last rank promotes to a
+  queen) and tints both squares with `mark-premove` (the mockup has no premove state: the turn dot's
+  green, translucent like the other marks); any click while one is queued cancels it. The
+  opponent's `move_made` (the side to move becomes mine) clears the tint; a refusal clears it with a
+  message, except `premove_your_turn`. `ACK_POLICY`: `premove_set` never re-sent, `premove_cancel`
+  retried once. The settings preview shows "Premoves on/off".
+- **Proof.** `domain/premove.test.js` (zero time with increment, illegal, game over),
+  `services/premoveService.test.js` (rejections, the 64 s / 55 s clock arithmetic, row order, mate
+  by premove, a takeback clearing it, owner-only sync), `integration/premoveTwoInstances.test.js`
+  (premove queued on B played when the move on A commits; an illegal one reported only to its owner
+  on the other replica), frontend `features/game/premove.test.tsx` and the game page
+  characterization.
+
+## F-166
+
+**The game server reads "Allow takeback requests" and "Premoves" from the stored preferences
+(stacking follow-up f; supersedes the per-game declaration of F-152).**
+
+- **Context.** B4 (F-152) kept settings in the browser, so each page declared "Allow takeback
+  requests" to the game server per game with a `takeback_pref` event, stored in the Redis game and
+  broadcast as `takeback_prefs`; premoves were only gated in the browser. B3 (F-146) then stored both
+  switches as typed columns (`user_preferences.allow_takebacks`, `.premoves`) that the game server can
+  read. A client-declared setting is client-trusted state (NODE-11): a page could claim anything.
+- **Decision.**
+  - `preferencesService.gameplayOf(ids)` reads both switches per user (no row: both off) and fails
+    closed (a read error: both off). `services/gameplayPreferences.js` turns that into what the game
+    actions need.
+  - `takeback_request`: the opponent's stored `allow_takebacks` is read before the request is decided
+    (`takebackRejection(game, color, at, opponentAllows)`); off → `takebacks_disabled`.
+  - `premove_set`: the caller's stored `premoves` is read first; off → `premoves_disabled` (the page
+    shows "Premoves are off in your Gameplay settings.").
+  - `join_game` sends each player's takeback switch in `game_state_sync` (`takebackPrefs`), so the
+    board offers a Takeback button only when the opponent allows it. A switch changed mid-game is
+    applied on the next request (the server decides); the button follows on the next join.
+  - Removed, no backward compatibility kept (the stack ships the server and the page together): the
+    `takeback_pref` event and schema, `setTakebackPref`, the `takeback_prefs` broadcast and its page
+    handler, `useTakebackPref`, and `takebackPrefs` in the Redis game state.
+  - Settings: the Gameplay card's two switches are play settings in the browser; `/api/settings`
+    now stores them only in the typed columns (a play update writes the columns and drops the keys
+    from the `play` JSON; the GET payload's play settings show the columns), so there is one copy.
+  - Unit tests that wire no preferences port keep takebacks and premoves allowed (as F-140 does for
+    spectators); production always passes the port.
+- Tests (old → new): server `takebackService.test.js` (`takeback_pref` describe → the stored switch
+  decides: read on the server, only the opponent's counts, fail closed), `takeback.test.js`
+  (`game.takebackPrefs` → `opponentAllows` argument), `premoveService.test.js` (new: off by default,
+  on, only the caller's), `preferencesService.test.js` (`gameplayOf`), `handlers`/`schemas` (no
+  `takeback_pref`), `game`/`sockets` (sync carries `takebackPrefs`), `chat`/`timers` (join only
+  reads `user_preferences`; still nothing written), two-instance takeback (no seeded prefs);
+  frontend `takeback.test.tsx` (no `useTakebackPref`, no `takeback_prefs` handler/ack),
+  `GamePage.test.tsx` (button from the sync; nothing declared), `api/settings.test.ts` (one copy).
+
+## F-167
+
+**The game actions still have their database privileges after B1's grant changes (follow-up g).**
+
+- **Check.** B1 revoked the browser roles' writes on `moves` (F-123) and replaced `service_role`'s
+  table-wide INSERT/UPDATE on `games` with column grants that leave out the rating snapshot (F-120).
+  B4's takeback rollback deletes the undone plies (`movesRepository.deleteAfter`: `DELETE FROM moves
+  WHERE game_id = … AND move_number > …`) and stores the restored `fen` and clocks; draw offers,
+  takebacks and premoves end games through the finalizer's row (`status`, `result`, `winner_id`,
+  `ended_at`, `final_fen`, clocks, `end_reason`). On all migrations replayed in order, `service_role`
+  keeps DELETE (and INSERT) on `moves` and UPDATE on every one of those `games` columns; B4 adds no
+  `games` column, so F-120's "new server-written columns need an explicit grant" does not apply. The
+  only schema change the game actions needed is F-165's `end_reason = 'agreement'`.
+- **Decision.** No migration and no security-definer function. pgTAP
+  `091_game_actions_privileges` pins the privileges (and that the browser roles cannot delete moves)
+  and runs the rollback's statements as `service_role`, so a later grant change that breaks them fails
+  CI.
+- **Caveat.** Checked on a local Postgres 17 replay whose `auth` schema and Supabase roles are stubs
+  with Supabase's default privileges on `public`; the "Database (Supabase)" CI job runs it on the real
+  stack.

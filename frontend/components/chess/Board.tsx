@@ -32,6 +32,8 @@ export interface BoardProps {
     /** Legal destinations of the selected piece: a dot on empty squares, a capture tint on pieces. */
     legalDestinations?: readonly Square[];
     lastMove?: BoardMove | null;
+    /** A move queued for the opponent's turn (live game premoves): both squares tinted. */
+    premove?: BoardMove | null;
     /** The king in check, if any. */
     checkSquare?: Square | null;
     /** Called with the clicked square; squares are buttons only when this is set. */
@@ -86,12 +88,14 @@ const PieceSlot = memo(function PieceSlot({ color, type, col, row, animate }: Pi
 
 const HERO_LAST_FILL = { light: 'bg-board-hero-last-light', dark: 'bg-board-hero-last-dark' } as const;
 
+const touches = (move: BoardMove | null | undefined, sq: Square) => move?.from === sq || move?.to === sq;
+
 function markFor(sq: Square, props: BoardProps, occupied: boolean): SquareMark {
     if (props.legalDestinations?.includes(sq) && occupied) return 'capture';
     if (props.selectedSquare === sq) return 'selected';
+    if (touches(props.premove, sq)) return 'premove';
     if (props.checkSquare === sq) return 'check';
-    if (props.lastMove?.from === sq || props.lastMove?.to === sq) return 'last';
-    return 'none';
+    return touches(props.lastMove, sq) ? 'last' : 'none';
 }
 
 /** Square fill and tint; Home.dc.html paints the hero board's last move as solid gold squares instead. */

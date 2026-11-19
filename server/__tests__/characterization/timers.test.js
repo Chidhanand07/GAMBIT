@@ -121,7 +121,9 @@ describe('disconnect during an active game', () => {
         // F-140 (was `supabase.calls` toEqual []): the join reads the players' "Allow spectators";
         // nothing is written.
         expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
-        expect(supabase.callsFor('user_preferences').map((c) => c.ops[0][0])).toEqual(['select']);
+        // F-166 (was ['select']): each join (both players' and the stranger's) also reads the players'
+        // gameplay switches; every user_preferences call is still a read.
+        expect(new Set(supabase.callsFor('user_preferences').map((c) => c.ops[0][0]))).toEqual(new Set(['select']));
     });
 
     test('completed game or a user without a game → no notice, no DB write', async () => {
@@ -133,7 +135,8 @@ describe('disconnect during an active game', () => {
         anon.disconnect();
         await sleep(80);
         expect(notices).toEqual([]);
-        expect(supabase.calls).toEqual([]);
+        // F-166 (was: no call at all): the players' joins read their stored gameplay switches; no write.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
     });
 });
 

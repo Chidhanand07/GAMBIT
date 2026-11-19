@@ -71,6 +71,8 @@
     --color-mark-check:       rgba(255,90,70,0.6);
     --color-mark-selected:    rgba(239,191,91,0.7);
     --color-mark-capture:     rgba(220,80,60,0.5);
+    /* A queued premove (no mockup state): the turn dot's green (#5BD69A), translucent like the others. */
+    --color-mark-premove:     rgba(91,214,154,0.5);
     --color-mark-dot:         rgba(16,20,15,0.35);
     --color-mark-preview-dot: rgba(20,60,35,0.5);
     --color-mark-preview-hint: rgba(110,200,120,0.5);

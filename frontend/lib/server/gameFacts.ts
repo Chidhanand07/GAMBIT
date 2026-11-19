@@ -75,7 +75,10 @@ const ENDING_GROUPS: readonly (readonly [string, readonly string[]])[] = [
     ['Checkmate', ['checkmate']],
     ['Resignation', ['resignation']],
     ['On time', ['timeout']],
-    ['Stalemate or draw', ['stalemate', 'insufficient_material', 'threefold_repetition', 'fifty_move_rule']],
+    [
+        'Stalemate or draw',
+        ['stalemate', 'insufficient_material', 'threefold_repetition', 'fifty_move_rule', 'agreement'],
+    ],
     ['Abandoned', ['abandonment']],
 ];
 export const NOT_RECORDED = 'Not recorded';

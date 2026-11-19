@@ -110,6 +110,11 @@ describe('gamesRepository', () => {
     });
 });
 
+test('movesRepository.deleteAfter drops the rows after the kept plies of one game [TAKEBACK]', async () => {
+    const { table, ops } = await run(createMovesRepository(supabase).deleteAfter('g1', 4));
+    expect([table, ops]).toEqual(['moves', [['delete'], ['eq', 'game_id', 'g1'], ['gt', 'move_number', 4]]]);
+});
+
 test('movesRepository.insert / messagesRepository.insert', async () => {
     const row = { a: 1 };
     const moves = await run(createMovesRepository(supabase).insert(row));
@@ -181,12 +186,28 @@ describe('profilesRepository', () => {
 describe('gameResultsRepository [RATING-ATOMIC]', () => {
     test('applyGameResult calls apply_game_result with the p_-prefixed arguments and returns its result', async () => {
         supabase.queue('rpc:apply_game_result', { data: 'applied', error: null });
-        const white = { old_rating: 1500, old_rd: 100, old_vol: 0.06, old_games_played: 10, new_rating: 1510, new_rd: 95, new_vol: 0.06 };
+        const white = {
+            old_rating: 1500,
+            old_rd: 100,
+            old_vol: 0.06,
+            old_games_played: 10,
+            new_rating: 1510,
+            new_rd: 95,
+            new_vol: 0.06,
+        };
         const black = { ...white, new_rating: 1490 };
         const repo = createGameResultsRepository(supabase);
 
         const { table, ops, result } = await run(
-            repo.applyGameResult({ gameId: 'g', whiteId: 'w', blackId: 'b', result: 'white', ratingField: 'rating_rapid', white, black }),
+            repo.applyGameResult({
+                gameId: 'g',
+                whiteId: 'w',
+                blackId: 'b',
+                result: 'white',
+                ratingField: 'rating_rapid',
+                white,
+                black,
+            }),
         );
 
         expect(table).toBe('rpc:apply_game_result');
@@ -214,9 +235,7 @@ describe('notificationsRepository', () => {
         repo = createNotificationsRepository(supabase);
     });
 
-    test.each([
-        ['insert', [{ type: 't' }], [['insert', { type: 't' }]]],
-    ])('%s', async (name, args, expected) => {
+    test.each([['insert', [{ type: 't' }], [['insert', { type: 't' }]]]])('%s', async (name, args, expected) => {
         const { table, ops } = await run(repo[name](...args));
         expect(table).toBe('notifications');
         expect(ops).toEqual(expected);

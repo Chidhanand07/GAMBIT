@@ -65,12 +65,20 @@ export const GAMEPLAY_ROWS: SettingRowDef[] = [
         hint: 'Pre-selected when you open the lobby.',
         options: options(TIME_CONTROLS, (id) => SPEED_BUCKET_LABELS[id as keyof typeof SPEED_BUCKET_LABELS]),
     },
+    // The mockup's wording, verbatim.
+    { kind: 'switch', key: 'premoves', label: 'Premoves', hint: 'Queue a move while it is the opponent turn.' },
     { kind: 'switch', key: 'autoQueen', label: 'Auto-queen', hint: 'Promote pawns to a queen automatically.' },
     {
         kind: 'switch',
         key: 'confirmResignDraw',
         label: 'Confirm resign and draw',
         hint: 'Ask before you resign or offer a draw.',
+    },
+    {
+        kind: 'switch',
+        key: 'allowTakebacks',
+        label: 'Allow takeback requests',
+        hint: 'Opponents may ask to take back a move.',
     },
 ];
 

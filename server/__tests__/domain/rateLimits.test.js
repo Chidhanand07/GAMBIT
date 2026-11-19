@@ -13,10 +13,17 @@ test('every rule is a positive count over a positive window', () => {
 
 test.each([
     ['make_move', 'socketMove'],
+    ['premove_set', 'socketMove'],
+    ['premove_cancel', 'socketMove'],
     ['send_message', 'socketChat'],
     ['join_queue', 'socketQueueJoin'],
     ['challenge_request', 'socketChallenge'],
     ['rematch_request', 'socketChallenge'],
+    ['draw_offer', 'socketOffer'],
+    ['draw_accept', 'socketEvent'],
+    ['draw_decline', 'socketEvent'],
+    ['takeback_request', 'socketOffer'],
+    ['takeback_accept', 'socketEvent'],
     ['resign', 'socketEvent'],
     ['join_game', 'socketEvent'],
     ['anything_else', 'socketEvent'],

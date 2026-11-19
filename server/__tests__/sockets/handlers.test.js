@@ -36,6 +36,14 @@ function deps() {
             spectate: fn(),
             makeMove: fn(),
             resign: fn(),
+            offerDraw: fn(),
+            acceptDraw: fn(),
+            declineDraw: fn(),
+            requestTakeback: fn(),
+            acceptTakeback: fn(),
+            declineTakeback: fn(),
+            setPremove: fn(),
+            cancelPremove: fn(),
         },
         chatService: { sendMessage: fn() },
         verifyToken: jest.fn(async () => 'u1'),
@@ -75,6 +83,14 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'challenge_request',
             'challenge_accept',
             'challenge_decline',
+            'draw_offer',
+            'draw_accept',
+            'draw_decline',
+            'takeback_request',
+            'takeback_accept',
+            'takeback_decline',
+            'premove_set',
+            'premove_cancel',
             'disconnect',
         ].sort(),
     );
@@ -186,6 +202,57 @@ test('validated payloads go to the services; the actor is always the verified us
     expect(d.matchmaking.leaveQueue).toHaveBeenCalledWith('u1');
 });
 
+test('draw events: the service gets the game id and the verified user; anything else is stripped [DRAW-OFFER]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.draw_offer({ game_id: 'g', by: 'black', user_id: 'victim' }, ack);
+    await handlers.draw_accept({ game_id: 'g', result: 'draw' }, ack);
+    await handlers.draw_decline({ game_id: 'g' }, ack);
+    await handlers.draw_offer({ game_id: 'bad id!' }, ack);
+    expect(d.gameService.offerDraw).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.acceptDraw).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.declineDraw).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.offerDraw).toHaveBeenCalledTimes(1);
+    expect(ack.mock.calls.map(([a]) => a)).toEqual([
+        { ok: true },
+        { ok: true },
+        { ok: true },
+        { ok: false, error: 'invalid_payload' },
+    ]);
+});
+
+test('takeback events: the service gets the validated payload and the verified user [TAKEBACK]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.takeback_request({ game_id: 'g', plies: 9 }, ack);
+    await handlers.takeback_accept({ game_id: 'g' }, ack);
+    await handlers.takeback_decline({ game_id: 'g' }, ack);
+    await handlers.takeback_request({ plies: 1 }, ack);
+    expect(d.gameService.requestTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.acceptTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.declineTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.requestTakeback).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
+    // F-166 (was: `takeback_pref` declared the player's setting per game): no such event any more;
+    // the setting is the player's stored preference.
+    expect(handlers.takeback_pref).toBeUndefined();
+});
+
+test('premove events: squares and promotion only, for the verified user [PREMOVE]', async () => {
+    const d = deps();
+    const { handlers } = connect(d, 'u1');
+    const ack = jest.fn();
+    await handlers.premove_set({ game_id: 'g', from: 'e7', to: 'e5', fen: 'x', by: 'white' }, ack);
+    await handlers.premove_cancel({ game_id: 'g' }, ack);
+    await handlers.premove_set({ game_id: 'g', from: 'e9', to: 'e5' }, ack);
+    expect(d.gameService.setPremove).toHaveBeenCalledWith({ game_id: 'g', from: 'e7', to: 'e5' }, 'u1');
+    expect(d.gameService.cancelPremove).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
+    expect(d.gameService.setPremove).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
+});
+
 test('social events: requests are sent *from*, and answers given *by*, the verified user [S2][S4]', async () => {
     const d = deps();
     const { handlers } = connect(d, 'u1');
@@ -208,7 +275,11 @@ test('social events: requests are sent *from*, and answers given *by*, the verif
     expect(d.socialService.acceptRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
     expect(d.socialService.acceptChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
     expect(d.socialService.declineRematch).toHaveBeenCalledWith({ from_user_id: 'u2', to_user_id: 'u1' });
-    expect(d.socialService.declineChallenge).toHaveBeenCalledWith({ from_user_id: 'u2', by_username: 'me', to_user_id: 'u1' });
+    expect(d.socialService.declineChallenge).toHaveBeenCalledWith({
+        from_user_id: 'u2',
+        by_username: 'me',
+        to_user_id: 'u1',
+    });
 });
 
 test('an invalid payload never reaches a service and is acked as invalid_payload [S15]', async () => {

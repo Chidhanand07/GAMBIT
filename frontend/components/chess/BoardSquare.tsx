@@ -2,14 +2,18 @@ import { memo } from 'react';
 import type { Square } from 'chess.js';
 import { cn } from '@/lib/design/cn';
 
-/** Square tint, in Game.dc.html priority: last move < check < selected < capture target. */
-export type SquareMark = 'none' | 'last' | 'check' | 'selected' | 'capture';
+/**
+ * Square tint, in Game.dc.html priority: last move < check < queued premove < selected <
+ * capture target (the premove tint has no mockup state).
+ */
+export type SquareMark = 'none' | 'last' | 'check' | 'premove' | 'selected' | 'capture';
 
 const MARKS: Record<Exclude<SquareMark, 'none'>, string> = {
     last: 'bg-mark-last',
     check: 'bg-mark-check',
     selected: 'bg-mark-selected',
     capture: 'bg-mark-capture',
+    premove: 'bg-mark-premove',
 };
 
 /** Settings.dc.html's live preview draws the selected piece's square and its dots in green. */
