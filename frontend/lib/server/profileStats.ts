@@ -1,7 +1,11 @@
 import 'server-only';
-import { playerOutcome, type OutcomeRow } from '@/lib/chess/gameOutcome';
+import { playerOutcome } from '@/lib/chess/gameOutcome';
 import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
+import type { Opening } from '@/lib/chess/eco';
+import { averageGameLength, bestWins, endings, fastestWin, overallBestWin, type FactGameRow } from './gameFacts';
+import { openingStats } from './openings';
+import { ratingHistory } from './ratingHistory';
 
 /** Rating reported for a bucket whose column is null. */
 const DEFAULT_RATING = 1200;
@@ -20,12 +24,13 @@ interface StatsProfileRow {
     rating_classical: number | null;
 }
 
-interface StatsGameRow extends OutcomeRow {
+type StatsGameRow = FactGameRow & {
+    id: string;
     time_control: string | null;
     white_accuracy?: number | null;
     black_accuracy?: number | null;
     created_at?: string | null;
-}
+};
 
 const emptyCategory = (): CategoryStats => ({ played: 0, wins: 0, losses: 0, draws: 0 });
 
@@ -103,24 +108,48 @@ function mostActiveDay(games: StatsGameRow[], profileId: string): string | null 
     return top > 0 ? WEEKDAYS[counts.indexOf(top)] : null;
 }
 
-/** Response body of GET /api/profile/[username]/stats. */
-export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[]) {
+/** Lifetime totals from the profile row (missing counters read as 0). */
+function totalsOf(profile: StatsProfileRow) {
     return {
         total: profile.games_played ?? 0,
         wins: profile.wins ?? 0,
         losses: profile.losses ?? 0,
         draws: profile.draws ?? 0,
-        ratings: {
-            bullet: profile.rating_bullet ?? DEFAULT_RATING,
-            blitz: profile.rating_blitz ?? DEFAULT_RATING,
-            rapid: profile.rating_rapid ?? DEFAULT_RATING,
-            classical: profile.rating_classical ?? DEFAULT_RATING,
-        },
+    };
+}
+
+/** Current rating per bucket (1200 for an empty column). */
+function ratingsOf(profile: StatsProfileRow): Record<SpeedBucket, number> {
+    return {
+        bullet: profile.rating_bullet ?? DEFAULT_RATING,
+        blitz: profile.rating_blitz ?? DEFAULT_RATING,
+        rapid: profile.rating_rapid ?? DEFAULT_RATING,
+        classical: profile.rating_classical ?? DEFAULT_RATING,
+    };
+}
+
+/** Response body of GET /api/profile/[username]/stats. */
+export function buildProfileStats(
+    profile: StatsProfileRow,
+    games: StatsGameRow[],
+    openings: Map<string, Opening | null> | null = null,
+) {
+    const wins = bestWins(games, profile.id);
+    return {
+        ...totalsOf(profile),
+        ratings: ratingsOf(profile),
         byCategory: statsByCategory(games, profile.id),
         byColour: statsByColour(games, profile.id),
+        ratingHistory: ratingHistory(games, profile.id),
+        bestWins: wins,
+        openings: openings ? openingStats(games, openings, profile.id) : null,
+        endings: endings(games, profile.id),
         facts: {
             averageAccuracy: averageAccuracy(games, profile.id),
+            averageGameLength: averageGameLength(games, profile.id),
             longestWinStreak: longestWinStreak(games, profile.id),
+            bestWin: overallBestWin(wins),
+            fastestWin: fastestWin(games, profile.id),
             mostActiveDay: mostActiveDay(games, profile.id),
         },
     };

@@ -6,8 +6,9 @@ jest.mock('@supabase/ssr', () => require('../helpers/routeHarness').supabaseSsrM
 import { GET as notifications } from '@/app/api/notifications/route'
 import { PUT as markAllRead } from '@/app/api/notifications/read/route'
 import { GET as leaderboard } from '@/app/api/leaderboard/route'
+import { GET as leaderboardMe } from '@/app/api/leaderboard/me/route'
 import { POST as maverickMove } from '@/app/api/maverick-move/route'
-import { db, req, json, resetHarness, signInWithCookie } from '../helpers/routeHarness'
+import { db, req, json, resetHarness, signInWithCookie, uid } from '../helpers/routeHarness'
 
 beforeEach(() => {
     resetHarness()
@@ -40,16 +41,24 @@ describe('notifications', () => {
 })
 
 describe('GET /api/leaderboard', () => {
-    test('defaults to rapid, top 50', async () => {
+    // F-125 (was: 'defaults to rapid, top 50' ordered by rating only): the default board is All, a
+    // player without a rating on the board is left out, and ties are ordered by username.
+    test('defaults to All, top 50, best first, ties by username', async () => {
         db.queue('profiles', { data: [{ username: 'a' }], error: null })
         expect((await json(await leaderboard(req('/api/leaderboard')))).body).toEqual([{ username: 'a' }])
         const call = db.callsFor('profiles')[0]
-        expect(call.ops).toEqual(expect.arrayContaining([['order', 'rating_rapid', { ascending: false }], ['limit', 50]]))
+        expect(call.ops).toEqual(expect.arrayContaining([
+            ['not', 'rating_all', 'is', null],
+            ['order', 'rating_all', { ascending: false, nullsFirst: false }],
+            ['order', 'username', { ascending: true }],
+            ['limit', 50],
+        ]))
+        expect(String(db.op(call, 'select')![0])).toMatch(/rated_games_blitz/)
     })
 
-    test.each(['rating_bullet', 'rating_blitz', 'rating_classical'])('accepts field=%s', async (field) => {
+    test.each(['rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical', 'rating_all'])('accepts field=%s', async (field) => {
         await leaderboard(req(`/api/leaderboard?field=${field}`))
-        expect(db.callsFor('profiles')[0].ops).toContainEqual(['order', field, { ascending: false }])
+        expect(db.callsFor('profiles')[0].ops).toContainEqual(['order', field, { ascending: false, nullsFirst: false }])
     })
 
     test.each(['password', 'id); drop table profiles;--', 'email'])('rejects field=%s without querying', async (field) => {
@@ -58,12 +67,13 @@ describe('GET /api/leaderboard', () => {
         expect(db.calls).toEqual([])
     })
 
-    test('sends the number of ranked players (a HEAD count of every profile) as X-Total-Count', async () => {
+    // F-125 (was: a HEAD count of every profile): the count is of the players ranked on that board.
+    test('sends the number of players ranked on the board (a HEAD count) as X-Total-Count', async () => {
         db.queue('profiles', { data: [{ username: 'a' }], error: null }, { data: null, error: null, count: 1234 })
-        const res = await leaderboard(req('/api/leaderboard'))
+        const res = await leaderboard(req('/api/leaderboard?field=rating_blitz'))
         expect(res.headers.get('X-Total-Count')).toBe('1234')
         const count = db.callsFor('profiles')[1]
-        expect(count.ops).toEqual([['select', 'id', { count: 'exact', head: true }]])
+        expect(count.ops).toEqual([['select', 'id', { count: 'exact', head: true }], ['not', 'rating_blitz', 'is', null]])
     })
 
     test('no X-Total-Count when the count fails; the list is still returned', async () => {
@@ -76,6 +86,41 @@ describe('GET /api/leaderboard', () => {
     test('database error → empty list', async () => {
         db.queue('profiles', { data: null, error: { message: 'x' } })
         expect(await json(await leaderboard(req('/api/leaderboard')))).toEqual({ status: 200, body: [] })
+    })
+})
+
+describe('GET /api/leaderboard/me [F-125]', () => {
+    const ME = '11111111-1111-4111-8111-111111111111'
+    const POOLS = {
+        rating_all: 1376, rating_bullet: 1200, rating_blitz: 1376.4, rating_rapid: 1025, rating_classical: 1200,
+        rated_games_bullet: 0, rated_games_blitz: 26, rated_games_rapid: 3, rated_games_classical: 0,
+    }
+
+    test('the verified user\'s rank from leaderboard_rank, rating and pool; a userId in the query is ignored', async () => {
+        signInWithCookie(ME)
+        db.queue('rpc:leaderboard_rank', { data: 73, error: null })
+        db.queue('profiles', { data: POOLS, error: null })
+        const res = await json(await leaderboardMe(req(`/api/leaderboard/me?field=rating_all&userId=${uid('victim')}`)))
+        expect(res).toEqual({ status: 200, body: { rank: 73, rating: 1376, pool: 'blitz' } })
+        expect(db.callsFor('rpc:leaderboard_rank')[0].ops).toEqual([['rpc', 'leaderboard_rank', { p_profile_id: ME, p_board: 'all' }]])
+        expect(db.callsFor('profiles')[0].ops).toContainEqual(['eq', 'id', ME])
+    })
+
+    test('a pool board names its pool; no rating there is a null rank', async () => {
+        signInWithCookie(ME)
+        db.queue('rpc:leaderboard_rank', { data: null, error: null })
+        db.queue('profiles', { data: { ...POOLS, rating_classical: null }, error: null })
+        const res = await json(await leaderboardMe(req('/api/leaderboard/me?field=rating_classical')))
+        expect(res.body).toEqual({ rank: null, rating: null, pool: 'classical' })
+        expect(db.op(db.callsFor('rpc:leaderboard_rank')[0], 'rpc')).toEqual(['leaderboard_rank', { p_profile_id: ME, p_board: 'classical' }])
+    })
+
+    test('401 when signed out, 400 for an unknown field, 500 when a read fails', async () => {
+        expect((await leaderboardMe(req('/api/leaderboard/me'))).status).toBe(401)
+        signInWithCookie(ME)
+        expect((await leaderboardMe(req('/api/leaderboard/me?field=email'))).status).toBe(400)
+        db.queue('rpc:leaderboard_rank', { data: null, error: { message: 'down' } })
+        expect((await leaderboardMe(req('/api/leaderboard/me'))).status).toBe(500)
     })
 })
 

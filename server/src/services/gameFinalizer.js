@@ -12,6 +12,7 @@
  * A row that still cannot be written after the retries goes to the result
  * outbox; a worker writes it later and then rates the game (ADR F-066).
  */
+const { endReasonCode } = require('../domain/adjudication');
 const { clocksAt } = require('../domain/clock');
 const { resultLabel, winnerIdFor } = require('../domain/result');
 const { gameRoom } = require('./emitter');
@@ -45,7 +46,8 @@ const PERSIST_BACKOFF_MS = Object.freeze([200, 800]);
 /**
  * The `games` row of a finished game. `result` is the outcome
  * ('white' | 'black' | 'draw'); see docs/fixes/DECISIONS.md F-008. An aborted
- * game has `status = 'aborted'` and no result.
+ * game has `status = 'aborted'` and no result. `end_reason` is the verdict's
+ * reason as a stored code (F-124).
  * @param {any} game state after the transition
  * @param {Outcome} outcome
  */
@@ -59,6 +61,8 @@ function finishedRow(game, outcome) {
         final_fen: game.fen ?? null,
         white_clock_ms: Math.round(game.whiteClockMs ?? 0),
         black_clock_ms: Math.round(game.blackClockMs ?? 0),
+        // How it ended, as the stored code (F-124); the verdict is the server's own.
+        end_reason: endReasonCode(game.reason),
     };
 }
 

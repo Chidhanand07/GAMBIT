@@ -4,14 +4,12 @@ import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { cn } from '@/lib/design/cn';
 import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
-import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
+import { opponentRating, ratingChange, signedChange } from '../gameRow';
 import { gameHref, profileHref } from '../links';
 import { GAME_FILTERS, gameRowDetail, type GameFilter } from '../model';
 import { EMPTY, LIST_CARD, LIST_ROW } from './styles';
-
-const DEFAULT_RATING = 1200;
 
 const OUTCOME_STYLES: Record<
     PlayerOutcome,
@@ -23,9 +21,9 @@ const OUTCOME_STYLES: Record<
     aborted: { letter: 'A', score: 'Aborted', badge: 'bg-bg-base', ink: 'text-ink-disabled', bar: 'bg-ink-disabled' },
 };
 
-function Opponent({ game, isWhite }: { game: ProfileGameRow; isWhite: boolean }) {
+function Opponent({ game, profileId }: { game: ProfileGameRow; profileId: string }) {
+    const isWhite = game.white_id === profileId;
     const opp = isWhite ? game.black : game.white;
-    const rating = opp?.[`rating_${classifyTimeControl(game.time_control)}`] ?? DEFAULT_RATING;
     return (
         <span className="flex items-center gap-2 font-semibold">
             <span
@@ -43,7 +41,9 @@ function Opponent({ game, isWhite }: { game: ProfileGameRow; isWhite: boolean })
             ) : (
                 <span>Unknown</span>
             )}
-            <span className="font-mono text-[13px] font-medium text-ink-muted">({Math.round(rating)})</span>
+            <span className="font-mono text-[13px] font-medium text-ink-muted">
+                ({opponentRating(game, profileId)})
+            </span>
         </span>
     );
 }
@@ -60,6 +60,13 @@ function Accuracy({ value, bar }: { value: number | null; bar: string }) {
             </span>
         </span>
     );
+}
+
+/** "+8 · Apr 21, 2026": the rating change when the game has a snapshot (F-120), then the date. */
+function scoreNote(game: ProfileGameRow, profileId: string): string {
+    const change = ratingChange(game, profileId);
+    const date = formatDate(game.created_at);
+    return change === null ? date : `${signedChange(change)} · ${date}`;
 }
 
 /** One Games-tab row: result badge, colour and opponent, speed, the player's accuracy, score and Review. */
@@ -79,13 +86,13 @@ function GameRow({ game, profileId }: { game: ProfileGameRow; profileId: string 
                 {s.letter}
             </span>
             <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-[2px]">
-                <Opponent game={game} isWhite={isWhite} />
+                <Opponent game={game} profileId={profileId} />
                 <span className="text-[14px] text-ink-muted">{gameRowDetail(game)}</span>
             </span>
             <Accuracy value={isWhite ? game.white_accuracy : game.black_accuracy} bar={s.bar} />
             <span className="flex w-[110px] flex-col items-end">
                 <span className="font-mono text-[15px] font-bold">{s.score}</span>
-                <span className="text-[12px] text-ink-muted">{formatDate(game.created_at)}</span>
+                <span className="text-[12px] text-ink-muted">{scoreNote(game, profileId)}</span>
             </span>
             <Link
                 href={gameHref(game.id)}

@@ -18,9 +18,20 @@ function AboutCard({ facts }: { facts: Fact[] }) {
             <span className={PANEL_TITLE}>About</span>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-[14px]">
                 {facts.map((f) => (
-                    <div key={f.k} className="flex flex-col gap-[2px]">
+                    <div key={f.k} className="flex min-w-0 flex-col gap-[2px]">
                         <span className="text-[13px] text-ink-muted">{f.k}</span>
-                        <span className="font-semibold">{f.v}</span>
+                        {f.href ? (
+                            <a
+                                href={f.href}
+                                target="_blank"
+                                rel="nofollow noopener noreferrer ugc"
+                                className="font-semibold [overflow-wrap:anywhere]"
+                            >
+                                {f.v}
+                            </a>
+                        ) : (
+                            <span className="font-semibold">{f.v}</span>
+                        )}
                     </div>
                 ))}
             </div>

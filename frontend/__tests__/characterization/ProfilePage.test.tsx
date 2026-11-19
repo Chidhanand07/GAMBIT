@@ -116,13 +116,16 @@ describe('initial load', () => {
     })
 
     // Redesign: the Overview's Friends card (Profile.dc.html) also loads the profile's friends.
-    test('other profile: then fetches recent games (limit 5), friend status and friends, nothing else', async () => {
+    // F-160 (was: without '/api/profile/bob/stats'): the Overview's Achievements need the win
+    // streak and the leaderboard rank, which come with the stats.
+    test('other profile: then fetches recent games (limit 5), friend status, friends and stats, nothing else', async () => {
         await renderProfile()
         expect(urls().slice().sort()).toEqual([
             '/api/friends/status/bob',
             '/api/friends?userId=u-bob',
             '/api/profile/bob',
             '/api/profile/bob/games?limit=5&offset=0',
+            '/api/profile/bob/stats',
             '/api/profile/me',
         ])
         expect(callFor('/api/profile/bob/games?limit=5&offset=0')![1]).toEqual({ cache: 'no-store' })
@@ -196,7 +199,9 @@ describe('header and overview tab', () => {
         expect(screen.getAllByText('India')).toHaveLength(2) // hero chip + About "Country"
         // Redesign: "Joined 2023 · 10 games" in the hero; the count is also the About "Games played"
         expect(screen.getByText('Joined 2023 · 10 games')).toBeInTheDocument()
-        expect(screen.getByText('Games played').nextSibling).toHaveTextContent('10')
+        // F-127 (was: About "Games played" = 10): the About card holds the mockup's profile facts.
+        expect(screen.getByText('Member since').nextSibling).toHaveTextContent('2023')
+        expect(screen.getByText('Favorite player').nextSibling).toHaveTextContent('Not set')
         expect(screen.getByText('B')).toBeInTheDocument()
     })
 
@@ -214,51 +219,56 @@ describe('header and overview tab', () => {
     })
 
     // Redesign: the per-mode ratings moved from Overview cards to the Stats tab's "Rating over time"
-    // card (one mode at a time, Blitz first). F12 (was: 'Peak = CURRENT rating (peak_* ignored)'):
-    // Peak reads peak_<category>, never below the current rating, and is hidden when unknown.
+    // card (one mode at a time, Blitz first). F-121 (was: 'Peak from peak_*' and 'Peak never below
+    // the current rating, hidden without a peak'; no migration ever created peak_*): Peak, Low and the
+    // change come from the stats' rating history, recorded per rated game since F-120.
     const showMode = (name: string) => click(screen.getByRole('button', { name }))
-    async function openStats() {
-        routes['/api/profile/bob/stats'] = {}
+    async function openStats(stats: unknown = {}) {
+        routes['/api/profile/bob/stats'] = stats
         await renderProfile()
         click(screen.getByRole('button', { name: 'Stats' }))
         await settle()
     }
 
-    test('rating card shows rounded ratings, "—" for missing, and Peak from peak_*', async () => {
-        await openStats()
+    test('rating card shows rounded ratings, "—" for missing, and Peak / Low / change from the history', async () => {
+        await openStats({ ratingHistory: { blitz: [1200, 1262, 1251], bullet: [], rapid: [1500, 1400] } })
         expect(screen.getByText('1251')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1350')).toBeInTheDocument()
-        showMode('Bullet')
-        expect(screen.getByText('1100')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1262 · Low 1200 · +51 over 2 games')).toBeInTheDocument()
+        expect(screen.getByRole('img', { name: 'Blitz rating over the last 2 games' })).toBeInTheDocument()
         showMode('Rapid')
         expect(screen.getByText('1400')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1500')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1500 · Low 1400 · -100 over 1 game')).toBeInTheDocument()
         showMode('Classical')
         expect(screen.getByText('—')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1600')).toBeInTheDocument()
-        expect(screen.queryByText('Peak 1100')).not.toBeInTheDocument()
     })
 
-    test('F12: Peak is never below the current rating and is hidden when the profile has no peak', async () => {
-        routes['/api/profile/bob'] = {
-            ...BOB, peak_bullet: 900, peak_blitz: null, peak_rapid: undefined, peak_classical: undefined,
-        }
-        await openStats()
+    test('F-121: a mode without recorded games says so and shows no Peak', async () => {
+        await openStats({ ratingHistory: { blitz: [] } })
         expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
+        expect(screen.getByText(/No blitz rating history yet/)).toBeInTheDocument()
         showMode('Bullet')
-        expect(screen.getByText('Peak 1100')).toBeInTheDocument()
-        for (const mode of ['Rapid', 'Classical']) {
-            showMode(mode)
-            expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
-        }
+        expect(screen.getByText('1100')).toBeInTheDocument()
+        expect(screen.getByText(/No bullet rating history yet/)).toBeInTheDocument()
     })
 
-    // Redesign: the Record card became About facts ("Record", "Win rate").
-    test('record shows wins / losses / draws and rounded win rate', async () => {
+    // F-127 (was: 'record shows wins / losses / draws and rounded win rate' in the About card): About
+    // is the mockup's list (the record is on the Stats tab), and the new public-profile fields show.
+    test('About, hero chips and handle show the public-profile fields', async () => {
+        routes['/api/profile/bob'] = {
+            ...BOB, city: 'Bengaluru', website: 'https://lichess.org/@/bob', favorite_opening: "King's Gambit",
+            favorite_player: 'Magnus Carlsen', pronouns: 'he/him', playing_style: 'aggressive', experience: 'improving',
+        }
         await renderProfile()
-        expect(screen.getByText('6 W · 3 L · 1 D')).toBeInTheDocument()
-        expect(screen.getByText('Win rate').nextSibling).toHaveTextContent('60%')
+        expect(screen.getByText('@bob · he/him')).toBeInTheDocument()
+        expect(screen.getByText('India, Bengaluru')).toBeInTheDocument()
+        expect(screen.getAllByText("King's Gambit")).toHaveLength(2) // hero chip + About
+        expect(screen.getAllByText('Aggressive')).toHaveLength(2)
+        expect(screen.getByText('Experience').nextSibling).toHaveTextContent('Improving')
+        expect(screen.getByText('Favorite player').nextSibling).toHaveTextContent('Magnus Carlsen')
+        const link = screen.getByText('lichess.org/@/bob')
+        expect(link).toHaveAttribute('href', 'https://lichess.org/@/bob')
+        expect(link).toHaveAttribute('rel', 'nofollow noopener noreferrer ugc')
+        expect(screen.queryByText('6 W · 3 L · 1 D')).not.toBeInTheDocument()
     })
 
     test('recent games list: result from winner_id/result, opponent link, time control and date', async () => {
@@ -281,6 +291,19 @@ describe('header and overview tab', () => {
         expect(screen.getByText('vs Unknown')).toBeInTheDocument()
         expect(screen.getByText('3+2')).toBeInTheDocument()
         expect(screen.getAllByText('Jan 5, 2024')).toHaveLength(4)
+    })
+
+    test('Achievements: "N in a row" and "Top N" from the stats, as Profile.dc.html draws them [F-160]', async () => {
+        routes['/api/profile/bob/stats'] = {
+            facts: { averageAccuracy: null, longestWinStreak: 4, mostActiveDay: null },
+            standing: { pool: 'blitz', rank: 15 },
+        }
+        await renderProfile()
+        expect(screen.getByText('Achievements')).toBeInTheDocument()
+        expect(screen.getByText('4 in a row')).toBeInTheDocument()
+        expect(screen.getByText('Best win streak')).toBeInTheDocument()
+        expect(screen.getByText('Top 15')).toBeInTheDocument()
+        expect(screen.getByText('Blitz leaderboard')).toBeInTheDocument()
     })
 
     test('recent games: empty or failed response shows "No completed games yet."', async () => {
@@ -512,11 +535,13 @@ describe('stats tab', () => {
         expect(urls().filter(u => u === '/api/profile/bob/stats')).toHaveLength(1)
     })
 
+    // F-160 (was: only the first request fails): the Overview loads the stats too, and opening the
+    // Stats tab after a failed Overview load tries once more, so the first two requests fail here.
     test('F12: a failed stats request shows an error with Retry instead of a spinner forever', async () => {
         let calls = 0
         routes['/api/profile/bob/stats'] = () => {
             calls++
-            return calls === 1 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
+            return calls <= 2 ? jsonResponse({ error: 'boom' }, false) : jsonResponse({ total: 3 })
         }
         await renderProfile()
         click(screen.getByRole('button', { name: 'Stats' }))

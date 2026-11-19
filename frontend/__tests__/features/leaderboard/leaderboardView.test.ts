@@ -1,5 +1,5 @@
 import { LEADERBOARD_SIZE, podiumOf, standingOf, toRankRows, totalsOf, winPercent } from '@/features/leaderboard/leaderboardView'
-import { bucketOf } from '@/features/leaderboard/types'
+import { fieldOf } from '@/features/leaderboard/types'
 
 const P = (username: string, rating: number | null, extra: object = {}) => ({
     username, display_name: null, rating_rapid: rating, games_played: 4, wins: 1, ...extra,
@@ -37,15 +37,36 @@ describe('leaderboardView', () => {
         expect(podiumOf(rows.slice(0, 2))).toEqual([])
     })
 
-    test('standingOf: rank on the board or null, rating in the bucket, record', () => {
+    // F-125 (was: standingOf(rows, me, bucket) with the rank from the rows only): the field is the
+    // board's column, and the server's rank fills in for a viewer beyond the rows returned.
+    test('standingOf: rank on the board or null, rating in the board\'s pool, record', () => {
         const rows = toRankRows([P('a', 3), P('me', 2)], 'rating_rapid')
         const me = { username: 'me', display_name: 'Me', games_played: 10, wins: 7, rating_blitz: 1333.4 }
-        expect(standingOf(rows, me, 'blitz')).toEqual({ rank: 2, rating: 1333, name: 'Me', bucket: 'blitz', games: 10, winPct: 70 })
-        expect(standingOf([], me, 'rapid').rank).toBeNull()
+        expect(standingOf(rows, me, 'rating_blitz')).toEqual({ rank: 2, rating: 1333, name: 'Me', pool: 'blitz', games: 10, winPct: 70 })
+        expect(standingOf([], me, 'rating_rapid').rank).toBeNull()
     })
 
-    test('bucketOf maps All to rapid', () => {
-        expect(bucketOf('all')).toBe('rapid')
-        expect(bucketOf('classical')).toBe('classical')
+    test('standingOf: beyond the rows returned, the server\'s rank, rating and pool are used [F-125]', () => {
+        const me = { username: 'me', display_name: null, games_played: 32, wins: 19, rating_rapid: 1025 }
+        expect(standingOf([], me, 'rating_rapid', { rank: 73, rating: 1025, pool: 'rapid' })).toMatchObject({ rank: 73, rating: 1025, pool: 'rapid' })
+        expect(standingOf([], me, 'rating_all', { rank: 13, rating: 1239, pool: 'blitz' })).toMatchObject({ rank: 13, rating: 1239, pool: 'blitz' })
+        expect(standingOf([], me, 'rating_all')).toMatchObject({ rank: null, rating: null, pool: null })
+        const rows = toRankRows([P('a', 3), P('me', 2)], 'rating_rapid')
+        expect(standingOf(rows, me, 'rating_rapid', { rank: 99, rating: 1025, pool: 'rapid' }).rank).toBe(2)
+    })
+
+    test('toRankRows: the pool under each rating; on All, the pool the best rating comes from [F-125]', () => {
+        const all = [
+            { username: 'x', display_name: null, rating_all: 1376, rating_blitz: 1376, rating_rapid: 1300, rated_games_blitz: 26, rated_games_rapid: 4 },
+            { username: 'y', display_name: null, rating_all: 1228, rating_rapid: 1228, rated_games_rapid: 1 },
+        ]
+        expect(toRankRows(all, 'rating_all').map((r) => [r.rating, r.pool])).toEqual([[1376, 'blitz'], [1228, 'rapid']])
+        expect(toRankRows([P('a', 1500)], 'rating_rapid')[0].pool).toBe('rapid')
+    })
+
+    // F-125 (was: 'bucketOf maps All to rapid'): All has its own column.
+    test('fieldOf maps All to rating_all and a pool to its column', () => {
+        expect(fieldOf('all')).toBe('rating_all')
+        expect(fieldOf('classical')).toBe('rating_classical')
     })
 })

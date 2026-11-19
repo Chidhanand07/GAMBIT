@@ -7,19 +7,20 @@ const ACTIVE_GAME_COLUMNS = 'id, white_id, black_id, time_control, status, start
 // Whitespace kept byte-for-byte from the original handlers' select strings.
 const GAME_WITH_PLAYERS_COLUMNS = `
             *,
-            white:profiles!games_white_id_fkey(id, username, display_name, avatar_url, rating_rapid, rating_blitz, rating_bullet, rating_classical),
-            black:profiles!games_black_id_fkey(id, username, display_name, avatar_url, rating_rapid, rating_blitz, rating_bullet, rating_classical)
+            white:profiles!games_white_id_fkey(id, username, display_name, avatar_url, country, rating_rapid, rating_blitz, rating_bullet, rating_classical),
+            black:profiles!games_black_id_fkey(id, username, display_name, avatar_url, country, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;
 const HISTORY_COLUMNS = `
             id, time_control, status, result, winner_id,
             white_accuracy, black_accuracy, created_at, ended_at,
-            white_id, black_id,
+            white_id, black_id, rating_category, final_fen, fen,
+            white_rating_before, white_rating_after, black_rating_before, black_rating_after,
             white:profiles!games_white_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical),
             black:profiles!games_black_id_fkey(username, display_name, rating_rapid, rating_blitz, rating_bullet, rating_classical)
         `;
 /** Columns the profile Stats tab needs: outcome, speed bucket, colour, accuracy and date. */
-const STATS_COLUMNS =
-    'id, time_control, status, winner_id, result, white_id, black_id, white_accuracy, black_accuracy, created_at';
+const STATS_COLUMNS = `id, time_control, status, winner_id, result, white_id, black_id, white_accuracy, black_accuracy,
+    created_at, ended_at, end_reason, final_fen, fen, rating_category, white_rating_before, white_rating_after, black_rating_before, black_rating_after`;
 const FINISHED_STATUSES = ['completed', 'finished', 'ended'];
 
 /** A deadline that passed more than this long ago means the game timed out while the server was down. */
@@ -95,6 +96,7 @@ export function abandonActiveGame(admin: SupabaseClient, gameId: string) {
         .update({
             status: 'completed',
             result: 'abandoned',
+            end_reason: 'abandonment',
             ended_at: new Date().toISOString(),
         })
         .eq('id', gameId)

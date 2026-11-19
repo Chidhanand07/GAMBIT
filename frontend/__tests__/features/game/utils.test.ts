@@ -119,6 +119,17 @@ describe('deriveGameView', () => {
         expect(v.status).toEqual({ text: 'Alice is thinking...', tone: 'wait' })
     })
 
+    test('each bar carries the two-letter country chip of its player, none without a known country [F-126]', () => {
+        const v = view({
+            gameData: {
+                white_id: 'w-id', black_id: 'b-id', time_control: '5',
+                white: { username: 'alice', country: 'India' }, black: { username: 'bob', country: 'Atlantis' },
+            },
+        })
+        expect(v.bottom.country).toBe('IN')
+        expect(v.top.country).toBeNull()
+    })
+
     test('time bar and low clock: percentage of the base time; low under 30 s, never after the game', () => {
         expect(view().bottom).toMatchObject({ timePercent: 3, low: true })
         expect(view().top).toMatchObject({ timePercent: 67, low: false })

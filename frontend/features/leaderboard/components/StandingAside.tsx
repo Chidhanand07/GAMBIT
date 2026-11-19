@@ -12,10 +12,10 @@ function StandingCard({ standing: s, playHref }: { standing: Standing; playHref:
                 <span className="font-display text-[44px] font-bold leading-none tracking-[-0.03em]">
                     {s.rank === null ? '—' : `#${s.rank}`}
                 </span>
-                <span className="font-mono text-[28px] font-bold leading-none text-accent">{s.rating}</span>
+                <span className="font-mono text-[28px] font-bold leading-none text-accent">{s.rating ?? '—'}</span>
             </div>
             <span className="text-[14px] text-ink-muted">
-                {`${s.name} · ${capitalize(s.bucket)} · ${s.games} games · ${s.winPct}% wins`}
+                {`${s.name} · ${s.pool ? capitalize(s.pool) : 'All'} · ${s.games} games · ${s.winPct}% wins`}
             </span>
             <Link
                 href={playHref}

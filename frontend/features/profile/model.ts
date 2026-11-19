@@ -5,6 +5,7 @@ import type { Friend } from '@/types/friendship';
 import type { Profile } from '@/types/profile';
 import type { CategoryRecord, ProfileGameRow, ProfileStats } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
+import { experienceLabel, isHttpsUrl, playingStyleLabel } from '@/lib/profile/fields';
 import { gameOutcome, type ProfileRecord } from './format';
 
 const PERCENT = 100;
@@ -12,17 +13,43 @@ const PERCENT = 100;
 export interface Fact {
     k: string;
     v: string;
+    /** A link for the value (the website), opened in a new tab. */
+    href?: string;
 }
 
-/** The About card: only facts the profile row really carries. */
-export function aboutFacts(profile: Pick<Profile, 'created_at' | 'country'>, record: ProfileRecord): Fact[] {
-    const facts: Fact[] = [];
-    if (profile.created_at) facts.push({ k: 'Member since', v: String(new Date(profile.created_at).getFullYear()) });
-    if (profile.country) facts.push({ k: 'Country', v: profile.country });
-    facts.push({ k: 'Games played', v: String(record.gamesPlayed) });
-    facts.push({ k: 'Record', v: `${record.wins} W · ${record.losses} L · ${record.draws} D` });
-    if (record.gamesPlayed > 0) facts.push({ k: 'Win rate', v: `${record.winRate}%` });
+const NOT_SET = 'Not set';
+
+type AboutProfile = Pick<Profile, 'created_at' | 'country'> &
+    Partial<Pick<Profile, 'favorite_opening' | 'playing_style' | 'experience' | 'favorite_player' | 'website'>>;
+
+/** "lichess.org/@/bob" for "https://lichess.org/@/bob/": the link without its scheme and trailing slash. */
+export const websiteLabel = (url: string): string => url.replace(/^https:\/\//, '').replace(/\/$/, '');
+
+/**
+ * The About card of Profile.dc.html: member since, country, favourite opening, playing style,
+ * experience and favourite player ("Not set" when empty), then the website when there is one (F-127).
+ */
+export function aboutFacts(profile: AboutProfile): Fact[] {
+    const facts: Fact[] = [
+        { k: 'Member since', v: profile.created_at ? String(new Date(profile.created_at).getFullYear()) : NOT_SET },
+        { k: 'Country', v: profile.country || NOT_SET },
+        { k: 'Favorite opening', v: profile.favorite_opening || NOT_SET },
+        { k: 'Playing style', v: playingStyleLabel(profile.playing_style) ?? NOT_SET },
+        { k: 'Experience', v: experienceLabel(profile.experience) ?? NOT_SET },
+        { k: 'Favorite player', v: profile.favorite_player || NOT_SET },
+    ];
+    if (profile.website && isHttpsUrl(profile.website)) {
+        facts.push({ k: 'Website', v: websiteLabel(profile.website), href: profile.website });
+    }
     return facts;
+}
+
+type ChipProfile = Pick<Profile, 'country'> & Partial<Pick<Profile, 'city' | 'favorite_opening' | 'playing_style'>>;
+
+/** The hero's chips (Profile.dc.html): "Country, City", the favourite opening and the playing style. */
+export function heroChips(profile: ChipProfile): string[] {
+    const place = [profile.country, profile.city].filter(Boolean).join(', ');
+    return [place, profile.favorite_opening ?? '', playingStyleLabel(profile.playing_style) ?? ''].filter(Boolean);
 }
 
 export interface Badge {
@@ -32,28 +59,43 @@ export interface Badge {
 }
 
 const GAME_MILESTONES = [500, 100, 30, 10] as const;
-const WIN_MILESTONES = [100, 50, 10] as const;
+/** A run of wins counts as a streak badge from this length ("First win" covers a single win). */
+const MIN_STREAK_BADGE = 2;
+/** "Top N" is earned on the leaderboard's visible list (its top 50). */
+export const TOP_RANK_BADGE_LIMIT = 50;
 
-/** Achievements earned from the lifetime counters (first win, games and wins milestones). */
-export function achievements(record: ProfileRecord): Badge[] {
-    const badges: Badge[] = [];
-    if (record.wins > 0) badges.push({ glyph: '♞︎', name: 'First win', note: 'Won your first game' });
-    const wins = WIN_MILESTONES.find((n) => record.wins >= n);
-    if (wins) badges.push({ glyph: '♛︎', name: `${wins} wins`, note: `Won ${wins} games` });
-    const games = GAME_MILESTONES.find((n) => record.gamesPlayed >= n);
-    if (games) badges.push({ glyph: '♜︎', name: `${games} games`, note: `Played ${games} games` });
-    return badges;
+type BadgeStats = Pick<ProfileStats, 'facts' | 'standing'> | null;
+
+function streakBadge(stats: BadgeStats): Badge | null {
+    const streak = stats?.facts?.longestWinStreak ?? 0;
+    if (streak < MIN_STREAK_BADGE) return null;
+    return { glyph: '\u265B\uFE0E', name: `${streak} in a row`, note: 'Best win streak' };
 }
 
-const isRating = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+function topBadge(stats: BadgeStats): Badge | null {
+    const standing = stats?.standing;
+    if (!standing || standing.rank < 1 || standing.rank > TOP_RANK_BADGE_LIMIT) return null;
+    return {
+        glyph: '\u265A\uFE0E',
+        name: `Top ${standing.rank}`,
+        note: `${SPEED_BUCKET_LABELS[standing.pool]} leaderboard`,
+    };
+}
 
 /**
- * Highest rating reached in a category: the stored peak, never below the current rating
- * (a peak column can lag one game behind). Null when the profile has no peak (F12).
+ * The Achievements card of Profile.dc.html, in its order: First win, "N in a row" (the longest
+ * win streak over the finished games), the games milestone and "Top N" (the place on the
+ * leaderboard of the profile's best pool, F-160). A badge is shown only once it is earned;
+ * the streak and the rank come from the stats, so they appear once those have loaded.
  */
-export function peakRating(rating: number | null | undefined, peak: number | null | undefined): number | null {
-    if (!isRating(peak)) return null;
-    return Math.round(isRating(rating) ? Math.max(peak, rating) : peak);
+export function achievements(record: ProfileRecord, stats: BadgeStats = null): Badge[] {
+    const badges: (Badge | null)[] = [];
+    if (record.wins > 0) badges.push({ glyph: '\u265E\uFE0E', name: 'First win', note: 'Won your first game' });
+    badges.push(streakBadge(stats));
+    const games = GAME_MILESTONES.find((n) => record.gamesPlayed >= n);
+    if (games) badges.push({ glyph: '\u265C\uFE0E', name: `${games} games`, note: `Played ${games} games` });
+    badges.push(topBadge(stats));
+    return badges.filter((b): b is Badge => b !== null);
 }
 
 export function matchesFriendSearch(friend: Pick<Friend, 'username' | 'display_name'>, query: string): boolean {
@@ -142,13 +184,46 @@ export function colourRows(stats: ProfileStats): ColourRow[] {
     return rows;
 }
 
-/** Stats-tab fact tiles, only for facts the API could compute. */
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const isNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+const movesText = (n: number | null | undefined) => (isNumber(n) ? plural(n, 'move', 'moves') : null);
+
+/** Stats-tab fact tiles in the mockup's order, only for facts the API could compute. */
 export function statFacts(stats: ProfileStats): Fact[] {
     const f = stats.facts;
     if (!f) return [];
-    const facts: Fact[] = [];
-    if (f.averageAccuracy !== null) facts.push({ k: 'Average accuracy', v: `${f.averageAccuracy}%` });
-    facts.push({ k: 'Longest win streak', v: `${f.longestWinStreak} ${f.longestWinStreak === 1 ? 'game' : 'games'}` });
-    if (f.mostActiveDay) facts.push({ k: 'Most active day', v: f.mostActiveDay });
-    return facts;
+    const facts: [string, string | null][] = [
+        ['Average accuracy', isNumber(f.averageAccuracy) ? `${f.averageAccuracy}%` : null],
+        ['Average game length', movesText(f.averageGameLength)],
+        ['Longest win streak', plural(f.longestWinStreak, 'game', 'games')],
+        ['Best win', isNumber(f.bestWin) ? `vs ${f.bestWin}` : null],
+        ['Fastest win', movesText(f.fastestWin)],
+        ['Most active day', f.mostActiveDay || null],
+    ];
+    return facts.filter((x): x is [string, string] => x[1] !== null).map(([k, v]) => ({ k, v }));
+}
+
+export interface EndingRow {
+    name: string;
+    n: number;
+    /** Share of the games counted, as a CSS width ("34%"). */
+    pct: string;
+}
+
+/** "How games end" bars: each row's share of all the games counted. Empty without games. */
+export function endingRows(stats: ProfileStats): EndingRow[] {
+    const rows = stats.endings ?? [];
+    const total = rows.reduce((sum, r) => sum + r.count, 0);
+    if (total === 0) return [];
+    return rows.map((r) => ({ name: r.name, n: r.count, pct: `${pct(r.count, total)}%` }));
+}
+
+/** Win rates from this percentage up read as good (green), below EVEN_RATE as poor (red). */
+const GOOD_RATE = 60;
+const EVEN_RATE = 45;
+
+/** The colour band of an opening's win rate (Profile.dc.html: ≥ 60 green, ≥ 45 cream, else red). */
+export function openingRateTone(winRate: number): 'good' | 'even' | 'poor' {
+    if (winRate >= GOOD_RATE) return 'good';
+    return winRate >= EVEN_RATE ? 'even' : 'poor';
 }

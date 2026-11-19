@@ -116,6 +116,15 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
 | [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
 | [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
+| [F-120](#f-120) | Rated games store both ratings before/after; only `apply_game_result` writes them | B1 | RATING-SNAPSHOT |
+| [F-121](#f-121) | Rating chart, Peak and Low from the stored snapshots (supersedes F-082) | B1 | RATING-HISTORY |
+| [F-122](#f-122) | Best win = highest opponent rating at the time, per pool, from the snapshots | B1 | BEST-WIN |
+| [F-123](#f-123) | Openings from stored moves via a built-in ECO table; `moves` index and browser writes revoked | B1 | OPENINGS |
+| [F-124](#f-124) | `games.end_reason` written by the finalizer; game length from the final FEN | B1 | GAME-ENDINGS |
+| [F-125](#f-125) | "All" = best pool with ≥ 1 rated game; `leaderboard_rank` for any place; friends carry every pool | B1 | RANKINGS |
+| [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
+| [F-127](#f-127) | Public-profile fields (city, website, favourites, pronouns, style, experience): CHECK + zod, owner-only grants | B1 | PROFILE-FIELDS |
+| [F-160](#f-160) | Achievements "N in a row" and "Top N" from the longest win streak and the best pool's `leaderboard_rank` | STACK | ACHIEVEMENTS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -2897,3 +2906,214 @@ not a required check.**
   holds `design/design`, because `design/` is not in the repository). Pull requests from forks get no
   secrets, so the job cannot run there.
 
+
+## F-120
+
+**Rated games store both players' ratings before and after, written only by `apply_game_result`
+(B1 item 1; SEC-04, NODE-16, NX-07).**
+
+- **Context.** The profile design shows a rating history chart, a rating change per game and a
+  "best win" (opponent rating at the time). The database kept only the current rating per pool.
+- **Options.** (a) Columns written by the finalizer from the values the rating service computed;
+  (b) a separate `rating_history` table; (c) columns written inside `apply_game_result`.
+- **Decision.** (c). Migration `20261118100000_game_rating_snapshots.sql` adds
+  `games.rating_category` (`bullet|blitz|rapid|classical`, CHECK) and
+  `games.{white,black}_rating_{before,after}` (`numeric(7,2)`, like the profile columns). The
+  function, still security definer with the same signature and compare-and-set, fills them in the
+  transaction that writes the profiles: "before" is the stored value the compare-and-set just
+  verified, "after" the value written. `already_applied` and `stale` calls write nothing.
+- **Why.** One writer, one transaction: a snapshot can never disagree with the profile, and the
+  idempotency (`rated_at`) already covers it. The game server needs no change. A history table
+  would duplicate what one game row can carry.
+- **Privileges.** `anon`/`authenticated` lose INSERT/UPDATE/DELETE/TRUNCATE on `games` (no policy
+  ever allowed a write). `service_role` loses table-level INSERT/UPDATE and gets them back per
+  column on every existing column except `rated_at`, `rating_category` and the four snapshots. A
+  later migration that adds a column the server writes must grant it to `service_role`.
+- **Old games.** Glicko-2 depends on each player's RD and volatility at that moment, which were
+  never stored, so old games stay NULL. The UI shows no change for them and the rating chart says
+  history starts with the first game rated after this migration.
+- **Rollout.** Migration first, then the web app (it only reads the columns). Rollback:
+  `GRANT INSERT, UPDATE ON TABLE public.games TO service_role;` and re-create the function from
+  `20261113100000_rating_atomic.sql`. pgTAP `060_game_rating_snapshots.test.sql`.
+
+## F-121
+
+**The profile's rating chart is drawn from the stored snapshots; Peak/Low come from them too
+(B1 item 2; supersedes F-082).**
+
+- **Context.** "Rating over time" (Profile.dc.html) needs a series per pool. F-082 read
+  `profiles.peak_<pool>`, a column no migration ever created, so Peak never showed.
+- **Decision.** `GET /api/profile/[username]/stats` returns `ratingHistory` per pool, built in
+  `lib/server/ratingHistory.ts` from the player's finished games: the rating before the first game
+  with a snapshot (F-120), then the rating after each one, ordered by `ended_at`. The page draws it
+  with the mockup's geometry (`features/profile/ratingChart.ts`): "Peak · Low · ±change over N
+  games", where N is the number of rated games (the mockup counted points). `peakRating` and the
+  `peak_*` reads are removed.
+- **Empty pool.** Without a recorded game the card keeps the grid and says that history is recorded
+  for rated games from now on and earlier games have none (they cannot be recomputed, F-120).
+- **Cost.** No extra query: the stats route already reads the player's finished games; it now also
+  selects the snapshot columns.
+
+## F-122
+
+**"Best win" is the highest opponent rating at the time of a win, per pool, from the snapshots
+(B1 item 3).**
+
+- **Decision.** `lib/server/gameFacts.ts` reads the player's won games that carry a rating snapshot
+  (F-120) and keeps, per pool, the opponent's rating *before* the game. The stats route returns
+  `bestWins` per pool and `facts.bestWin` (the best over all pools), shown as the "Best win · vs N"
+  tile in the mockup's order. The opponent's current rating is not used: it says nothing about the
+  game, and it changes after it.
+- **Old games.** Without a snapshot the opponent's rating at the time is unknown, so those wins are
+  not candidates; the tile is left out until a recorded win exists.
+
+## F-123
+
+**Openings are named by a small built-in ECO table, server-side, from the stored moves; `moves` gets
+an index and loses its browser write privileges (B1 item 4).**
+
+- **Context.** The profile shows each game's opening and an "Openings" table (games, win rate,
+  average accuracy). Games store no PGN (`games.pgn` is never written); the game server stores one
+  `moves` row per ply with the SAN.
+- **Options.** (a) an ECO dependency (e.g. a full 3,000-line database); (b) classify in the game
+  server at finalization and store the name; (c) a small table plus a pure classifier, run in
+  `lib/server` on the stored moves.
+- **Decision.** (c). `lib/chess/openings.data.ts` lists ~90 common lines (ECO, family, name, SAN);
+  `lib/chess/eco.ts` picks the longest line the game follows (check marks ignored) and needs only the
+  first `MAX_BOOK_PLIES` (11) plies. `lib/server/openings.ts` reads those plies for the requested games
+  (`moves.game_id IN (…) AND move_number <= 11`, chunked to stay under PostgREST's 1,000-row cap) and
+  builds the table: most played families first, at most five rows, the rest counted in "Other" (also
+  used for lines outside the table). A failed read gives `openings: null` and the card is left out
+  rather than showing a partial table. The games route adds each game's family as `opening`.
+- **Why.** No new runtime dependency; works for every game already played (moves exist for all of
+  them, unlike a column written at finalization); the table is data and is tested move by move against
+  chess.js, so a typo cannot ship.
+- **Database.** Migration `20261118100100_moves_book_index.sql`: `idx_moves_game_ply (game_id,
+  move_number)` for that read, and `anon`/`authenticated` lose INSERT/UPDATE/DELETE/TRUNCATE on `moves`
+  (no policy ever allowed a write; this keeps the openings server-written even if one were added).
+  pgTAP `061_moves_book_index.test.sql`.
+- **Limits.** Families are coarse by design (the mockup groups by family). Transpositions reach the
+  line they end in only if the move order matches a row.
+
+## F-124
+
+**How a game ended is stored as a code with the result; game length is read from the final FEN
+(B1 item 5).**
+
+- **End reason.** Migration `20261118100200_game_end_reason.sql` adds `games.end_reason` with a CHECK
+  on the server's verdict codes (`checkmate`, `stalemate`, `insufficient_material`,
+  `threefold_repetition`, `fifty_move_rule`, `resignation`, `timeout`, `abandonment`, `aborted`).
+  `server/src/domain/adjudication.js` maps each `REASON` to its code (`endReasonCode`, null for
+  anything else, never free text) and the finalizer writes it in the same guarded `finishIfActive`
+  update as the result, so the outbox re-drive (F-066) replays it too. The web app's
+  stale-game cleanup writes `abandonment`. `service_role` gets column INSERT/UPDATE on it (F-120 made
+  `games` writes column by column); the browser roles get nothing.
+- **Old games.** Backfilled only where certain (`status = 'aborted'` → `aborted`, `result =
+  'abandoned'` → `abandonment`); the rest stay NULL and the "How games end" card shows them as
+  "Not recorded" (a row that appears only when there are any). Aborted games are not counted, like
+  everywhere else on the profile (F12).
+- **Rows.** The card groups codes as the mockup does: Checkmate, Resignation, On time, Stalemate or
+  draw (stalemate, insufficient material, threefold, fifty-move), Abandoned.
+- **Game length.** No new column: the number of moves is read from `final_fen` (or `fen` for rows
+  written before `final_fen`), counted like a score sheet (`lib/chess/fen.ts`). The stats route adds
+  "Average game length" and "Fastest win"; the games route returns `move_count` per game instead of the
+  positions.
+- **Rollout.** Migration, then the game server and web app. pgTAP `062_game_end_reason.test.sql`.
+
+## F-125
+
+**"All" ranks every player by their best pool with at least one rated game; a SQL function gives any
+player's rank; friends carry every pool's rating (B1 item 6).**
+
+- **Context.** The "All" tab ranked by the rapid rating, a player outside the top 50 had no rank, and
+  `/api/friends` returned the rapid rating only, so the lobby showed it whatever time control was picked.
+- **Options for "All".** (a) the highest rating across pools; (b) a games-weighted mean; (c) (a) with a
+  minimum number of rated games per pool.
+- **Decision: (c) with a threshold of 1.** `profiles.rating_all` is a stored generated column: the
+  greatest rating among the pools where `rated_games_<pool> >= 1`, NULL before any rated game.
+  Without the threshold an untouched pool's 1200 default would count (a 1,050 rapid player would rank
+  as 1,200). A higher threshold would hide most players of a small community; Glicko-2's deviation
+  already damps the first games. A weighted mean was rejected because it mixes pools that are not
+  comparable and changes when a player tries a new pool. The rule's constant also lives in
+  `lib/chess/ratingPools.ts` (`MIN_RATED_GAMES_FOR_ALL`), which names the pool the rating comes from.
+- **Counters.** `profiles.rated_games_{bullet,blitz,rapid,classical}` are incremented only by
+  `apply_game_result` (same signature) when it rates a game; backfilled from finished, applied, rated
+  games with the pool read from `time_control` exactly like the server's model. No role can write them
+  directly (the browser roles have no column grant; `service_role` has no UPDATE on profiles, F-086).
+- **Rank.** `public.leaderboard_rank(profile, board)` (STABLE, security invoker, service-role only):
+  1 + players with a higher rating, + players with the same rating and an earlier username, the
+  order every list uses (`rating desc, username asc`, NULLs left out). Both counts are range scans on
+  new `(rating, username)` indexes, one per board (partial on `rating_all IS NOT NULL`).
+  `GET /api/leaderboard/me?field=` returns the verified user's `{ rank, rating, pool }`; the standing
+  card prefers the row's position when the viewer is in the top 50.
+- **API.** `GET /api/leaderboard` defaults to `rating_all`, leaves out players without a rating on the
+  board, and counts only those for `X-Total-Count`. `GET /api/friends` returns all four ratings; the
+  lobby's friend list shows the one of the selected time control's pool.
+- **Database.** Migration `20261118100300_leaderboard_ranking.sql`, pgTAP
+  `063_leaderboard_ranking.test.sql`. Rollout: migration, then the web app.
+
+## F-126
+
+**The board's country chip is a two-letter code derived from `profiles.country` (B1 item 7).**
+
+- **Context.** Game.dc.html shows a mono "IN" chip next to each player's rating; the game API did not
+  return the country, and `profiles.country` is free text ("India"), edited in Settings.
+- **Decision.** `GET /api/games/[id]` embeds `country` for both players (allow-listed in the player
+  DTO), and `lib/chess/countryCode` turns it into the chip: a two-letter value is upper-cased, a few
+  common aliases are mapped (USA, UK, …), and an English country name is looked up in a table built
+  once from `Intl.DisplayNames` (current ISO codes only: DD/UK/YU-style replaced codes are skipped,
+  so "Germany" is DE and "United Kingdom" GB). Unknown text gives no chip rather than a guess.
+- **Why not store a code.** Changing the column to ISO codes would need a data migration of free text
+  and a picker in Settings; the derived chip needs neither and the profile keeps showing the full name
+  (its hero chip, as before).
+
+## F-127
+
+**The public-profile fields the design shows are real columns, validated twice and writable only by
+their owner (B1 item 8).**
+
+- **Fields.** Profile.dc.html and Settings.dc.html show a city, a website, a favourite opening and
+  player, pronouns, a playing style and an experience level. Migration
+  `20261118100400_profile_extra_fields.sql` adds them as nullable columns with CHECK constraints:
+  city 1–60, website `https://` + host, no whitespace, ≤ 200, favourite opening 1–80, favourite player
+  1–60, pronouns `he/him|she/her|they/them`, playing style `aggressive|positional|tactical|balanced`,
+  experience `beginner|improving|club|tournament` (ids stored, labels in `lib/profile/fields.ts`).
+  An empty string is refused: "not set" is NULL.
+- **Validation at the API.** `schemas.profilePatch` (zod) applies the same limits and lists from
+  `lib/profile/fields.ts`; the website must parse as a URL with the `https:` protocol. A bad value is a
+  400 and nothing is written; the CHECKs back it up for any other writer.
+- **Privileges (F-017/F-086 pattern).** `authenticated` gets UPDATE on exactly these seven columns,
+  limited to its own row by the `profiles_update` policy; `PATCH /api/profile/me` writes them through
+  the caller's session client. `01_profiles_rls` now pins the exact set of eleven user-writable columns.
+- **Display.** Profile hero: "@user · pronouns" and the chips "Country, City", favourite opening,
+  playing style. About card: the mockup's six facts ("Not set" when empty) plus the website as a
+  `rel="nofollow noopener noreferrer ugc"` link, only when it is a valid https URL. The About card no
+  longer repeats games/record/win rate (the hero and the Stats tab show them). Settings: the mockup's
+  text fields, then the bio, then segmented choices for pronouns, playing style and experience; the
+  live preview shows the same chips and pronouns.
+- **Not done.** The design's visibility toggles (show country, rating history, recent games, friends)
+  are privacy settings, not profile fields; they stay out until they are enforced server-side.
+- pgTAP `064_profile_extra_fields.test.sql`.
+
+## F-160
+
+**The profile's "N in a row" and "Top N" achievements come from real data (stacking follow-up a).**
+
+- **Context.** Profile.dc.html's Achievements card shows four badges: First win (♞), "4 in a row" /
+  "Best win streak" (♛), "30 games" / "Played 30 games" (♜) and "Top 15" / "Blitz leaderboard" (♚).
+  B1 shipped First win and the games milestone, plus a "N wins" milestone the mockup does not have,
+  because the streak and the rank were not on the Overview.
+- **Decision.** "N in a row" is the longest win streak the stats route already computes from the
+  finished games (`facts.longestWinStreak`, oldest first, aborted games skipped); it is earned from 2
+  (a single win is "First win"). "Top N" is the profile's place on the board of its best pool: the
+  pool its "All" rating comes from (`allRatingPool`, F-125), ranked by `public.leaderboard_rank`
+  through the service-role client; the stats route returns it as `standing: { pool, rank }` (null
+  without a rated game, without a rank, or when the read fails). It is earned while the place is on
+  the leaderboard's visible list (rank ≤ 50). The "N wins" badge is dropped: it is not in the design.
+- **Loading.** The Overview now fetches the stats (once per profile, shared with the Stats tab), so
+  the two stats-derived badges appear when that read returns; a failed read leaves them out (the
+  Stats tab still shows its error and Retry).
+- **Not a client value.** The rank is read on the server from the database for the profile in the
+  URL; nothing the browser sends feeds it (NODE-10).
+- Tests: `model.test.ts` (badges, thresholds), `api/profile.test.ts` (standing from
+  `leaderboard_rank` on the best pool; null cases), `ProfilePage.test.tsx` (Overview shows them).

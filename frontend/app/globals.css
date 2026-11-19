@@ -63,6 +63,9 @@
     --color-board-hero-last-light: #E8D08A;
     --color-board-hero-last-dark:  #C9A24B;
 
+    /* Colour — profile rating chart area (Profile.dc.html) */
+    --color-chart-area:       rgba(239,191,91,0.12);
+
     /* Colour — board marks (Game.dc.html, Settings.dc.html) */
     --color-mark-last:        rgba(255,225,80,0.45);
     --color-mark-check:       rgba(255,90,70,0.6);

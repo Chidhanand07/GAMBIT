@@ -1,6 +1,7 @@
 // The two player bars around the board (Game.dc.html): who sits on top / bottom, their rating,
 // captures, clock and whether they are to move. Pure: everything comes in through the arguments.
 import { clockPercent, isClockLow } from '@/lib/chess/clock';
+import { countryCode } from '@/lib/chess/country';
 import { parseBaseMinutes, ratingFieldFor } from '@/lib/chess/timeControl';
 import type { PlayerColor } from '@/types/game';
 import type { ProfileSummary } from '@/types/profile';
@@ -20,7 +21,7 @@ export interface SeatView {
     /** Rating in this time control's category, with the rating change once the server sent it. */
     rating: string;
     avatarUrl: string | null;
-    /** Country chip (Game.dc.html "IN"), when the game API sends the player's country. */
+    /** Two-letter chip from the player's profile country (F-126); null without a known country. */
     country: string | null;
     online: boolean;
     /** To move (and the game is still running). */
@@ -110,7 +111,7 @@ export function seatView(side: PlayerColor, ctx: SeatContext): SeatView {
         href: player?.username ? `/profile/${player.username}` : null,
         rating: ratingText(player, tc, ratingChange),
         avatarUrl: player?.avatar_url ?? null,
-        country: player?.country ?? null,
+        country: countryCode(player?.country),
         online: isOnline(side, ctx),
         active: running && ctx.turn === side,
         captures: capturesText(captured, lead),

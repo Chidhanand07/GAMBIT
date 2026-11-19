@@ -259,10 +259,15 @@ describe('join/[token]', () => {
 })
 
 describe('leaderboard', () => {
+    // F-125: the default tab is All (rating_all, the best pool with a rated game; rapid here).
     const P = (username: string, rating: number, extra: any = {}) => ({
-        username, display_name: null, avatar_url: null, rating_rapid: rating, rating_bullet: rating - 100,
-        games_played: 10, wins: 4, ...extra,
+        username, display_name: null, avatar_url: null, rating_all: rating, rating_rapid: rating, rating_bullet: rating - 100,
+        rated_games_rapid: 3, games_played: 10, wins: 4, ...extra,
     })
+    /** The board for every /api/leaderboard request, `me` for /api/leaderboard/me (F-125). */
+    const serve = (board: unknown, me: unknown = { rank: null, rating: null, pool: null }, headers?: Record<string, string>) =>
+        fetchMock.mockImplementation(async (url: string) =>
+            String(url).startsWith('/api/leaderboard/me') ? jsonResponse(me) : jsonResponse(board, true, headers))
     // Redesign (Leaderboard.dc.html): the table is an ARIA grid of role="row" divs; the podium a "Top three" group.
     const dataRows = () => screen.getAllByRole('row').slice(1)
     const podium = () => screen.queryByRole('group', { name: 'Top three' })
@@ -275,13 +280,13 @@ describe('leaderboard', () => {
         expect(screen.getByRole('status', { name: 'Loading rankings' }).children).toHaveLength(8)
         await act(async () => resolve(jsonResponse([])))
         await flush()
-        expect(fetchMock.mock.calls).toEqual([['/api/leaderboard?field=rating_rapid']])
+        expect(fetchMock.mock.calls).toEqual([['/api/leaderboard?field=rating_all']])
         expect(screen.getByText('No ranked players yet')).toBeInTheDocument()
     })
 
     test('podium order, table rows, stats; switching filter refetches', async () => {
         const players = [P('a', 1800, { display_name: 'Ace' }), P('b', 1700), P('c', 1600, { games_played: 0 }), P('d', 1500)]
-        fetchMock.mockImplementation(async () => jsonResponse(players))
+        serve(players)
         render(<LeaderboardPage />)
         await flush()
         expect([...podium()!.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/profile/b', '/profile/a', '/profile/c'])
@@ -298,7 +303,7 @@ describe('leaderboard', () => {
         expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
         fireEvent.click(screen.getByRole('button', { name: 'Bullet' }))
         await flush()
-        expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_bullet'])
+        expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_all', '/api/leaderboard?field=rating_bullet'])
         expect(screen.getByRole('button', { name: 'Bullet' })).toHaveAttribute('aria-pressed', 'true')
         expect(dataRows()[0].textContent).toBe('1AAce@a1700bullet1040%')
     })
@@ -317,7 +322,7 @@ describe('leaderboard', () => {
 
     test('a capped board (50 rows) shows the server count of ranked players and labels the mean as the top 50', async () => {
         const fifty = Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))
-        fetchMock.mockImplementation(async () => jsonResponse(fifty, true, { 'X-Total-Count': '1234' }))
+        serve(fifty, undefined, { 'X-Total-Count': '1234' })
         render(<LeaderboardPage />)
         await flush()
         expect(screen.getByText('Total players').previousSibling!.textContent).toBe('1234')
@@ -326,7 +331,7 @@ describe('leaderboard', () => {
     })
 
     test('a capped board without a server count leaves "Total players" out instead of showing 50', async () => {
-        fetchMock.mockImplementation(async () => jsonResponse(Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))))
+        serve(Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500)))
         render(<LeaderboardPage />)
         await flush()
         expect(screen.queryByText('Total players')).toBeNull()
@@ -336,12 +341,12 @@ describe('leaderboard', () => {
     test('the open board re-reads the rankings every 30 s ("Updated live")', async () => {
         jest.useFakeTimers()
         try {
-            fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+            serve([P('a', 1800)])
             const { unmount } = render(<LeaderboardPage />)
             await act(async () => {})
             expect(fetchMock).toHaveBeenCalledTimes(1)
             await act(async () => { jest.advanceTimersByTime(30_000) })
-            expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_rapid'])
+            expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_all', '/api/leaderboard?field=rating_all'])
             unmount()
             await act(async () => { jest.advanceTimersByTime(60_000) })
             expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -352,9 +357,11 @@ describe('leaderboard', () => {
 
     test('signed in: own row is marked "You" and the standing card shows rank, rating and record', async () => {
         profile = { id: 'me', username: 'b', display_name: 'Bee', rating_rapid: 1700.2, games_played: 20, wins: 15 }
-        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800), P('b', 1700), P('c', 1600)]))
+        serve([P('a', 1800), P('b', 1700), P('c', 1600)], { rank: 2, rating: 1700, pool: 'rapid' })
         render(<LeaderboardPage />)
         await flush()
+        // F-125: a signed-in viewer's standing is also read from the server (rank beyond the top 50).
+        expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_all', '/api/leaderboard/me?field=rating_all'])
         expect(within(dataRows()[1]).getByText('You')).toBeInTheDocument()
         expect(within(dataRows()[0]).queryByText('You')).toBeNull()
         expect(screen.getByText('Your standing')).toBeInTheDocument()
@@ -363,13 +370,24 @@ describe('leaderboard', () => {
         expect(screen.getByRole('link', { name: 'Play a game' })).toHaveAttribute('href', '/lobby')
     })
 
-    test('signed in but outside the returned board: rank shows a dash; guests get no standing card', async () => {
+    // F-125 (was: 'signed in but outside the returned board: rank shows a dash'): the server's rank
+    // is shown beyond the top 50; a dash only when the viewer is not ranked on the board at all.
+    test('signed in beyond the returned board: the server rank; unranked: a dash; guests get no standing card', async () => {
+        profile = { id: 'me', username: 'zed', display_name: null, rating_rapid: 900, games_played: 32, wins: 19 }
+        serve([P('a', 1800)], { rank: 73, rating: 1239, pool: 'blitz' })
+        const first = render(<LeaderboardPage />)
+        await flush()
+        expect(screen.getByText('#73', { selector: 'span.font-display' })).toBeInTheDocument()
+        expect(screen.getByText('1239')).toBeInTheDocument()
+        expect(screen.getByText('zed · Blitz · 32 games · 59% wins')).toBeInTheDocument()
+        first.unmount()
+
         profile = { id: 'me', username: 'zed', display_name: null, rating_rapid: 900, games_played: 0, wins: 0 }
-        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+        serve([P('a', 1800)])
         const { unmount } = render(<LeaderboardPage />)
         await flush()
-        expect(screen.getByText('—')).toBeInTheDocument()
-        expect(screen.getByText('zed · Rapid · 0 games · 0% wins')).toBeInTheDocument()
+        expect(screen.getAllByText('—')).toHaveLength(2)
+        expect(screen.getByText('zed · All · 0 games · 0% wins')).toBeInTheDocument()
         unmount()
         profile = null
         render(<LeaderboardPage />)

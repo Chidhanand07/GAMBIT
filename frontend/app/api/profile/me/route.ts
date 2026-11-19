@@ -30,7 +30,8 @@ export async function GET() {
     return NextResponse.json(data);
 }
 
-// PATCH /api/profile/me — body { displayName?, bio?, country?, avatarUrl? }; omitted fields are kept
+// PATCH /api/profile/me — body { displayName?, bio?, country?, avatarUrl?, city?, website?, favoriteOpening?,
+// favoritePlayer?, pronouns?, playingStyle?, experience? } (F-127); omitted fields are kept, null clears one
 export async function PATCH(request: Request) {
     const auth = await requireFreshUser();
     if (!auth.ok) return auth.response;

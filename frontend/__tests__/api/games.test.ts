@@ -156,7 +156,7 @@ describe('GET /api/games/active', () => {
         db.queue('games', { data: { id: uid('g1'), started_at: new Date(NOW).toISOString(), clock_deadline: new Date(NOW - 11000).toISOString() }, error: null })
         expect((await json(await activeGame())).body).toBeNull()
         const update = db.callsFor('games')[1]
-        expect(db.op(update, 'update')![0]).toMatchObject({ status: 'completed', result: 'abandoned' })
+        expect(db.op(update, 'update')![0]).toMatchObject({ status: 'completed', result: 'abandoned', end_reason: 'abandonment' })
         expect(update.ops).toContainEqual(['eq', 'status', 'active'])
     })
 

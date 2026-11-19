@@ -44,3 +44,10 @@ test('toLobbyFriends: presence from the online ids, online first then by name, r
         { username: 'bea', display_name: null, avatar_url: null, rating: 1301, online: false },
     ])
 })
+
+test('toLobbyFriends: the rating is the one of the selected pool [F-125]', () => {
+    const friends = [{ id: 'b', username: 'bea', rating_rapid: 1300, rating_blitz: 1239.6, rating_bullet: null, friendship_id: '1' }]
+    expect(toLobbyFriends(friends, new Set(), 'blitz')[0].rating).toBe(1240)
+    expect(toLobbyFriends(friends, new Set(), 'bullet')[0].rating).toBe(1200)
+    expect(toLobbyFriends(friends, new Set(), 'rapid')[0].rating).toBe(1300)
+})

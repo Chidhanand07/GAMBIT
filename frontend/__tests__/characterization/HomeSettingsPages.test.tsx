@@ -186,13 +186,44 @@ describe('settings page', () => {
         expect(fetchMock.mock.calls).toEqual([['/api/profile/me', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ displayName: 'New Name', bio: null, country: 'India' }),
+            // F-127 (was: { displayName, bio, country } only): every public-profile field is sent,
+            // trimmed, an empty one as null.
+            body: JSON.stringify({
+                displayName: 'New Name', bio: null, country: 'India', city: null, website: null,
+                favoriteOpening: null, favoritePlayer: null, pronouns: null, playingStyle: null, experience: null,
+            }),
         }]])
         expect(profileState.refetch).toHaveBeenCalledTimes(1)
         // Redesign: "Saved!" on the button became the "Changes saved." status line
         expect(screen.getAllByRole('status')[0]).toHaveTextContent('Changes saved.')
         act(() => { jest.advanceTimersByTime(2500) })
         expect(screen.getAllByRole('status')[0]).toHaveTextContent('')
+    })
+
+    test('F-127: the public-profile fields are prefilled, previewed and saved', async () => {
+        profileState = {
+            ...profileState,
+            profile: {
+                ...ME, city: 'Pune', website: 'https://example.com/me', favorite_opening: 'Italian Game',
+                favorite_player: null, pronouns: 'they/them', playing_style: 'positional', experience: 'club',
+            },
+        }
+        render(<SettingsPage />)
+        expect(screen.getByDisplayValue('Pune')).toBeInTheDocument()
+        expect(screen.getByDisplayValue('https://example.com/me')).toBeInTheDocument()
+        expect(screen.getByText('@me1 · they/them')).toBeInTheDocument()
+        expect(screen.getByText('India, Pune')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Positional' })).toHaveAttribute('aria-pressed', 'true')
+        fireEvent.change(screen.getByPlaceholderText('e.g. Magnus Carlsen'), { target: { value: ' Hikaru ' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Tactical' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Prefer not to say' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+        await flush()
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+        expect(body).toMatchObject({
+            city: 'Pune', website: 'https://example.com/me', favoriteOpening: 'Italian Game', favoritePlayer: 'Hikaru',
+            pronouns: null, playingStyle: 'tactical', experience: 'club',
+        })
     })
 
     test('save errors: API error text, fallback text, network error', async () => {
@@ -329,13 +360,15 @@ describe('settings page', () => {
         render(<SettingsPage />)
         const sections = within(screen.getByRole('group', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
         expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Account'])
-        const unbacked = /notification|privacy|two-factor|2fa|sign-in emails|delete account|change email|premove|takeback|move by|piece set|pronoun|playing style|experience|favou?rite|website|city|visib/i
+        // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
+        // those are real profile columns now; everything else here still has no backing.
+        const unbacked = /notification|privacy|two-factor|2fa|sign-in emails|delete account|change email|premove|takeback|move by|piece set|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]
             const names = controls.map(c => `${c.getAttribute('aria-label') ?? ''} ${c.textContent ?? ''} ${(c as HTMLInputElement).placeholder ?? ''}`)
             expect(names.filter(n => unbacked.test(n))).toEqual([])
-            expect(document.body.textContent).not.toMatch(/two-factor|delete account|change email|premove|pronouns/i)
+            expect(document.body.textContent).not.toMatch(/two-factor|delete account|change email|premove|show my country|show rating history/i)
         }
     })
 

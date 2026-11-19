@@ -40,7 +40,7 @@ function WinRate({ pct }: { pct: number }) {
     );
 }
 
-function RankRowView({ row, bucket }: { row: RankRow; bucket: string }) {
+function RankRowView({ row }: { row: RankRow }) {
     return (
         <div
             role="row"
@@ -56,7 +56,7 @@ function RankRowView({ row, bucket }: { row: RankRow; bucket: string }) {
             <PlayerCell row={row} />
             <span role="cell" className="flex flex-col">
                 <span className="font-mono text-[18px] font-bold text-accent">{row.rating}</span>
-                <span className="text-[12px] text-ink-muted">{bucket}</span>
+                <span className="text-[12px] text-ink-muted">{row.pool}</span>
             </span>
             <span role="cell" className="font-mono text-[15px] font-medium">
                 {row.games}
@@ -93,8 +93,8 @@ export function RankingsEmpty() {
     );
 }
 
-/** The rankings grid; `bucket` is the rating pool printed under each rating ("rapid"). */
-export function RankingsTable({ rows, bucket }: { rows: readonly RankRow[]; bucket: string }) {
+/** The rankings grid; each row prints its rating pool under the rating ("rapid"). */
+export function RankingsTable({ rows }: { rows: readonly RankRow[] }) {
     return (
         <TableCard>
             <div className="overflow-x-auto">
@@ -113,7 +113,7 @@ export function RankingsTable({ rows, bucket }: { rows: readonly RankRow[]; buck
                         ))}
                     </div>
                     {rows.map((row) => (
-                        <RankRowView key={row.username} row={row} bucket={bucket} />
+                        <RankRowView key={row.username} row={row} />
                     ))}
                 </div>
             </div>

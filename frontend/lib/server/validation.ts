@@ -2,6 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { TIME_CONTROL_PRESETS, normalizeTimeControl } from '@/lib/chess/timeControl';
+import { EXPERIENCE_LEVELS, PLAYING_STYLES, PROFILE_TEXT_LIMITS, PRONOUNS, isHttpsUrl } from '@/lib/profile/fields';
 
 // Input schemas for the route handlers (NX-07 step 2, NODE-08). Every route param, query
 // value and request body goes through `parseInput` / `parseJsonBody` before it is used.
@@ -54,6 +55,12 @@ const timeControl = z
 /** Optional profile text: a bounded string, null, or absent. */
 const optionalText = (max: number) => z.string().max(max).nullish();
 
+/** An optional public-profile field (F-127): non-empty and bounded (the database refuses ""), null clears it. */
+const optionalField = (max: number) => z.string().trim().min(1).max(max).nullish();
+
+/** An optional link: an https URL with a host (F-127; the database CHECK is the same rule). */
+const optionalHttpsUrl = z.string().trim().max(PROFILE_TEXT_LIMITS.website).refine(isHttpsUrl).nullish();
+
 export const schemas = {
     /**
      * Any 8-4-4-4-12 hex id. z.guid(), not z.uuid(): zod 4's uuid() also checks the RFC 9562
@@ -71,6 +78,8 @@ export const schemas = {
     newUsername: z.string().regex(new RegExp(`^[A-Za-z0-9_]{${MIN_NEW_USERNAME_LENGTH},${MAX_NEW_USERNAME_LENGTH}}$`)),
     friendAction: z.enum(['accept', 'decline']),
     ratingField: z.enum(['rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical']),
+    /** A leaderboard: one rating pool, or "All" (profiles.rating_all, F-125). */
+    leaderboardField: z.enum(['rating_all', 'rating_rapid', 'rating_bullet', 'rating_blitz', 'rating_classical']),
     gamesPage: z.object({
         limit: queryInt(DEFAULT_PAGE_SIZE)
             .pipe(z.number().int().min(1))
@@ -111,6 +120,13 @@ export const schemas = {
         bio: optionalText(MAX_BIO_LENGTH),
         country: optionalText(MAX_COUNTRY_LENGTH),
         avatarUrl: optionalText(MAX_URL_LENGTH),
+        city: optionalField(PROFILE_TEXT_LIMITS.city),
+        website: optionalHttpsUrl,
+        favoriteOpening: optionalField(PROFILE_TEXT_LIMITS.favoriteOpening),
+        favoritePlayer: optionalField(PROFILE_TEXT_LIMITS.favoritePlayer),
+        pronouns: z.enum(PRONOUNS).nullish(),
+        playingStyle: z.enum(PLAYING_STYLES).nullish(),
+        experience: z.enum(EXPERIENCE_LEVELS).nullish(),
     }),
     gamePatch: z.object({ draw_offer: z.boolean().optional(), rematch_requested: z.boolean().optional() }),
     computerMove: z.object({

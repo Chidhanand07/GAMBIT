@@ -10,6 +10,7 @@ import { ChatCard } from '@/features/game/components/ChatCard'
 import { ConfirmDialogs } from '@/features/game/components/ConfirmDialogs'
 import { GameInfoCard } from '@/features/game/components/GameInfoCard'
 import { GameLayout } from '@/features/game/components/GameLayout'
+import { GameSeat } from '@/features/game/components/GameSeat'
 import { BoardTools } from '@/features/game/components/BoardTools'
 import { PromotionPicker } from '@/features/game/components/PromotionPicker'
 
@@ -202,4 +203,15 @@ test('PromotionPicker: four named choices in order, reporting the piece letter',
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Queen', 'Rook', 'Bishop', 'Knight'])
     fireEvent.click(screen.getByRole('button', { name: 'Knight' }))
     expect(onSelect).toHaveBeenCalledWith('n')
+})
+
+test('GameSeat: the player bar shows the country chip from the seat [F-126]', () => {
+    const seat = {
+        side: 'black' as const, name: 'chiruparande', href: '/profile/chiruparande', rating: '1228', avatarUrl: null,
+        country: 'IN', online: true, active: false, captures: '', seconds: 60, timePercent: 50, low: false, isMe: false,
+    }
+    const { rerender } = render(<GameSeat seat={seat} />)
+    expect(screen.getByText('IN')).toBeInTheDocument()
+    rerender(<GameSeat seat={{ ...seat, country: null }} />)
+    expect(screen.queryByText('IN')).not.toBeInTheDocument()
 })

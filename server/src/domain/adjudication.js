@@ -19,6 +19,32 @@ const REASON = Object.freeze({
 });
 
 /**
+ * The `games.end_reason` code stored for each reason (F-124). The database accepts exactly these
+ * codes (CHECK in supabase/migrations/20261118100200_game_end_reason.sql).
+ * @type {Readonly<Record<string, string>>}
+ */
+const END_REASON_CODE = Object.freeze({
+    [REASON.CHECKMATE]: 'checkmate',
+    [REASON.STALEMATE]: 'stalemate',
+    [REASON.INSUFFICIENT_MATERIAL]: 'insufficient_material',
+    [REASON.THREEFOLD_REPETITION]: 'threefold_repetition',
+    [REASON.FIFTY_MOVE_RULE]: 'fifty_move_rule',
+    [REASON.RESIGNATION]: 'resignation',
+    [REASON.TIME]: 'timeout',
+    [REASON.ABANDONMENT]: 'abandonment',
+    [REASON.ABORTED]: 'aborted',
+});
+
+/**
+ * The stored code of a verdict's reason; null for anything else (never a free-form string).
+ * @param {unknown} reason
+ * @returns {string | null}
+ */
+function endReasonCode(reason) {
+    return typeof reason === 'string' && Object.hasOwn(END_REASON_CODE, reason) ? END_REASON_CODE[reason] : null;
+}
+
+/**
  * @typedef {'white' | 'black'} Color
  * @typedef {{ winner: Color | null, reason: string, aborted?: boolean }} Verdict `winner` null is a draw,
  *   unless `aborted`: then no game was played and nothing is rated
@@ -58,4 +84,4 @@ function adjudicate(position) {
     return rule ? { winner: rule.winner(position), reason: rule.reason } : null;
 }
 
-module.exports = { REASON, adjudicate };
+module.exports = { REASON, END_REASON_CODE, adjudicate, endReasonCode };

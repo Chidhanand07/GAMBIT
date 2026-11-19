@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/components/SocketProvider';
 import type { ColorChoice, Difficulty } from '@/features/offline/types';
+import { speedBucketForMinutes } from '@/lib/chess/timeControl';
 import type { LobbyStage } from '../types';
 import { useActiveGame } from './useActiveGame';
 import { useLiveGames } from './useLiveGames';
@@ -42,7 +43,8 @@ export function useLobby() {
     const [stage, setStage] = useState<LobbyStage>('none');
     const [difficulty, setDifficulty] = useState<Difficulty>('medium');
     const [side, setSide] = useState<ColorChoice>('w');
-    const friends = useLobbyFriends(stage === 'friends');
+    // Friends' ratings in the pool of the selected time control (F-125).
+    const friends = useLobbyFriends(stage === 'friends', speedBucketForMinutes(timeControl.getTcMinutes().mins));
     const invite = useInviteDialog(timeControl);
     const online = usePlayOnline({ timeControl, activeGame, onGameStart: invite.closeOnStart });
 

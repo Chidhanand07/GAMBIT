@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { countLeaderboardPlayers, listLeaderboard } from '@/lib/server/profiles';
+import { countLeaderboardPlayers, listLeaderboard } from '@/lib/server/leaderboard';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseInput, schemas } from '@/lib/server/validation';
 
-// GET /api/leaderboard?field=rating_<bucket> — top 50 (default rapid). The number of ranked
-// players (all of them, not just the 50 returned) is sent as `X-Total-Count` when it is known.
+// GET /api/leaderboard?field=rating_all|rating_<bucket> — top 50 (default All, F-125). The number of
+// ranked players on that board (not just the 50 returned) is sent as `X-Total-Count` when known.
 // PUBLIC on purpose: usernames, ratings and totals only, the same for every caller
 // (docs/fixes/DECISIONS.md F-012).
 export async function GET(request: NextRequest) {
-    // `field` becomes a column name in the select list and the order clause: enum only.
+    // `field` becomes a column name in the filter and the order clause: enum only.
     const field = parseInput(
-        schemas.ratingField,
-        request.nextUrl.searchParams.get('field') ?? 'rating_rapid',
+        schemas.leaderboardField,
+        request.nextUrl.searchParams.get('field') ?? 'rating_all',
         'Invalid field',
     );
     if (!field.ok) return field.response;
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const admin = createAdminClient();
     const [{ data, error }, total] = await Promise.all([
         listLeaderboard(admin, field.data),
-        countLeaderboardPlayers(admin),
+        countLeaderboardPlayers(admin, field.data),
     ]);
 
     if (error) {

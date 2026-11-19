@@ -1,6 +1,5 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { RatingField } from '@/types/timeControl';
 import { createAdminClient } from './supabase';
 
 /** Starting rating in every speed bucket for a brand-new profile. */
@@ -9,9 +8,8 @@ const DEFAULT_RATING = 1200;
 const MAX_USERNAME_SUFFIX = 99;
 const MAX_USERNAME_BASE_LENGTH = 15;
 
-const STATS_COLUMNS =
-    'id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical';
-const LEADERBOARD_SIZE = 50;
+const STATS_COLUMNS = `id, games_played, wins, losses, draws, rating_bullet, rating_blitz, rating_rapid, rating_classical,
+    rated_games_bullet, rated_games_blitz, rated_games_rapid, rated_games_classical`;
 
 /** Columns of a freshly created profile row (signup, /api/profile/me auto-create, OAuth). */
 export function newProfileRow(id: string, username: string) {
@@ -70,6 +68,13 @@ export interface ProfilePatch {
     bio?: string | null;
     country?: string | null;
     avatarUrl?: string | null;
+    city?: string | null;
+    website?: string | null;
+    favoriteOpening?: string | null;
+    favoritePlayer?: string | null;
+    pronouns?: string | null;
+    playingStyle?: string | null;
+    experience?: string | null;
 }
 
 const PATCH_COLUMNS: Readonly<Record<keyof ProfilePatch, string>> = {
@@ -77,6 +82,13 @@ const PATCH_COLUMNS: Readonly<Record<keyof ProfilePatch, string>> = {
     bio: 'bio',
     country: 'country',
     avatarUrl: 'avatar_url',
+    city: 'city',
+    website: 'website',
+    favoriteOpening: 'favorite_opening',
+    favoritePlayer: 'favorite_player',
+    pronouns: 'pronouns',
+    playingStyle: 'playing_style',
+    experience: 'experience',
 };
 
 /**
@@ -95,7 +107,8 @@ export function profileUpdateFromPatch(patch: ProfilePatch): Record<string, stri
 /**
  * Updates the caller's own profile and returns the updated row. `userClient` is the caller's
  * session client (createUserClient): the `profiles_update` policy and the column grants
- * (display_name, bio, country, avatar_url) decide what may change, not the service role.
+ * (display_name, bio, country, avatar_url and the F-127 public-profile fields) decide what may
+ * change, not the service role.
  */
 export function updateProfile(userClient: SupabaseClient, id: string, fields: Record<string, unknown>) {
     return userClient.from('profiles').update(fields).eq('id', id).select().single();
@@ -104,23 +117,6 @@ export function updateProfile(userClient: SupabaseClient, id: string, fields: Re
 /** Inserts a new profile row (no returning select). */
 export function insertProfile(admin: SupabaseClient, row: Record<string, unknown>) {
     return admin.from('profiles').insert(row);
-}
-
-/** Top 50 profiles by one rating column, best first. */
-export function listLeaderboard(admin: SupabaseClient, field: RatingField) {
-    return admin
-        .from('profiles')
-        .select(`username, display_name, ${field}, games_played, wins, losses, draws`)
-        .order(field, { ascending: false })
-        .limit(LEADERBOARD_SIZE);
-}
-
-/**
- * How many players the leaderboard ranks: every profile (the board orders all of them by rating).
- * A HEAD count, so no rows are read.
- */
-export function countLeaderboardPlayers(admin: SupabaseClient) {
-    return admin.from('profiles').select('id', { count: 'exact', head: true });
 }
 
 /** Email local part with non-word characters replaced by `_`, max 15 chars, else "player". */

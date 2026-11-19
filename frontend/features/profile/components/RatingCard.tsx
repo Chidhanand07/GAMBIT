@@ -2,6 +2,7 @@ import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
 import { SPEED_BUCKET_LABELS } from '@/lib/chess/timeControl';
 import type { SpeedBucket } from '@/types/timeControl';
+import { CHART_HEIGHT, CHART_WIDTH, ratingChart, type RatingChart } from '../ratingChart';
 import { PANEL, PANEL_TITLE } from './styles';
 
 const MODES: readonly SpeedBucket[] = ['bullet', 'blitz', 'rapid', 'classical'];
@@ -13,25 +14,66 @@ interface RatingCardProps {
     onMode: (mode: SpeedBucket) => void;
     /** Current rating in `mode`, rounded; null when the profile has none. */
     rating: number | null;
-    /** Highest rating reached in `mode`; null when the profile has no peak (F12). */
-    peak: number | null;
-    /** Games played in `mode`, when the stats know it. */
-    played: number | null;
+    /** Rating before the first recorded game, then after each one (F-121); empty or null without any. */
+    history: readonly number[] | null;
 }
 
-function summary(peak: number | null, played: number | null): string {
-    const parts: string[] = [];
-    if (peak !== null) parts.push(`Peak ${peak}`);
-    if (played !== null) parts.push(`${played} ${played === 1 ? 'game' : 'games'}`);
-    return parts.join(' · ');
+const gamesText = (n: number) => `${n} ${n === 1 ? 'game' : 'games'}`;
+
+function ChartLines({ chart, label }: { chart: RatingChart; label: string }) {
+    return (
+        <svg
+            viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+            width="100%"
+            height={CHART_HEIGHT}
+            role="img"
+            aria-label={`${label} rating over the last ${gamesText(chart.games)}`}
+            preserveAspectRatio="none"
+        >
+            {GRID_LINES.map((y) => (
+                <line key={y} x1="0" y1={y} x2={CHART_WIDTH} y2={y} className="stroke-line-subtle" />
+            ))}
+            <path d={chart.area} className="fill-[var(--color-chart-area)]" />
+            <path
+                d={chart.line}
+                fill="none"
+                className="stroke-accent"
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+            />
+        </svg>
+    );
 }
 
-/**
- * "Rating over time": the mode switch, the current rating and its peak. No rating history is
- * stored per game yet, so the chart area keeps its grid and says so instead of drawing a line.
- */
-export function RatingCard({ mode, onMode, rating, peak, played }: RatingCardProps) {
+/** The empty chart: grid lines and why there is no line (games before F-120 have no snapshot). */
+function NoHistory({ label }: { label: string }) {
+    return (
+        <div className="relative h-[160px]">
+            <svg
+                viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+                width="100%"
+                height={CHART_HEIGHT}
+                aria-hidden="true"
+                preserveAspectRatio="none"
+            >
+                {GRID_LINES.map((y) => (
+                    <line key={y} x1="0" y1={y} x2={CHART_WIDTH} y2={y} className="stroke-line-subtle" />
+                ))}
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center px-4 text-center text-[14px] text-ink-muted">
+                No {label.toLowerCase()} rating history yet. It is recorded for rated games from now on; earlier games
+                have none.
+            </span>
+        </div>
+    );
+}
+
+/** "Rating over time": the mode switch, the current rating, peak, low and change, and the chart. */
+export function RatingCard({ mode, onMode, rating, history }: RatingCardProps) {
     const label = SPEED_BUCKET_LABELS[mode];
+    const chart = ratingChart(history);
     return (
         <Card className={PANEL}>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -40,18 +82,13 @@ export function RatingCard({ mode, onMode, rating, peak, played }: RatingCardPro
             </div>
             <div className="flex flex-wrap items-baseline gap-5">
                 <span className="font-mono text-[36px] font-bold tracking-[-0.04em] text-accent">{rating ?? '—'}</span>
-                <span className="text-[14px] text-ink-muted">{summary(peak, played)}</span>
+                {chart && (
+                    <span className="text-[14px] text-ink-muted">
+                        Peak {chart.peak} · Low {chart.low} · {chart.delta} over {gamesText(chart.games)}
+                    </span>
+                )}
             </div>
-            <div className="relative h-[160px]">
-                <svg viewBox="0 0 600 160" width="100%" height="160" aria-hidden="true" preserveAspectRatio="none">
-                    {GRID_LINES.map((y) => (
-                        <line key={y} x1="0" y1={y} x2="600" y2={y} className="stroke-line-subtle" />
-                    ))}
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-[14px] text-ink-muted">
-                    {label} rating history is not recorded yet.
-                </span>
-            </div>
+            {chart ? <ChartLines chart={chart} label={label} /> : <NoHistory label={label} />}
         </Card>
     );
 }
