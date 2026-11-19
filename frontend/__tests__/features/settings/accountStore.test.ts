@@ -104,3 +104,25 @@ describe('parseAccountPreferences', () => {
         expect(withPreference(prefs, 'notifications', 'invented', true).notifications).not.toHaveProperty('invented')
     })
 })
+
+describe('no session in this browser: the server is not asked [F-168]', () => {
+    test('a guest gets the browser copy and the defaults without a request (no 401 to log)', async () => {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ boardTheme: 'green' }))
+        const api = fakeApi(response(200, { stored: true, play: {} }))
+        const store = createAccountSettingsStore({ api, hasSession: async () => false })
+        const loaded = await store.load()
+        expect(api.get).not.toHaveBeenCalled()
+        expect(loaded.play.boardTheme).toBe('green')
+        expect(loaded.account).toEqual(DEFAULT_ACCOUNT_PREFERENCES)
+        await store.save(loaded)
+        expect(api.patch).not.toHaveBeenCalled()
+    })
+
+    test('a session check that fails counts as no session; with a session the server is read', async () => {
+        const api = fakeApi(response(200, { stored: true, play: {} }))
+        await createAccountSettingsStore({ api, hasSession: async () => Promise.reject(new Error('offline')) }).load()
+        expect(api.get).not.toHaveBeenCalled()
+        await createAccountSettingsStore({ api, hasSession: async () => true }).load()
+        expect(api.get).toHaveBeenCalledTimes(1)
+    })
+})

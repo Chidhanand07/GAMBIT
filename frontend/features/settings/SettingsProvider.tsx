@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { PieceSetProvider } from '@/components/chess/pieceSets';
 import { setSoundsEnabled } from '@/lib/sounds';
 import type { AccountPreferences } from '@/types/preferences';
+import { hasBrowserSession } from '@/lib/supabase/session';
 import { subscribeToAuthChanges } from './authChanges';
 import { boardPrefsOf, type BoardPrefs, type UserSettings } from './model';
 import { createAccountSettingsStore, DEFAULT_PREFERENCES, type Preferences, type SettingsStore } from './store';
@@ -30,7 +31,7 @@ const SettingsContext = createContext<SettingsContextValue>({
     saveAccount: async () => true,
 });
 
-const defaultStore = createAccountSettingsStore({ subscribe: subscribeToAuthChanges });
+const defaultStore = createAccountSettingsStore({ subscribe: subscribeToAuthChanges, hasSession: hasBrowserSession });
 
 /** Applies the settings that act outside React: move sounds and the piece slide duration. */
 function applyGlobally(settings: UserSettings) {

@@ -25,7 +25,14 @@ const storage = {
     getPublicUrl: jest.fn(),
 }
 jest.mock('@/lib/supabase/client', () => ({
-    createClient: () => ({ storage: { from: (bucket: string) => ({ upload: (...a: any[]) => storage.upload(bucket, ...a), getPublicUrl: storage.getPublicUrl }) } }),
+    createClient: () => ({
+        storage: { from: (bucket: string) => ({ upload: (...a: any[]) => storage.upload(bucket, ...a), getPublicUrl: storage.getPublicUrl }) },
+        // F-168: the settings store asks the server only when the browser holds a session.
+        auth: {
+            getSession: async () => ({ data: { session: { user: { id: 'u1' } } } }),
+            onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        },
+    }),
 }))
 
 // F-112: app/page.tsx is an async Server Component that resolves the viewer; the page itself is

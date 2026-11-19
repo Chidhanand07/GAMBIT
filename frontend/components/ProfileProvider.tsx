@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { loadBrowserClient } from '@/lib/supabase/lazyClient'
+import { hasBrowserSession } from '@/lib/supabase/session'
 
 interface Profile {
     id: string
@@ -36,13 +37,6 @@ const ProfileContext = createContext<ProfileContextValue>({
 
 export function useProfile() {
     return useContext(ProfileContext)
-}
-
-/** True when this browser holds a Supabase session (read locally; refreshed if it has expired). */
-async function hasBrowserSession(): Promise<boolean> {
-    const supabase = await loadBrowserClient()
-    const { data } = await supabase.auth.getSession()
-    return Boolean(data.session)
 }
 
 export default function ProfileProvider({ children }: { children: React.ReactNode }) {

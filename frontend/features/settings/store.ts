@@ -73,6 +73,11 @@ export interface AccountStoreOptions {
     api?: SettingsApi;
     local?: LocalSettingsStore;
     subscribe?: SettingsStore['subscribe'];
+    /**
+     * Whether this browser holds a session. Without one the server is not asked (a guest would get
+     * a 401, which browsers log on every public page; F-111, F-168). Default: always ask.
+     */
+    hasSession?: () => Promise<boolean>;
 }
 
 const fromPayload = (body: PreferencesPayload): Preferences => ({
@@ -97,11 +102,16 @@ export function createAccountSettingsStore({
     api = { get: fetchSettings, patch: patchSettings },
     local = createLocalSettingsStore(),
     subscribe,
+    hasSession = async () => true,
 }: AccountStoreOptions = {}): SettingsStore {
     let signedIn = false;
     return {
         subscribe,
         async load() {
+            if (!(await hasSession().catch(() => false))) {
+                signedIn = false;
+                return { play: local.load(), account: { ...DEFAULT_ACCOUNT_PREFERENCES } };
+            }
             const res = await api.get();
             signedIn = res.status !== HTTP_UNAUTHORIZED;
             if (!signedIn) return { play: local.load(), account: { ...DEFAULT_ACCOUNT_PREFERENCES } };

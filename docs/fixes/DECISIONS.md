@@ -135,6 +135,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-147](#f-147) | Piece sets Gambit / Classic / Line art: SVG artwork and the mockup's Unicode glyphs, via a piece-set context | B3 | PIECE-SETS |
 | [F-163](#f-163) | One leaderboard: the opt-out view carries B1's columns and `leaderboard_rank` counts only listed players | STACK | LEADERBOARD-AGREE |
 | [F-164](#f-164) | `delete_account` re-checked on the stacked schema; a uuid-column guard joins the FK guard | STACK | DELETE-ACCOUNT |
+| [F-168](#f-168) | Root-layout account code keeps the landing lean: lazy Supabase client, no `/api/settings` without a session | STACK | LANDING-LEAN |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3582,3 +3583,26 @@ context.** (Track B3, item 5; SOLID-01.)
   stored without a foreign key (which the FK guard cannot see) fails the test until it is listed and
   handled by `delete_account`.
 - pgTAP `081_delete_account` (22 → 28 assertions; no assertion removed).
+
+## F-168
+
+**B3's account code in the root layout follows the landing's first-paint rules (F-111).**
+
+- **Context.** The landing track (F-111) loads supabase-js on first use (`lib/supabase/lazyClient`),
+  skips `/api/profile/me` when the browser holds no session (a guest's 401 is logged by browsers on
+  every public page), and opens no guest presence socket on `/`. B3, built before it, put three
+  pieces in the root layout that broke those rules once stacked: the settings provider's auth
+  watcher (`authChanges.ts`) and the two-factor gate (`SecondFactorGate`) imported the eager
+  client, and the account settings store asked `/api/settings` on every page, guests included.
+- **Decision.**
+  - `subscribeToAuthChanges` and `SecondFactorGate` use `loadBrowserClient()` (the gate was changed
+    while resolving the B3-3 rebase; the watcher in this commit). The watcher can be stopped before
+    the client has loaded.
+  - The account store takes `hasSession`; the provider passes `lib/supabase/session.hasBrowserSession`
+    (moved out of ProfileProvider, which now imports it). Without a session the store uses the
+    browser copy and the defaults and sends no request; a failing check counts as no session.
+  - PresenceProvider (resolved during the rebase): lazy client and no guest socket on `/` (F-111),
+    the tab's idle status (F-131), and the "Show when I am online" gate (F-140) together.
+- Tests: `accountStore.test.ts` (no request without a session), `authChanges.test.ts` (lazy, never
+  the eager client), `HomeSettingsPages.test.tsx` (its client double has a session),
+  `presencePrivacy.test.tsx` and `PresenceProvider.test.tsx` (wait for the lazy client).
