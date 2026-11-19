@@ -103,6 +103,14 @@ describe('landing page', () => {
         expect(screen.queryByText('Create Account')).toBeNull()
         expect(screen.getByTestId('seeded-header')).toHaveAttribute('data-viewer', 'signed-in')
     })
+
+    test('[F-114] JSON-LD is rendered as one escaped ld+json script', () => {
+        const { container } = render(<Home />)
+        const scripts = container.querySelectorAll('script[type="application/ld+json"]')
+        expect(scripts).toHaveLength(1)
+        const data = JSON.parse(scripts[0].textContent!)
+        expect(data['@graph'].map((n: any) => n['@type'])).toEqual(['WebSite', 'SoftwareApplication'])
+    })
 })
 
 describe('landing demo board timers (F17)', () => {

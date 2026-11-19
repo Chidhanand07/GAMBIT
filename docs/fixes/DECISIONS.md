@@ -128,6 +128,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-111](#f-111) | Landing performance: lazy Supabase/socket.io, no guest 401, lazy audio, 2 KB symbol font, no trail on touch | v2 | C |
 | [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
 | [F-113](#f-113) | Intro splash: composited wordmark, Escape, 44 px Replay hit area | v2 | C |
+| [F-114](#f-114) | Landing metadata: canonical, share images, icons, robots, sitemap, JSON-LD from NEXT_PUBLIC_SITE_URL | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
 
@@ -2718,3 +2719,23 @@ the Dependabot part of F-057).**
   - "Replay intro" stays drawn at 40 px; a `::before` strip 3 px above and below makes the hit area
     44 px without painting anything.
 - **Measured.** Splash key frames (0.5–4.6 s) differ from the mockup by ≤ 0.17% at 375 and 1440 px.
+
+## F-114
+
+**Landing metadata: canonical, share images, icons, robots, sitemap and JSON-LD from one site URL.**
+
+- **Decision.**
+  - `NEXT_PUBLIC_SITE_URL` (an http(s) origin; else Vercel's production domain; else localhost) feeds
+    `metadataBase`, the canonical link, `robots.txt` and `sitemap.xml` (`lib/siteUrl.ts`).
+  - `/` sets title, description, canonical `/`, Open Graph and a `summary_large_image` Twitter card.
+    `app/opengraph-image.tsx` and `app/twitter-image.tsx` render one 1200×630 card with `next/og`:
+    the page background, the logo tile, "Gambit / Chess, perfected." and the gold knight, in Space
+    Grotesk and Inter (static subsets committed under `frontend/assets/fonts`, OFL). Colours come
+    from `lib/design/brandColors.ts`, which a test keeps equal to the `globals.css` tokens.
+  - Icons: `app/icon.tsx` (32 px logo tile), `app/apple-icon.tsx` (180 px, opaque) and
+    `app/favicon.ico` built from the same tile.
+  - `robots.txt` allows the site and disallows the signed-in, per-user and API routes;
+    `sitemap.xml` lists only `/`, `/offline`, `/analysis`, `/signup` and `/login`
+    (`lib/seo/publicRoutes.ts`).
+  - JSON-LD: a `WebSite` and a free `SoftwareApplication` (GameApplication, Chess, web browser),
+    serialised with `<`, `>`, `&`, U+2028 and U+2029 escaped so no value can end the script element.

@@ -5,6 +5,7 @@ import { FeatureGrid } from './FeatureGrid';
 import { HeroBoard } from './HeroBoard';
 import { HomeFooter } from './HomeFooter';
 import { HomeHero } from './HomeHero';
+import { StructuredData } from './StructuredData';
 
 /**
  * The landing page (design/Home.dc.html, F-110): intro splash, header, hero, "Why Gambit" and the
@@ -21,6 +22,7 @@ export function LandingPage({ viewer }: { viewer: Viewer }) {
                 <FeatureGrid />
             </div>
             <HomeFooter />
+            <StructuredData />
         </>
     );
 }

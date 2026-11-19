@@ -10,6 +10,7 @@ import { SettingsProvider } from '@/features/settings/SettingsProvider'
 import PageBackground from '@/components/layout/PageBackground'
 import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
 import ChallengeListener from '@/features/navigation/components/ChallengeListener'
+import { siteOrigin } from '@/lib/siteUrl'
 
 // Redesign typography (design/HANDOFF.md §2): each family is exposed as a CSS variable that
 // app/globals.css and tailwind.config.ts read (font-sans, font-display, font-mono, font-symbols).
@@ -50,6 +51,9 @@ const notoSymbols2 = localFont({
 const fontVariables = [inter, spaceGrotesk, jetbrainsMono, notoSymbols2].map((font) => font.variable).join(' ')
 
 export const metadata: Metadata = {
+    // Resolves relative canonical and Open Graph URLs against the public origin (F-114).
+    metadataBase: new URL(siteOrigin()),
+    applicationName: 'Gambit',
     title: 'Gambit - Chess, perfected.',
     description: 'Premium chess platform with accuracy rating, smart matchmaking, and friend system.',
 }
