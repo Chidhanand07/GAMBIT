@@ -15,6 +15,11 @@ frontend/.next/
 frontend/out/
 frontend/build/
 
+# Playwright and Lighthouse CI output (F-115)
+frontend/test-results/
+frontend/playwright-report/
+frontend/.lighthouseci/
+
 # Env files (contain secrets)
 frontend/.env.local
 server/.env
