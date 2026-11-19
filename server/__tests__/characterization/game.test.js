@@ -63,8 +63,11 @@ describe('join_game: game in Redis', () => {
             blackId: 'black-user',
             // Was: no count. A player now sees how many watch (ADR F-130).
             spectators: 0,
+            // F-166: each player's stored "Allow takeback requests" (both off by default).
+            takebackPrefs: { white: false, black: false },
         });
-        expect(supabase.calls).toEqual([]);
+        // F-166 (was: no call at all): the join reads the players' stored gameplay switches only.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
     });
 
     test('a running clock is deducted for the side to move and floored at 0', async () => {
@@ -168,6 +171,8 @@ describe('join_game: restore from the database (Redis empty)', () => {
             blackId: 'b',
             // Was: no count. A player now sees how many watch (ADR F-130).
             spectators: 0,
+            // F-166: each player's stored "Allow takeback requests" (both off by default).
+            takebackPrefs: { white: false, black: false },
         });
         expect(sync.blackMs).toBeGreaterThan(279900);
         expect(sync.blackMs).toBeLessThanOrEqual(280000);
@@ -201,6 +206,8 @@ describe('join_game: restore from the database (Redis empty)', () => {
             blackId: 'b',
             // Was: no count. A non-player joining a live game is counted as watching (ADR F-130).
             spectators: 1,
+            // F-166: each player's stored "Allow takeback requests" (both off by default).
+            takebackPrefs: { white: false, black: false },
         });
         expect(await getGame('db-2')).toMatchObject({
             whiteClockMs: 180000,

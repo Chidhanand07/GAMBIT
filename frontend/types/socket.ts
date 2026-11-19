@@ -12,7 +12,6 @@ import type {
     PremoveDiscardedPayload,
     TakebackAppliedPayload,
     TakebackDeclinedPayload,
-    TakebackPrefsPayload,
     TakebackRequestedPayload,
 } from './gameRequests';
 
@@ -123,7 +122,6 @@ export interface ClientToServerEvents {
     draw_offer: (payload: GameIdPayload) => void;
     draw_accept: (payload: GameIdPayload) => void;
     draw_decline: (payload: GameIdPayload) => void;
-    takeback_pref: (payload: GameIdPayload & { allow: boolean }) => void;
     takeback_request: (payload: GameIdPayload) => void;
     takeback_accept: (payload: GameIdPayload) => void;
     takeback_decline: (payload: GameIdPayload) => void;
@@ -269,7 +267,6 @@ export interface ServerToClientEvents {
     takeback_requested: (payload: TakebackRequestedPayload) => void;
     takeback_declined: (payload: TakebackDeclinedPayload) => void;
     takeback_applied: (payload: TakebackAppliedPayload) => void;
-    takeback_prefs: (payload: TakebackPrefsPayload) => void;
     premove_discarded: (payload: PremoveDiscardedPayload) => void;
     chat_message: (payload: ChatMessagePayload) => void;
     game_end: (payload: GameEndBroadcast) => void;

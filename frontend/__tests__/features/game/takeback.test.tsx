@@ -3,10 +3,9 @@
  * socket handlers, the commands, the setting declared to the server, and the button.
  */
 import { Chess } from 'chess.js'
-import { fireEvent, render, renderHook, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { GameActionsGrid } from '@/features/game/components/GameActions'
 import { createGameSocketHandlers, type SocketHandlerContext } from '@/features/game/hooks/gameSocketHandlers'
-import { useTakebackPref } from '@/features/game/hooks/useTakebackPref'
 import * as requests from '@/features/game/requestCommands'
 import { createInitialGameState, gameReducer } from '@/features/game/state/gameReducer'
 import { canRequestTakeback } from '@/features/game/utils/takeback'
@@ -52,7 +51,9 @@ describe('reducer', () => {
     test('requests and settings', () => {
         let s = gameReducer(createInitialGameState(), { type: 'takebackRequested', by: 'black', plies: 2 })
         expect(s.takeback).toEqual({ by: 'black', plies: 2 })
-        s = gameReducer(s, { type: 'takebackPrefsSet', prefs: { black: true } })
+        // F-166 (was: a `takebackPrefsSet` action from the `takeback_prefs` event): the settings
+        // come with the join's game_state_sync, from the players' stored preferences.
+        s = gameReducer(s, { type: 'requestsSynced', drawOffer: null, lastDrawOfferPly: {}, takeback: s.takeback, takebackPrefs: { black: true }, premove: null })
         expect(s.takebackPrefs).toEqual({ black: true })
         expect(gameReducer(s, { type: 'takebackCleared' }).takeback).toBeNull()
         expect(gameReducer(s, { type: 'moveReceived', fen: 'x', from: 'a2', to: 'a3', san: 'a3' }).takeback).toBeNull()
@@ -72,15 +73,14 @@ describe('socket handlers', () => {
         return { ctx, fire, dispatched: () => (ctx.dispatch as jest.Mock).mock.calls.map(([a]) => a) }
     }
 
-    test('takeback_requested / takeback_prefs, for this game only', () => {
+    // F-166 (was: 'takeback_requested / takeback_prefs, for this game only'): the server no longer
+    // sends `takeback_prefs`; no handler listens for it.
+    test('takeback_requested, for this game only; no takeback_prefs handler', () => {
         const { fire, dispatched } = makeCtx()
         fire('takeback_requested', { game_id: 'other', by: 'black', plies: 1 })
         fire('takeback_requested', { game_id: 'g1', by: 'black', plies: 1 })
-        fire('takeback_prefs', { game_id: 'g1', black: true })
-        expect(dispatched()).toEqual([
-            { type: 'takebackRequested', by: 'black', plies: 1 },
-            { type: 'takebackPrefsSet', prefs: { black: true } },
-        ])
+        expect(dispatched()).toEqual([{ type: 'takebackRequested', by: 'black', plies: 1 }])
+        expect(new Map(createGameSocketHandlers(makeCtx().ctx).handlers).has('takeback_prefs')).toBe(false)
     })
 
     test('takeback_declined: cleared; the requester is told', () => {
@@ -130,36 +130,19 @@ describe('commands', () => {
         expect(ACK_POLICY.takeback_request).toEqual({ retryOnce: false })
         expect(ACK_POLICY.takeback_accept).toEqual({ retryOnce: false })
         expect(ACK_POLICY.takeback_decline).toEqual({ retryOnce: true, doneOnRetry: ['no_pending_request'] })
-        expect(ACK_POLICY.takeback_pref).toEqual({ retryOnce: true })
+        // F-166 (was: takeback_pref retried once): the event is gone.
+        expect('takeback_pref' in ACK_POLICY).toBe(false)
+        // F-166: the server refuses a premove when the stored switch is off, with its own message.
+        expect(rejectionMessage('premoves_disabled')).toBe('Premoves are off in your Gameplay settings.')
         for (const code of ['takeback_pending', 'takeback_cooldown', 'takeback_nothing_to_undo']) {
             expect(rejectionMessage(code)).not.toBe(rejectionMessage('unknown_code'))
         }
     })
 })
 
-describe('useTakebackPref', () => {
-    const base = { gameId: 'g1', myColor: 'white' as const, connected: true, over: false }
-
-    test('nothing is sent while the setting is off (the server assumes off); on → sent; off again → sent', () => {
-        const socket = { emit: jest.fn() }
-        const { rerender } = renderHook((p: { allow: boolean }) => useTakebackPref({ ...base, socket: socket as never, ...p }), {
-            initialProps: { allow: false },
-        })
-        expect(socket.emit).not.toHaveBeenCalled()
-        rerender({ allow: true })
-        rerender({ allow: false })
-        expect(socket.emit.mock.calls.map(([e, p]) => [e, p])).toEqual([
-            ['takeback_pref', { game_id: 'g1', allow: true }],
-            ['takeback_pref', { game_id: 'g1', allow: false }],
-        ])
-    })
-
-    test('spectators never declare', () => {
-        const socket = { emit: jest.fn() }
-        renderHook(() => useTakebackPref({ ...base, myColor: 'spectator', allow: true, socket: socket as never }))
-        expect(socket.emit).not.toHaveBeenCalled()
-    })
-})
+// F-166 (was: describe('useTakebackPref'): the page declared "Allow takeback requests" to the
+// server per game with `takeback_pref`). The server reads the stored preference itself; the
+// GamePage test checks nothing is declared.
 
 describe('Takeback button', () => {
     const base = { isPlayer: true, over: false, onFlip: jest.fn(), onDraw: jest.fn(), onResign: jest.fn() }

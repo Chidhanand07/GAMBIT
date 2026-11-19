@@ -42,7 +42,8 @@ maybe('a request on A accepted on B: both see the restored state; Redis and the 
     const a = await startInstance('A-tb');
     const b = await startInstance('B-tb');
     const id = `${NS}-accept`;
-    await seedGame(a.gameStore, id, { takebackPrefs: { white: true, black: true } });
+    // F-166: no preferences wired here, so takebacks are allowed (was: seeded per-game takebackPrefs).
+    await seedGame(a.gameStore, id);
     const white = await connectPlayer(a.url, 'alice', cleanups);
     const black = await connectPlayer(b.url, 'bob', cleanups);
     await Promise.all([emitAck(white, 'join_game', id), emitAck(black, 'join_game', id)]);
@@ -88,7 +89,8 @@ maybe('accepting on B while White moves on A: the move wins, or the takeback doe
     const a = await startInstance('A-tb2');
     const b = await startInstance('B-tb2');
     const id = `${NS}-race`;
-    await seedGame(a.gameStore, id, { takebackPrefs: { white: true, black: true } });
+    // F-166: no preferences wired here, so takebacks are allowed (was: seeded per-game takebackPrefs).
+    await seedGame(a.gameStore, id);
     const white = await connectPlayer(a.url, 'alice', cleanups);
     const black = await connectPlayer(b.url, 'bob', cleanups);
     await Promise.all([emitAck(white, 'join_game', id), emitAck(black, 'join_game', id)]);

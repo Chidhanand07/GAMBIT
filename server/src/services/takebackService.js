@@ -1,7 +1,7 @@
 // @ts-check
 /**
- * Takebacks: `takeback_pref`, `takeback_request`, `takeback_accept`, `takeback_decline`
- * (ADR F-152). The handlers pass the validated payload and the verified user id.
+ * Takebacks: `takeback_request`, `takeback_accept`, `takeback_decline` (ADR F-152). Whether
+ * the opponent allows a request is their stored preference, read on the server (ADR F-166). The handlers pass the validated payload and the verified user id.
  *
  * Every change goes through `mutateGame`'s compare-and-set, so it is correct across
  * replicas: an accept re-checks that the request still stands for the current position
@@ -20,6 +20,7 @@ const {
     TAKEBACK_REJECTION,
 } = require('../domain/takeback');
 const { gameRoom } = require('./emitter');
+const { opponentAllowsTakebacks } = require('./gameplayPreferences');
 const { log } = require('../observability/log');
 
 /**
@@ -31,10 +32,8 @@ const { log } = require('../observability/log');
  * @property {{ deleteAfter: Function }} movesRepo
  * @property {import('./emitter').Emitter} emitter
  * @property {() => number} now
+ * @property {Partial<import('./gameplayPreferences').GameplayPort>} [preferences] stored gameplay switches
  */
-
-/** `decide`'s answer when the state already is what was asked for: nothing to write. */
-const UNCHANGED = 'unchanged';
 
 /**
  * Run `decide` on the game inside one compare-and-set, as the verified player `userId`.
@@ -89,7 +88,7 @@ function appliedPayload(gameId, state, plies, at) {
 /**
  * @param {TakebackDeps} deps
  */
-function createTakebacks({ gameStore, gamesRepo, movesRepo, emitter, now }) {
+function createTakebacks({ gameStore, gamesRepo, movesRepo, emitter, now, preferences }) {
     /**
      * Fire-and-forget, after Redis committed: drop the undone `moves` rows and store the
      * restored position and clocks in the `games` row (so a restore from the row matches).
@@ -112,33 +111,19 @@ function createTakebacks({ gameStore, gamesRepo, movesRepo, emitter, now }) {
     }
 
     /**
-     * `takeback_pref`: whether the caller lets the opponent ask for takebacks (their setting).
-     * @param {{ game_id: string, allow: boolean }} data
-     * @param {string} userId
-     * @returns {Promise<AckResult>}
-     */
-    async function setTakebackPref({ game_id: gameId, allow }, userId) {
-        const out = await asPlayer(gameStore, gameId, userId, (game, color) =>
-            game.takebackPrefs?.[color] === allow
-                ? UNCHANGED
-                : { ...game, takebackPrefs: { ...(game.takebackPrefs ?? {}), [color]: allow } },
-        );
-        if ('error' in out) return out.error === UNCHANGED ? { ok: true } : { ok: false, error: out.error };
-        emitter.toRoom(gameRoom(gameId), 'takeback_prefs', { game_id: gameId, ...out.state.takebackPrefs });
-        return { ok: true };
-    }
-
-    /**
      * `takeback_request`: ask the opponent to undo the caller's last move.
      * @param {{ game_id: string }} data
      * @param {string} userId
      * @returns {Promise<AckResult>}
      */
     async function requestTakeback({ game_id: gameId }, userId) {
+        const current = await gameStore.getGame(gameId);
+        const color = current ? colorOfPlayer(userId, current.whiteId) : 'white';
+        const allowed = current ? await opponentAllowsTakebacks(preferences, current, color) : false;
         const at = now();
-        const out = await asPlayer(gameStore, gameId, userId, (game, color) => {
-            const rejection = takebackRejection(game, color, at);
-            return rejection ?? { ...game, ...withTakebackRequest(game, color, at) };
+        const out = await asPlayer(gameStore, gameId, userId, (game, side) => {
+            const rejection = takebackRejection(game, side, at, allowed && side === color);
+            return rejection ?? { ...game, ...withTakebackRequest(game, side, at) };
         });
         if ('error' in out) return { ok: false, error: out.error };
         const { by, plies } = out.state.takeback;
@@ -182,7 +167,7 @@ function createTakebacks({ gameStore, gamesRepo, movesRepo, emitter, now }) {
         return { ok: true };
     }
 
-    return { setTakebackPref, requestTakeback, acceptTakeback, declineTakeback };
+    return { requestTakeback, acceptTakeback, declineTakeback };
 }
 
 module.exports = { createTakebacks };

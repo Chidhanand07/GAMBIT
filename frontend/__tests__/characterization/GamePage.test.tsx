@@ -213,7 +213,7 @@ describe('mount', () => {
             // [DRAW-OFFER]
             'draw_declined', 'draw_offered',
             // [TAKEBACK]
-            'takeback_applied', 'takeback_declined', 'takeback_prefs', 'takeback_requested',
+            'takeback_applied', 'takeback_declined', 'takeback_requested',
             // [PREMOVE]
             'premove_discarded',
         ].sort())
@@ -970,11 +970,21 @@ describe('draw', () => {
 })
 
 describe('takebacks [TAKEBACK]', () => {
+    // F-166 (was: shown on a `takeback_prefs` event): the opponent's stored setting arrives with
+    // the join's game_state_sync.
     test('the Takeback button appears once the opponent allows takebacks; it emits takeback_request', async () => {
         await renderGame()
         bothMoved()
         expect(screen.queryByRole('button', { name: 'Takeback' })).not.toBeInTheDocument()
-        socket.serverSends('takeback_prefs', { game_id: 'g1', black: true })
+        socket.serverSends('game_state_sync', {
+            fen: AFTER_E4_E5,
+            moveLog: [
+                { move: 'e2e4', fen: AFTER_E4, san: 'e4' },
+                { move: 'e7e5', fen: AFTER_E4_E5, san: 'e5' },
+            ],
+            whiteMs: 300_000, blackMs: 300_000, activeSide: 'w', clockActive: true, whiteId: 'me', blackId: 'opp',
+            takebackPrefs: { white: false, black: true },
+        })
         socket.emit.mockClear()
         click(screen.getByRole('button', { name: 'Takeback' }))
         expect(socket.emitted('takeback_request')).toEqual([{ game_id: 'g1' }])
@@ -1002,9 +1012,11 @@ describe('takebacks [TAKEBACK]', () => {
         expect(screen.queryByText('e5')).not.toBeInTheDocument()
     })
 
-    test('with "Allow takeback requests" on, the player declares it to the server for this game', async () => {
+    // F-166 (was: 'with "Allow takeback requests" on, the player declares it to the server for this
+    // game' → one takeback_pref emit): the server reads the stored preference; nothing is declared.
+    test('"Allow takeback requests" is never declared by the page: the server reads the stored setting', async () => {
         await renderGameWithSettings({ allowTakebacks: true })
-        expect(socket.emitted('takeback_pref')).toEqual([{ game_id: 'g1', allow: true }])
+        expect(socket.emitted('takeback_pref')).toEqual([])
     })
 })
 

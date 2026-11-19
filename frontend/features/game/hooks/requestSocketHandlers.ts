@@ -9,7 +9,6 @@ import type {
     PremoveDiscardedPayload,
     TakebackAppliedPayload,
     TakebackDeclinedPayload,
-    TakebackPrefsPayload,
     TakebackRequestedPayload,
 } from '@/types/socket';
 import type { GameAction, MovePair, RestoredPosition } from '../state/gameReducer';
@@ -101,16 +100,6 @@ function onPremoveDiscarded(ctx: SocketHandlerContext) {
     };
 }
 
-function onTakebackPrefs(ctx: SocketHandlerContext) {
-    return ({ game_id: gameId, white, black }: TakebackPrefsPayload) => {
-        if (gameId !== ctx.gameId) return;
-        ctx.dispatch({
-            type: 'takebackPrefsSet',
-            prefs: { ...(white === undefined ? {} : { white }), ...(black === undefined ? {} : { black }) },
-        });
-    };
-}
-
 export function requestHandlerList(ctx: SocketHandlerContext): Array<[string, SocketListener]> {
     return [
         ['draw_offered', onDrawOffered(ctx)],
@@ -118,7 +107,6 @@ export function requestHandlerList(ctx: SocketHandlerContext): Array<[string, So
         ['takeback_requested', onTakebackRequested(ctx)],
         ['takeback_declined', onTakebackDeclined(ctx)],
         ['takeback_applied', onTakebackApplied(ctx)],
-        ['takeback_prefs', onTakebackPrefs(ctx)],
         ['premove_discarded', onPremoveDiscarded(ctx)],
     ];
 }

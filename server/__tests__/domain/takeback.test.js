@@ -38,7 +38,6 @@ function game(plies, extra = {}) {
         blackClockMs: 1,
         lastMoveAt: 100,
         activeSide: plies % 2 ? 'b' : 'w',
-        takebackPrefs: { white: true, black: true },
         ...extra,
     };
 }
@@ -55,36 +54,37 @@ describe('pliesToUndo', () => {
 describe('takebackRejection', () => {
     const AT = 1_000_000;
     test('allowed when the opponent allows it and there is a move of mine to undo', () => {
-        expect(takebackRejection(game(3), 'white', AT)).toBeNull();
-        expect(takebackRejection(game(3), 'black', AT)).toBeNull();
-        expect(takebackRejection(game(1), 'white', AT)).toBeNull();
+        expect(takebackRejection(game(3), 'white', AT, true)).toBeNull();
+        expect(takebackRejection(game(3), 'black', AT, true)).toBeNull();
+        expect(takebackRejection(game(1), 'white', AT, true)).toBeNull();
     });
 
     test('nothing to undo: no move of mine yet', () => {
-        expect(takebackRejection(game(0), 'white', AT)).toBe('takeback_nothing_to_undo');
-        expect(takebackRejection(game(1), 'black', AT)).toBe('takeback_nothing_to_undo');
+        expect(takebackRejection(game(0), 'white', AT, true)).toBe('takeback_nothing_to_undo');
+        expect(takebackRejection(game(1), 'black', AT, true)).toBe('takeback_nothing_to_undo');
     });
 
-    test('the opponent has not allowed takebacks (absent counts as not allowed)', () => {
-        expect(takebackRejection(game(3, { takebackPrefs: { white: true, black: false } }), 'white', AT)).toBe(
-            'takebacks_disabled',
-        );
-        expect(takebackRejection(game(3, { takebackPrefs: undefined }), 'black', AT)).toBe('takebacks_disabled');
-        // My own setting does not matter for my request.
-        expect(takebackRejection(game(3, { takebackPrefs: { black: true } }), 'white', AT)).toBeNull();
+    // F-166 (was: read from game.takebackPrefs in the Redis state, absent = not allowed): the caller
+    // passes the opponent's stored switch.
+    test('the opponent has not allowed takebacks', () => {
+        expect(takebackRejection(game(3), 'white', AT, false)).toBe('takebacks_disabled');
+        expect(takebackRejection(game(3), 'black', AT, false)).toBe('takebacks_disabled');
+        expect(takebackRejection(game(3), 'white', AT, true)).toBeNull();
     });
 
     test('one standing request at a time', () => {
         const pending = { takeback: { by: 'white', plies: 1, ply: 3, at: AT } };
-        expect(takebackRejection(game(3, pending), 'black', AT)).toBe('takeback_pending');
-        expect(takebackRejection(game(3, pending), 'white', AT)).toBe('takeback_pending');
+        expect(takebackRejection(game(3, pending), 'black', AT, true)).toBe('takeback_pending');
+        expect(takebackRejection(game(3, pending), 'white', AT, true)).toBe('takeback_pending');
     });
 
     test('a cooldown after my last request, whatever the answer was', () => {
         const last = { lastTakebackAt: { white: AT } };
-        expect(takebackRejection(game(3, last), 'white', AT + TAKEBACK_COOLDOWN_MS - 1)).toBe('takeback_cooldown');
-        expect(takebackRejection(game(3, last), 'white', AT + TAKEBACK_COOLDOWN_MS)).toBeNull();
-        expect(takebackRejection(game(3, last), 'black', AT)).toBeNull();
+        expect(takebackRejection(game(3, last), 'white', AT + TAKEBACK_COOLDOWN_MS - 1, true)).toBe(
+            'takeback_cooldown',
+        );
+        expect(takebackRejection(game(3, last), 'white', AT + TAKEBACK_COOLDOWN_MS, true)).toBeNull();
+        expect(takebackRejection(game(3, last), 'black', AT, true)).toBeNull();
     });
 });
 

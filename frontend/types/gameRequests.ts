@@ -45,10 +45,3 @@ export interface TakebackAppliedPayload {
     activeSide: 'w' | 'b';
     clockActive: boolean;
 }
-
-/** Both players' takeback settings after one of them changed. */
-export interface TakebackPrefsPayload {
-    game_id: string;
-    white?: boolean;
-    black?: boolean;
-}

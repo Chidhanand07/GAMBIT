@@ -1,5 +1,5 @@
 // Requests between the two players of a live game, as the server reported them: the standing
-// draw offer (ADR F-151) and takeback request (ADR F-152), each player's takeback setting, and
+// draw offer (ADR F-151) and takeback request (ADR F-152), each player's stored takeback setting, and
 // this player's own queued premove (ADR F-153).
 // The server is the authority; this slice only mirrors its events.
 import type { Square } from 'chess.js';
@@ -18,7 +18,10 @@ export interface RequestsState {
     lastDrawOfferPly: Partial<Record<PlayerColor, number>>;
     /** The standing takeback request: who asked, and how many plies it undoes. */
     takeback: { by: PlayerColor; plies: number } | null;
-    /** Whether each player lets the opponent ask for takebacks (absent: not allowed). */
+    /**
+     * Whether each player lets the opponent ask for takebacks, from their stored preferences as
+     * the server read them when this client joined (ADR F-166; absent: not allowed).
+     */
     takebackPrefs: Partial<Record<PlayerColor, boolean>>;
     /** This player's queued premove, as the server holds it. */
     premove: QueuedPremove | null;
@@ -33,7 +36,6 @@ export type RequestsAction =
     | { type: 'drawOfferCleared' }
     | { type: 'takebackRequested'; by: PlayerColor; plies: number }
     | { type: 'takebackCleared' }
-    | { type: 'takebackPrefsSet'; prefs: Partial<Record<PlayerColor, boolean>> }
     | { type: 'premoveQueued'; premove: QueuedPremove }
     | { type: 'premoveCleared' }
     | ({ type: 'requestsSynced' } & RequestsState);
@@ -62,7 +64,6 @@ export const requestHandlers: Handlers = {
     drawOfferCleared: (s) => ({ ...s, drawOffer: null }),
     takebackRequested: (s, a) => ({ ...s, takeback: { by: a.by, plies: a.plies } }),
     takebackCleared: (s) => ({ ...s, takeback: null }),
-    takebackPrefsSet: (s, a) => ({ ...s, takebackPrefs: a.prefs }),
     premoveQueued: (s, a) => ({ ...s, premove: a.premove }),
     premoveCleared: (s) => ({ ...s, premove: null }),
     requestsSynced: (s, a) => ({

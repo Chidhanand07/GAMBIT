@@ -38,7 +38,7 @@ test('registers the legacy 13 events in order, plus move_rejected [S1], then the
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
         'move_rejected', 'spectators_changed', 'draw_offered', 'draw_declined',
-        'takeback_requested', 'takeback_declined', 'takeback_applied', 'takeback_prefs', 'premove_discarded',
+        'takeback_requested', 'takeback_declined', 'takeback_applied', 'premove_discarded',
     ])
 })
 

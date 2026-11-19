@@ -1,6 +1,6 @@
 /**
- * Takebacks through the game service: takeback_pref / _request / _accept / _decline
- * [TAKEBACK] (ADR F-152).
+ * Takebacks through the game service: takeback_request / _accept / _decline [TAKEBACK]
+ * (ADR F-152); whether the opponent allows a request is their stored preference (ADR F-166).
  */
 const { createGameService } = require('../../src/services/gameService');
 const { createSessionRegistry } = require('../../src/sockets/sessionRegistry');
@@ -14,7 +14,16 @@ const G = { game_id: 'g' };
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const AFTER_E5 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2';
 
-function setup(games = {}) {
+/** A preferences port with these players' stored gameplay switches (unknown players: all off). */
+const storedPrefs = (byUser) => ({
+    spectatingAllowed: jest.fn(async () => true),
+    notify: jest.fn(async () => false),
+    gameplayOf: jest.fn(
+        async (ids) => new Map(ids.map((id) => [id, { premoves: false, allowTakebacks: false, ...byUser[id] }])),
+    ),
+});
+
+function setup(games = {}, preferences = undefined) {
     const gameStore = fakeGameStore(games);
     const emitter = fakeEmitter();
     const sessions = createSessionRegistry();
@@ -27,7 +36,7 @@ function setup(games = {}) {
     const movesRepo = { insert: jest.fn(() => result()), deleteAfter: jest.fn(() => result()) };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter };
+    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter, preferences };
     let now = T;
     const svc = createGameService({ ...deps, now: () => now });
     return { svc, ...deps, advance: (ms) => (now += ms) };
@@ -36,20 +45,21 @@ function setup(games = {}) {
 const move = (ctx, userId, from, to) => ctx.svc.makeMove({ game_id: 'g', from, to }, userId, fakeClient());
 
 /** 1. e4 (White thought 1 s) e5 (Black thought 3 s); both players allow takebacks. */
-async function played() {
-    const ctx = setup({
-        g: makeGame({
-            id: 'g',
-            lastMoveAt: null,
-            startedAt: T,
-            timeControl: '1+2',
-            incrementMs: 2000,
-            whiteClockMs: 60_000,
-            blackClockMs: 60_000,
-        }),
-    });
-    await ctx.svc.setTakebackPref({ game_id: 'g', allow: true }, W);
-    await ctx.svc.setTakebackPref({ game_id: 'g', allow: true }, B);
+async function played(preferences = storedPrefs({ [W]: { allowTakebacks: true }, [B]: { allowTakebacks: true } })) {
+    const ctx = setup(
+        {
+            g: makeGame({
+                id: 'g',
+                lastMoveAt: null,
+                startedAt: T,
+                timeControl: '1+2',
+                incrementMs: 2000,
+                whiteClockMs: 60_000,
+                blackClockMs: 60_000,
+            }),
+        },
+        preferences,
+    );
     await move(ctx, W, 'e2', 'e4');
     ctx.advance(3000);
     await move(ctx, B, 'e7', 'e5');
@@ -64,24 +74,34 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-describe('takeback_pref', () => {
-    test('stores the player’s setting and tells the room; repeating it changes nothing', async () => {
+// F-166 (was: describe('takeback_pref'): the client declared its setting per game with
+// `takeback_pref`, stored in the Redis game and broadcast). The setting is the stored preference.
+describe('the stored "Allow takeback requests" decides [F-166]', () => {
+    test('there is no client declaration any more', async () => {
         const ctx = setup({ g: makeGame({ id: 'g' }) });
-        expect(await ctx.svc.setTakebackPref({ game_id: 'g', allow: true }, B)).toEqual({ ok: true });
-        expect(ctx.gameStore.state.get('g').takebackPrefs).toEqual({ black: true });
-        expect(ctx.emitter.sent).toEqual([
-            { room: 'game_g', event: 'takeback_prefs', args: [{ game_id: 'g', black: true }] },
-        ]);
-        expect(await ctx.svc.setTakebackPref({ game_id: 'g', allow: true }, B)).toEqual({ ok: true });
-        expect(ctx.emitter.sent).toHaveLength(1);
+        expect(ctx.svc.setTakebackPref).toBeUndefined();
     });
 
-    test('a spectator has no setting here', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g' }) });
-        expect(await ctx.svc.setTakebackPref({ game_id: 'g', allow: true }, 'stranger')).toEqual({
-            ok: false,
-            error: 'not_a_player',
-        });
+    test("the opponent's stored switch is read on the server for the request", async () => {
+        const prefs = storedPrefs({ [B]: { allowTakebacks: true } });
+        const ctx = await played(prefs);
+        expect(await ctx.svc.requestTakeback(G, W)).toEqual({ ok: true });
+        expect(prefs.gameplayOf).toHaveBeenLastCalledWith([W, B]);
+    });
+
+    test('my own switch does not let me ask: only the opponent’s counts', async () => {
+        const ctx = await played(storedPrefs({ [W]: { allowTakebacks: true } }));
+        expect(await ctx.svc.requestTakeback(G, W)).toEqual({ ok: false, error: 'takebacks_disabled' });
+    });
+
+    test('preferences that cannot be read count as not allowed (fail closed)', async () => {
+        const failing = {
+            gameplayOf: jest.fn(
+                async (ids) => new Map(ids.map((id) => [id, { premoves: false, allowTakebacks: false }])),
+            ),
+        };
+        const ctx = await played(failing);
+        expect(await ctx.svc.requestTakeback(G, W)).toEqual({ ok: false, error: 'takebacks_disabled' });
     });
 });
 
@@ -104,9 +124,9 @@ describe('takeback_request', () => {
         expect(ctx.emitter.sent).toEqual([]);
     });
 
+    // F-166 (was: Black declared `takeback_pref` false): Black's stored switch is off.
     test('the opponent has not allowed takebacks: takebacks_disabled', async () => {
-        const ctx = await played();
-        await ctx.svc.setTakebackPref({ game_id: 'g', allow: false }, B);
+        const ctx = await played(storedPrefs({ [W]: { allowTakebacks: true } }));
         expect(await ctx.svc.requestTakeback(G, W)).toEqual({ ok: false, error: 'takebacks_disabled' });
     });
 
@@ -117,7 +137,7 @@ describe('takeback_request', () => {
     });
 
     test('nothing of mine to undo; a second request while one stands; the cooldown', async () => {
-        const ctx = setup({ g: makeGame({ id: 'g', takebackPrefs: { white: true, black: true } }) });
+        const ctx = setup({ g: makeGame({ id: 'g' }) });
         expect(await ctx.svc.requestTakeback(G, W)).toEqual({ ok: false, error: 'takeback_nothing_to_undo' });
         await move(ctx, W, 'e2', 'e4');
         expect(await ctx.svc.requestTakeback(G, B)).toEqual({ ok: false, error: 'takeback_nothing_to_undo' });
@@ -238,6 +258,7 @@ describe('takeback_decline', () => {
     });
 });
 
+// F-166: "both settings" are the players' stored switches, read when the client joins.
 test('reconnect: game_state_sync carries the standing request and both settings', async () => {
     const ctx = await played();
     await ctx.svc.requestTakeback(G, W);

@@ -6,21 +6,27 @@
  * The queued move is private to its owner: it is acked, never broadcast, and only the
  * owner's own `game_state_sync` carries it. It is stored through `mutateGame`'s
  * compare-and-set and played (or dropped) by the move recorder in the same transition
- * that applies the opponent's move, so it is correct across replicas.
+ * that applies the opponent's move, so it is correct across replicas. A player whose stored
+ * "Premoves" switch is off cannot queue one (ADR F-166).
  */
 const { playerRejection } = require('../domain/moveAuthorization');
 const { premoveRejection, withPremove } = require('../domain/premove');
 const { colorOfPlayer } = require('../domain/result');
+const { switchesOf } = require('./gameplayPreferences');
 
 /**
  * @typedef {{ ok: boolean, error?: string }} AckResult
  * @typedef {{ game_id: string, from: string, to: string, promotion?: string }} PremoveRequest
  */
 
+/** The ack when the caller's stored "Premoves" switch is off (ADR F-166). */
+const PREMOVES_DISABLED = 'premoves_disabled';
+
 /**
- * @param {{ gameStore: { mutateGame: Function } }} deps
+ * @param {{ gameStore: { mutateGame: Function },
+ *   preferences?: Partial<import('./gameplayPreferences').GameplayPort> }} deps
  */
-function createPremoves({ gameStore }) {
+function createPremoves({ gameStore, preferences }) {
     /**
      * `premove_set`: queue (or replace) the caller's move for when the opponent has moved.
      * @param {PremoveRequest} request
@@ -28,6 +34,7 @@ function createPremoves({ gameStore }) {
      * @returns {Promise<AckResult>}
      */
     async function setPremove(request, userId) {
+        if (!(await switchesOf(preferences, userId)).premoves) return { ok: false, error: PREMOVES_DISABLED };
         /** @type {string | null} */
         let rejection = null;
         await gameStore.mutateGame(request.game_id, (/** @type {any} */ game) => {

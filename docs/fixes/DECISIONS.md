@@ -182,6 +182,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-165](#f-165) | An accepted draw offer is stored as `end_reason = 'agreement'` (CHECK extended); profile counts it as "Stalemate or draw" | STACK | DRAW-OFFER |
 | [F-152](#f-152) | Takebacks: undo own last move (two plies after a reply), opponent's per-game opt-in, per-ply clock snapshots, `moves` rows deleted | B4 | TAKEBACK |
 | [F-153](#f-153) | Premoves: one queued move per player in Redis, played in the opponent's move transaction at zero thinking time | B4 | PREMOVE |
+| [F-166](#f-166) | Takebacks and premoves follow the players' stored preferences, read by the game server; the per-game `takeback_pref` declaration is removed | STACK | GAME-PREFS |
 
 ---
 
@@ -3781,3 +3782,40 @@ move (PREMOVE).**
   on the other replica), frontend `features/game/premove.test.tsx` and the game page
   characterization.
 
+## F-166
+
+**The game server reads "Allow takeback requests" and "Premoves" from the stored preferences
+(stacking follow-up f; supersedes the per-game declaration of F-152).**
+
+- **Context.** B4 (F-152) kept settings in the browser, so each page declared "Allow takeback
+  requests" to the game server per game with a `takeback_pref` event, stored in the Redis game and
+  broadcast as `takeback_prefs`; premoves were only gated in the browser. B3 (F-146) then stored both
+  switches as typed columns (`user_preferences.allow_takebacks`, `.premoves`) that the game server can
+  read. A client-declared setting is client-trusted state (NODE-11): a page could claim anything.
+- **Decision.**
+  - `preferencesService.gameplayOf(ids)` reads both switches per user (no row: both off) and fails
+    closed (a read error: both off). `services/gameplayPreferences.js` turns that into what the game
+    actions need.
+  - `takeback_request`: the opponent's stored `allow_takebacks` is read before the request is decided
+    (`takebackRejection(game, color, at, opponentAllows)`); off → `takebacks_disabled`.
+  - `premove_set`: the caller's stored `premoves` is read first; off → `premoves_disabled` (the page
+    shows "Premoves are off in your Gameplay settings.").
+  - `join_game` sends each player's takeback switch in `game_state_sync` (`takebackPrefs`), so the
+    board offers a Takeback button only when the opponent allows it. A switch changed mid-game is
+    applied on the next request (the server decides); the button follows on the next join.
+  - Removed, no backward compatibility kept (the stack ships the server and the page together): the
+    `takeback_pref` event and schema, `setTakebackPref`, the `takeback_prefs` broadcast and its page
+    handler, `useTakebackPref`, and `takebackPrefs` in the Redis game state.
+  - Settings: the Gameplay card's two switches are play settings in the browser; `/api/settings`
+    now stores them only in the typed columns (a play update writes the columns and drops the keys
+    from the `play` JSON; the GET payload's play settings show the columns), so there is one copy.
+  - Unit tests that wire no preferences port keep takebacks and premoves allowed (as F-140 does for
+    spectators); production always passes the port.
+- Tests (old → new): server `takebackService.test.js` (`takeback_pref` describe → the stored switch
+  decides: read on the server, only the opponent's counts, fail closed), `takeback.test.js`
+  (`game.takebackPrefs` → `opponentAllows` argument), `premoveService.test.js` (new: off by default,
+  on, only the caller's), `preferencesService.test.js` (`gameplayOf`), `handlers`/`schemas` (no
+  `takeback_pref`), `game`/`sockets` (sync carries `takebackPrefs`), `chat`/`timers` (join only
+  reads `user_preferences`; still nothing written), two-instance takeback (no seeded prefs);
+  frontend `takeback.test.tsx` (no `useTakebackPref`, no `takeback_prefs` handler/ack),
+  `GamePage.test.tsx` (button from the sync; nothing declared), `api/settings.test.ts` (one copy).

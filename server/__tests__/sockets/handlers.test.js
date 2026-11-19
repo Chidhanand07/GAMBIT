@@ -39,7 +39,6 @@ function deps() {
             offerDraw: fn(),
             acceptDraw: fn(),
             declineDraw: fn(),
-            setTakebackPref: fn(),
             requestTakeback: fn(),
             acceptTakeback: fn(),
             declineTakeback: fn(),
@@ -87,7 +86,6 @@ test('registers the handshake middleware and exactly the supported events (no `a
             'draw_offer',
             'draw_accept',
             'draw_decline',
-            'takeback_pref',
             'takeback_request',
             'takeback_accept',
             'takeback_decline',
@@ -228,17 +226,18 @@ test('takeback events: the service gets the validated payload and the verified u
     const d = deps();
     const { handlers } = connect(d, 'u1');
     const ack = jest.fn();
-    await handlers.takeback_pref({ game_id: 'g', allow: true, user_id: 'victim' }, ack);
     await handlers.takeback_request({ game_id: 'g', plies: 9 }, ack);
     await handlers.takeback_accept({ game_id: 'g' }, ack);
     await handlers.takeback_decline({ game_id: 'g' }, ack);
-    await handlers.takeback_pref({ game_id: 'g', allow: 'yes' }, ack);
-    expect(d.gameService.setTakebackPref).toHaveBeenCalledWith({ game_id: 'g', allow: true }, 'u1');
+    await handlers.takeback_request({ plies: 1 }, ack);
     expect(d.gameService.requestTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
     expect(d.gameService.acceptTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
     expect(d.gameService.declineTakeback).toHaveBeenCalledWith({ game_id: 'g' }, 'u1');
-    expect(d.gameService.setTakebackPref).toHaveBeenCalledTimes(1);
+    expect(d.gameService.requestTakeback).toHaveBeenCalledTimes(1);
     expect(ack).toHaveBeenLastCalledWith({ ok: false, error: 'invalid_payload' });
+    // F-166 (was: `takeback_pref` declared the player's setting per game): no such event any more;
+    // the setting is the player's stored preference.
+    expect(handlers.takeback_pref).toBeUndefined();
 });
 
 test('premove events: squares and promotion only, for the verified user [PREMOVE]', async () => {

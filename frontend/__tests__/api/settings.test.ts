@@ -245,3 +245,30 @@ describe('gameplay switches for the game server (ADR F-146)', () => {
         expect(res.body.gameplay).toEqual({ premoves: true, allowTakebacks: false })
     })
 })
+
+describe('the Gameplay card writes the columns the game server reads [F-166]', () => {
+    test('play.premoves / play.allowTakebacks are stored in premoves / allow_takebacks, not in the play object', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('user_preferences', { data: [{ ...ROW, premoves: true, allow_takebacks: true }], error: null })
+        await patch({ play: { premoves: true, allowTakebacks: true, autoQueen: false } })
+        const update = db.op(db.callsFor('user_preferences')[0], 'update')![0] as Record<string, unknown>
+        expect(update).toMatchObject({ premoves: true, allow_takebacks: true })
+        expect(update.play).not.toHaveProperty('premoves')
+        expect(update.play).not.toHaveProperty('allowTakebacks')
+        expect(update.play).toMatchObject({ autoQueen: false })
+    })
+
+    test('the play settings show the stored columns, whatever an old play object says', async () => {
+        signInWithCookie(uid('me'))
+        db.queue('user_preferences', { data: { ...ROW, play: { premoves: false, allowTakebacks: false }, premoves: true, allow_takebacks: true }, error: null })
+        const { body } = await json(await GET())
+        expect(body.play).toMatchObject({ premoves: true, allowTakebacks: true })
+        expect(body.gameplay).toEqual({ premoves: true, allowTakebacks: true })
+    })
+
+    test('an explicit gameplay section in the same PATCH wins over the play copy', async () => {
+        signInWithCookie(uid('me'))
+        await patch({ play: { premoves: true }, gameplay: { premoves: false } })
+        expect(db.op(db.callsFor('user_preferences')[0], 'update')![0]).toMatchObject({ premoves: false })
+    })
+})

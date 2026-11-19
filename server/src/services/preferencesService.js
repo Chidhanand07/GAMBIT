@@ -73,6 +73,29 @@ async function spectatingAllowed(deps, playerIds) {
 }
 
 /**
+ * Each user's gameplay switches (premoves, allow_takebacks; ADR F-146, F-166). Fails closed:
+ * when the preferences cannot be read, every switch is off.
+ * @param {PreferencesDeps} deps
+ * @param {string[]} userIds
+ * @returns {Promise<Map<string, { premoves: boolean, allowTakebacks: boolean }>>}
+ */
+async function gameplayOf(deps, userIds) {
+    const ids = userIds.filter(Boolean);
+    try {
+        const prefs = await preferencesFor(deps, ids);
+        return new Map(
+            ids.map((id) => [
+                id,
+                { premoves: prefs.get(id)?.premoves === true, allowTakebacks: prefs.get(id)?.allow_takebacks === true },
+            ]),
+        );
+    } catch (e) {
+        log.error('[preferences] gameplay read failed:', /** @type {Error} */ (e).message);
+        return new Map(ids.map((id) => [id, { premoves: false, allowTakebacks: false }]));
+    }
+}
+
+/**
  * Insert one bell notification for `userId` if their `column` switch is on. Never throws.
  * @param {PreferencesDeps} deps
  * @param {{ userId: string, column: NotificationColumn, type: string, payload: object }} notification
@@ -108,6 +131,8 @@ function createPreferencesService(deps) {
         challengeRefusal: (fromId, toId) => challengeRefusalFor(deps, fromId, toId),
         /** @type {(playerIds: string[]) => Promise<boolean>} */
         spectatingAllowed: (playerIds) => spectatingAllowed(deps, playerIds),
+        /** @type {(userIds: string[]) => Promise<Map<string, { premoves: boolean, allowTakebacks: boolean }>>} */
+        gameplayOf: (userIds) => gameplayOf(deps, userIds),
         /** @type {(n: { userId: string, column: NotificationColumn, type: string, payload: object }) => Promise<boolean>} */
         notify: (notification) => notify(deps, notification),
     };

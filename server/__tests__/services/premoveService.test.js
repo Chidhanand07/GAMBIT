@@ -11,7 +11,7 @@ const T = 5_000_000;
 const W = 'white-user';
 const B = 'black-user';
 
-function setup(games = {}) {
+function setup(games = {}, preferences = undefined) {
     const gameStore = fakeGameStore(games);
     const emitter = fakeEmitter();
     const sessions = createSessionRegistry();
@@ -24,17 +24,20 @@ function setup(games = {}) {
     const movesRepo = { insert: jest.fn(() => result()), deleteAfter: jest.fn(() => result()) };
     const ratingService = { processGameEnd: jest.fn(async () => null) };
     const reviewService = { triggerGameReview: jest.fn() };
-    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter };
+    const deps = { gameStore, gamesRepo, movesRepo, ratingService, reviewService, sessions, emitter, preferences };
     let now = T;
     const svc = createGameService({ ...deps, now: () => now });
     return { svc, ...deps, advance: (ms) => (now += ms) };
 }
 
 /** A 1+2 game where White has played 1. e4 at T; Black to move. */
-async function afterE4() {
-    const ctx = setup({
-        g: makeGame({ id: 'g', timeControl: '1+2', incrementMs: 2000, whiteClockMs: 60_000, blackClockMs: 60_000 }),
-    });
+async function afterE4(preferences = undefined) {
+    const ctx = setup(
+        {
+            g: makeGame({ id: 'g', timeControl: '1+2', incrementMs: 2000, whiteClockMs: 60_000, blackClockMs: 60_000 }),
+        },
+        preferences,
+    );
     await ctx.svc.makeMove({ game_id: 'g', from: 'e2', to: 'e4' }, W, fakeClient());
     ctx.emitter.sent.length = 0;
     return ctx;
@@ -49,6 +52,36 @@ beforeEach(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
+
+// F-166: the stored "Premoves" switch is read on the server; a client cannot queue one with it off.
+describe('the stored "Premoves" switch [F-166]', () => {
+    const port = (byUser) => ({
+        spectatingAllowed: jest.fn(async () => true),
+        notify: jest.fn(async () => false),
+        gameplayOf: jest.fn(
+            async (ids) => new Map(ids.map((id) => [id, { premoves: false, allowTakebacks: false, ...byUser[id] }])),
+        ),
+    });
+
+    test('off (the default): premoves_disabled, nothing stored', async () => {
+        const prefs = port({});
+        const ctx = await afterE4(prefs);
+        expect(await premove(ctx, W, 'g1', 'f3')).toEqual({ ok: false, error: 'premoves_disabled' });
+        expect(ctx.gameStore.state.get('g').premove ?? null).toBeNull();
+        expect(prefs.gameplayOf).toHaveBeenCalledWith([W]);
+    });
+
+    test('on: queued as before', async () => {
+        const ctx = await afterE4(port({ [W]: { premoves: true } }));
+        expect(await premove(ctx, W, 'g1', 'f3')).toEqual({ ok: true });
+        expect(ctx.gameStore.state.get('g').premove).toEqual({ by: 'white', from: 'g1', to: 'f3' });
+    });
+
+    test("the opponent's switch does not count, only the caller's", async () => {
+        const ctx = await afterE4(port({ [B]: { premoves: true } }));
+        expect(await premove(ctx, W, 'g1', 'f3')).toEqual({ ok: false, error: 'premoves_disabled' });
+    });
+});
 
 describe('premove_set / premove_cancel', () => {
     test('stored for the owner, never broadcast', async () => {
@@ -161,7 +194,6 @@ describe('the premove is played right after the opponent’s move', () => {
 
     test('a takeback drops the premove', async () => {
         const ctx = await afterE4();
-        ctx.gameStore.state.get('g').takebackPrefs = { white: true, black: true };
         await move(ctx, B, 'e7', 'e5');
         await premove(ctx, B, 'g8', 'f6');
         await ctx.svc.requestTakeback({ game_id: 'g' }, B);

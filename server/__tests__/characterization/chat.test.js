@@ -68,7 +68,8 @@ describe('send_message', () => {
         });
         await sleep(50);
         expect(got).toEqual([]);
-        expect(supabase.calls).toEqual([]);
+        // F-166 (was: no call at all): joining reads the players' stored gameplay switches; nothing is written.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
     });
 
     test.each([
@@ -84,7 +85,8 @@ describe('send_message', () => {
         });
         await sleep(50);
         expect(got).toEqual([]);
-        expect(supabase.calls).toEqual([]);
+        // F-166 (was: no call at all): joining reads the players' stored gameplay switches; nothing is written.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
     });
 
     test('spectators in the room receive chat but cannot send it', async () => {
@@ -118,7 +120,8 @@ describe('send_message', () => {
         });
         await sleep(50);
         expect(got).toEqual([]);
-        expect(supabase.calls).toEqual([]);
+        // F-166 (was: no call at all): joining reads the players' stored gameplay switches; nothing is written.
+        expect(supabase.calls.filter((c) => c.table !== 'user_preferences')).toEqual([]);
     });
 });
 

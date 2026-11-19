@@ -18,7 +18,6 @@ const { wrap } = require('../wrap');
  * @property {(data: any, userId: string) => Promise<unknown>} offerDraw
  * @property {(data: any, userId: string) => Promise<unknown>} acceptDraw
  * @property {(data: any, userId: string) => Promise<unknown>} declineDraw
- * @property {(data: any, userId: string) => Promise<unknown>} setTakebackPref
  * @property {(data: any, userId: string) => Promise<unknown>} requestTakeback
  * @property {(data: any, userId: string) => Promise<unknown>} acceptTakeback
  * @property {(data: any, userId: string) => Promise<unknown>} declineTakeback
@@ -43,7 +42,6 @@ function registerGameHandlers(socket, client, { gameService, log }) {
         draw_offer: (data) => gameService.offerDraw(data, userId),
         draw_accept: (data) => gameService.acceptDraw(data, userId),
         draw_decline: (data) => gameService.declineDraw(data, userId),
-        takeback_pref: (data) => gameService.setTakebackPref(data, userId),
         takeback_request: (data) => gameService.requestTakeback(data, userId),
         takeback_accept: (data) => gameService.acceptTakeback(data, userId),
         takeback_decline: (data) => gameService.declineTakeback(data, userId),

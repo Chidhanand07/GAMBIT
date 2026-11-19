@@ -27,7 +27,6 @@ test('there is a schema for every client → server event (and none for `authent
             'draw_offer',
             'draw_accept',
             'draw_decline',
-            'takeback_pref',
             'takeback_request',
             'takeback_accept',
             'takeback_decline',

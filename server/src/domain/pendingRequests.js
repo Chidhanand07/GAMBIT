@@ -30,7 +30,8 @@ function clearedRequests(game, keys = PENDING_KEYS) {
 /**
  * The standing requests a (re)joining client must see in `game_state_sync`, each only
  * when there is one (an older client ignores the extra keys): the draw offer and each
- * side's last offer, the takeback request and each player's takeback setting.
+ * side's last offer, and the takeback request (each player's takeback setting comes from
+ * their stored preferences, ADR F-166).
  * @param {any} game
  */
 function requestsView(game) {
@@ -38,7 +39,6 @@ function requestsView(game) {
         ...(game.drawOffer ? { drawOffer: { by: game.drawOffer.by } } : {}),
         ...(game.lastDrawOfferPly ? { lastDrawOfferPly: game.lastDrawOfferPly } : {}),
         ...(game.takeback ? { takeback: { by: game.takeback.by, plies: game.takeback.plies } } : {}),
-        ...(game.takebackPrefs ? { takebackPrefs: game.takebackPrefs } : {}),
     };
 }
 

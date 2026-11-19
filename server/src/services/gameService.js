@@ -22,6 +22,7 @@ const { createGameFinalizer } = require('./gameFinalizer');
 const { createPremoves } = require('./premoveService');
 const { createTakebacks } = require('./takebackService');
 const { sendState } = require('./gameStateSync');
+const { syncedTakebackPrefs } = require('./gameplayPreferences');
 const { createMoveRecorder } = require('./moveRecorder');
 const { log } = require('../observability/log');
 
@@ -59,8 +60,9 @@ async function spectatorAllowed(ctx, game) {
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
  * @property {SpectatorsPort} [spectators] live spectator counts (F-130); without it none are sent
  * @property {() => number} [now]
- * @property {PreferencesPort} [preferences] the players' "Allow spectators" and notification switches
- *   (ADR F-140); index.js always passes it. Without it everyone may watch and nobody is notified.
+ * @property {PreferencesPort} [preferences] the players' "Allow spectators", notification and gameplay
+ *   switches (ADR F-140, F-166); index.js always passes it. Without it everyone may watch, nobody is
+ *   notified, and takebacks and premoves are allowed.
  */
 
 /**
@@ -68,6 +70,7 @@ async function spectatorAllowed(ctx, game) {
  * @property {(playerIds: string[]) => Promise<boolean>} spectatingAllowed
  * @property {(n: { userId: string, column: import('../domain/preferences').NotificationColumn,
  *   type: string, payload: object }) => Promise<boolean>} notify
+ * @property {(userIds: string[]) => Promise<Map<string, { premoves: boolean, allowTakebacks: boolean }>>} [gameplayOf]
  */
 
 /**
@@ -137,10 +140,10 @@ async function joinGame(ctx, gameId, client, userId) {
         // Visible to every instance: is any socket of this player still at this board?
         client.join(playerRoom(gameId, userId));
     }
-    sendState(ctx.now(), game, client, {
-        viewerId: userId,
-        spectators: await viewerCount(ctx, game, userId, client.id),
-    });
+    const spectators = await viewerCount(ctx, game, userId, client.id);
+    // Each player's stored "Allow takeback requests", so the board knows whether to offer one (F-166).
+    const takebackPrefs = await syncedTakebackPrefs(ctx.preferences, game);
+    sendState(ctx.now(), game, client, { viewerId: userId, spectators, takebackPrefs });
 }
 
 /**

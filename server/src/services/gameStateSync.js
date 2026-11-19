@@ -20,10 +20,11 @@ const { resultLabel } = require('../domain/result');
  * @param {number} now
  * @param {any} game
  * @param {ClientPort} client
- * @param {{ viewerId?: string, spectators?: number }} [viewer] the connection's verified user, and
- *   how many watch when known (F-130)
+ * @param {{ viewerId?: string, spectators?: number, takebackPrefs?: Record<'white' | 'black', boolean> }} [viewer]
+ *   the connection's verified user, how many watch when known (F-130), and the players' stored
+ *   takeback switches (F-166)
  */
-function sendState(now, game, client, { viewerId, spectators } = {}) {
+function sendState(now, game, client, { viewerId, spectators, takebackPrefs } = {}) {
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
         client.emit('game_end', {
@@ -50,6 +51,7 @@ function sendState(now, game, client, { viewerId, spectators } = {}) {
         blackId: game.blackId,
         ...(spectators === undefined ? {} : { spectators }),
         ...requestsView(game),
+        ...(takebackPrefs ? { takebackPrefs } : {}),
         ...premoveView(game, viewerId),
     });
 }

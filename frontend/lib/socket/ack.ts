@@ -46,6 +46,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
     takeback_nothing_to_undo: 'You have no move to take back yet.',
     premove_your_turn: 'It is your turn: make the move now.',
     illegal_premove: 'That premove is not possible.',
+    premoves_disabled: 'Premoves are off in your Gameplay settings.',
     [ACK_TIMEOUT_CODE]: 'The server did not answer. Check your connection and try again.',
 };
 
@@ -93,7 +94,6 @@ export const ACK_POLICY: Readonly<Record<string, RetryRule>> = {
     draw_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
     takeback_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
     // Declaring the same setting twice stores it once.
-    takeback_pref: { retryOnce: true },
     // Cancelling twice cancels once.
     premove_cancel: { retryOnce: true },
     // Not idempotent: a repeat would be a second move, message or notification, or would be

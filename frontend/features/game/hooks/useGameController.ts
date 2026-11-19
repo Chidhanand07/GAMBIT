@@ -19,7 +19,6 @@ import { useGameSocket } from './useGameSocket';
 import { useMoveHistory } from './useMoveHistory';
 import { useOpponentDisconnect } from './useOpponentDisconnect';
 import { useResignEstimate } from './useResignEstimate';
-import { useTakebackPref } from './useTakebackPref';
 
 function useGameRefs() {
     return {
@@ -36,7 +35,7 @@ export function useGameController(gameId: string) {
     const socket = useSocket();
     const { profile: myProfile } = useProfile();
     const { toast } = useToast();
-    const { autoQueen, confirmResignDraw, allowTakebacks, premoves } = useUserSettings().settings;
+    const { autoQueen, confirmResignDraw, premoves } = useUserSettings().settings;
     // Settings → "Move sounds" (F-102): the game page has no sound control of its own.
     const soundOn = useBoardPrefs().sound;
     const notify = (message: string) => toast(message, 'error');
@@ -56,7 +55,6 @@ export function useGameController(gameId: string) {
         ...{ socket, myProfile, gameId, myColor, soundOn, router, dispatch },
         ...{ chessRef, clockSyncedRef, lastProcessedFenRef, markDisconnected, markReconnected, inform },
     });
-    useTakebackPref({ socket, gameId, myColor, allow: allowTakebacks, connected: state.connected, over: !!gameOver });
     useGameClock({
         fen: state.fen,
         gameOver,

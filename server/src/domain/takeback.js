@@ -11,7 +11,6 @@
  * State, inside the Redis game JSON:
  * - `takeback: { by, plies, ply, at } | null`: the one standing request (`ply`: moves played then);
  * - `lastTakebackAt: { white?, black? }`: when each side last asked (the cooldown);
- * - `takebackPrefs: { white?, black? }`: whether each player lets the opponent ask (their setting);
  * - `clockLog: [{ whiteMs, blackMs }]`: both clocks right after each ply, kept in step with
  *   `moveLog`, so a takeback restores the clocks of the position it returns to.
  */
@@ -19,7 +18,7 @@ const { activeSideFromFen } = require('./gameState');
 const { clearedRequests, ALL_REQUEST_KEYS } = require('./pendingRequests');
 const { clocksAt } = require('./clock');
 const { initialClockMs } = require('./timeControl');
-const { opponentColor, sideToColor } = require('./result');
+const { sideToColor } = require('./result');
 
 /** Ack codes of the takeback events. */
 const TAKEBACK_REJECTION = Object.freeze({
@@ -57,11 +56,12 @@ function pliesToUndo(game, color) {
  * @param {any} game an active game the caller plays in
  * @param {Color} color
  * @param {number} at
+ * @param {boolean} opponentAllows the opponent's stored "Allow takeback requests" (ADR F-166)
  * @returns {string | null}
  */
-function takebackRejection(game, color, at) {
+function takebackRejection(game, color, at, opponentAllows) {
     if (game.takeback) return TAKEBACK_REJECTION.PENDING;
-    if (game.takebackPrefs?.[opponentColor(color)] !== true) return TAKEBACK_REJECTION.DISABLED;
+    if (!opponentAllows) return TAKEBACK_REJECTION.DISABLED;
     const last = game.lastTakebackAt?.[color];
     if (typeof last === 'number' && at - last < TAKEBACK_COOLDOWN_MS) return TAKEBACK_REJECTION.COOLDOWN;
     if (pliesToUndo(game, color) > pliesOf(game)) return TAKEBACK_REJECTION.NOTHING_TO_UNDO;
