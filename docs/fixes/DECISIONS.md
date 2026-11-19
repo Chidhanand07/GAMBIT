@@ -133,6 +133,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-145](#f-145) | Delete account: re-authenticate, ban, one SQL transaction (games anonymised to NULL), then the auth user | B3 | DELETE-ACCOUNT |
 | [F-146](#f-146) | `premoves` / `allow_takebacks` stored as typed preference columns for the game server | B3 | SETTINGS-PREFS |
 | [F-147](#f-147) | Piece sets Gambit / Classic / Line art: SVG artwork and the mockup's Unicode glyphs, via a piece-set context | B3 | PIECE-SETS |
+| [F-163](#f-163) | One leaderboard: the opt-out view carries B1's columns and `leaderboard_rank` counts only listed players | STACK | LEADERBOARD-AGREE |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3528,3 +3529,33 @@ context.** (Track B3, item 5; SOLID-01.)
   44.75px preview square at the board's 86% piece size. `pieceSet` is part of the play preferences
   (`parseSettings`), so it is stored on the server with them (F-140).
 
+## F-163
+
+**The leaderboard list, its count and every rank agree on who is listed (stacking follow-up d).**
+
+- **Context.** B1 (F-125) added `profiles.rating_all`, the per-pool `rated_games_*` counters and
+  `public.leaderboard_rank()`, all over `public.profiles`. B3 (F-140) made the list read
+  `public.leaderboard_profiles`, a view that leaves out players who turned "Show on leaderboard" off,
+  but the view had none of B1's columns, and the rank function still counted hidden players: an
+  opted-out player kept a rank (shown on the leaderboard's "Your standing" and the profile's "Top N")
+  and pushed everyone below them down a place.
+- **Decision.** Migration `20261118300300_leaderboard_opt_out_ranking.sql`:
+  1. `leaderboard_profiles` gains `rating_all` and `rated_games_{bullet,blitz,rapid,classical}`
+     (appended, so `CREATE OR REPLACE VIEW` keeps the existing columns; grants re-stated:
+     service_role SELECT only). The web app's list and its `X-Total-Count` read the view (B3's
+     intent, kept when B3 was stacked on B1: `lib/server/leaderboard.ts` `LEADERBOARD_SOURCE`).
+  2. `leaderboard_rank` reads the player and counts the players ahead in the view. A player not in
+     it (opted out, or unknown) gets NULL. Same signature, STABLE, SECURITY INVOKER, service_role
+     only.
+- **What an opted-out player sees.** The leaderboard does not list them; "Your standing" shows the
+  design's no-rank state ("—") with their rating; their profile earns no "Top N" (F-160). The
+  Settings privacy preview now asks the server for the rank (`GET /api/leaderboard/me`, any place,
+  not only the top 50) and shows "#N · rating" or, without a rank, "Listed · rating"; with the
+  switch off it shows "Not listed" as before.
+- **Rollout.** Apply the migration before the web app of this stack (the list selects the new view
+  columns). Rollback: drop and re-create the view from `20261118300000` (columns cannot be dropped by
+  CREATE OR REPLACE), re-grant, and re-create `leaderboard_rank` from `20261118100300`.
+- Tests: pgTAP `083_leaderboard_opt_out_ranking` (view columns incl. everything the list selects,
+  grants, opted-out player neither listed nor ranked nor counted, opting back in, rank = list place);
+  `accountTabs.test.tsx` (preview rank from `/api/leaderboard/me`, was the top-50 list; beyond 50; no
+  rank); `api/misc.test.ts` (list and count read `leaderboard_profiles`).

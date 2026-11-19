@@ -1,23 +1,24 @@
 import { useEffect, useState } from 'react';
-import { fetchLeaderboard } from '@/lib/api/leaderboard';
+import { fetchViewerStanding } from '@/lib/api/leaderboard';
 
 /**
- * The 1-based place of `username` on the rapid leaderboard (the board the privacy preview
- * shows), or null when they are not in the top 50 or it could not be loaded.
+ * The signed-in player's place on the rapid leaderboard (the board the privacy preview shows),
+ * from the server's rank (GET /api/leaderboard/me, any place, F-125). Null while loading, when
+ * it could not be read, or when the player is not on the leaderboard (no rapid rating, or
+ * "Show on leaderboard" is off, F-163).
  */
-export function useLeaderboardRank(username: string): number | null {
+export function useLeaderboardRank(): number | null {
     const [rank, setRank] = useState<number | null>(null);
     useEffect(() => {
         let current = true;
-        fetchLeaderboard('rating_rapid')
-            .then(({ players }) => {
-                const index = Array.isArray(players) ? players.findIndex((p) => p?.username === username) : -1;
-                if (current) setRank(index >= 0 ? index + 1 : null);
+        fetchViewerStanding('rating_rapid')
+            .then((standing) => {
+                if (current) setRank(standing?.rank ?? null);
             })
             .catch(() => {});
         return () => {
             current = false;
         };
-    }, [username]);
+    }, []);
     return rank;
 }

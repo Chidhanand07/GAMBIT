@@ -29,13 +29,16 @@ const reply = (status: number, body: unknown) => ({ ok: status < 300, status, he
 let fetchMock: jest.Mock
 let emailReply = reply(200, { pending: true, email: 'new@example.com' })
 let deleteReply = reply(200, { deleted: true })
+let standingReply = reply(200, { rank: 2, rating: 1025, pool: 'rapid' })
 beforeEach(() => {
     deleteReply = reply(200, { deleted: true })
     push.mockClear()
     authUser = { email: 'me@example.com', new_email: null }
     emailReply = reply(200, { pending: true, email: 'new@example.com' })
+    standingReply = reply(200, { rank: 2, rating: 1025, pool: 'rapid' })
     fetchMock = jest.fn(async (url: string) =>
-        url === '/api/account/email' ? emailReply : url === '/api/account/delete' ? deleteReply : reply(200, [{ username: 'x' }, { username: 'me1' }]))
+        url === '/api/account/email' ? emailReply : url === '/api/account/delete' ? deleteReply
+            : url === '/api/leaderboard/me?field=rating_rapid' ? standingReply : reply(200, [{ username: 'x' }, { username: 'me1' }]))
     ;(global as any).fetch = fetchMock
     window.history.replaceState(null, '', '/settings')
 })
@@ -105,7 +108,8 @@ describe('Privacy', () => {
         expect(within(preview).getByText('Maverick')).toBeInTheDocument()
         expect(within(preview).getByText('Online')).toBeInTheDocument()
         expect(within(preview).getByText('#2 · 1025')).toBeInTheDocument()
-        expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard?field=rating_rapid')
+        // F-163 (was: the place in GET /api/leaderboard?field=rating_rapid's top 50): the server's rank.
+        expect(fetchMock).toHaveBeenCalledWith('/api/leaderboard/me?field=rating_rapid')
         fireEvent.click(screen.getByRole('button', { name: 'Friends' }))
         fireEvent.click(screen.getByRole('switch', { name: 'Show on leaderboard' }))
         fireEvent.click(screen.getByRole('switch', { name: 'Allow spectators' }))
@@ -114,6 +118,22 @@ describe('Privacy', () => {
         expect(within(preview).getByText('Not listed')).toBeInTheDocument()
         expect(within(preview).getByText('Spectating off')).toBeInTheDocument()
         expect(within(preview).getByText('Last seen recently')).toBeInTheDocument()
+    })
+
+    test('the place comes from the server rank: beyond the top 50, or none when not listed [F-163]', async () => {
+        standingReply = reply(200, { rank: 73, rating: 1025, pool: 'rapid' })
+        open('Privacy')
+        await flush()
+        const preview = screen.getByRole('complementary', { name: 'Live preview' })
+        expect(within(preview).getByText('#73 · 1025')).toBeInTheDocument()
+    })
+
+    test('no server rank (opted out, or not rated in rapid): the preview names no place [F-163]', async () => {
+        standingReply = reply(200, { rank: null, rating: 1025, pool: 'rapid' })
+        open('Privacy')
+        await flush()
+        const preview = screen.getByRole('complementary', { name: 'Live preview' })
+        expect(within(preview).getByText('Listed · 1025')).toBeInTheDocument()
     })
 
     test('a failed save is reported and nothing changes app-wide', async () => {
