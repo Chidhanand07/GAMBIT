@@ -159,6 +159,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-132](#f-132) | The lobby's rating range is the matchmaker's own window, pushed when it widens | B2 | LIVE-3 |
 | [F-133](#f-133) | The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service | B2 | LIVE-4 |
 | [F-134](#f-134) | `/analysis?game=<id>`: a finished game's moves and stored review, private games for players only | B2 | LIVE-5 |
+| [F-161](#f-161) | The Overview's Away slot (F-104) is fed by presence's away set; the profile-only `friendStatus` goes | STACK | AWAY-WIRING |
 
 ---
 
@@ -3271,3 +3272,24 @@ their owner (B1 item 8).**
   DTO shape) and `features/analysis/gameReview.test.tsx` (moves on the board, accuracies, error, no fetch
   without `?game=`).
 
+## F-161
+
+**Friends' "Away" comes from presence everywhere a friend's status is shown (stacking follow-up b).**
+
+- **Context.** Parity fixes (F-104) gave the profile Overview's Friends card an optional `awayIds` prop
+  and a `friendStatus(id, onlineIds, awayIds?)` helper, left empty until presence could tell idleness.
+  B2 (F-131) made every tab report `online`/`away` and PresenceProvider expose `awayUserIds`, and wired
+  the lobby friend list and the Overview card through `presenceStatusOf(id, { present, away })`.
+- **Decision.** When B2 was stacked on the parity fixes the two met in the same files. The stack keeps
+  B2's single model (PresenceProvider sets → `presenceStatusOf` → `PRESENCE_LABELS`) and joins it with
+  the parity fixes' guest presence (a signed-out viewer listens to the channel without joining it, so
+  `onlineCount` may be 0 for a guest, F-104). The F-104 slot is therefore fed: the Overview card takes
+  the presence sets, and the now-unused profile `friendStatus` helper is removed; its cases move to the
+  presence tests unchanged.
+- **Where a status shows.** Lobby friend list (Online · Away · Offline, Away challengeable) and the
+  profile Overview's Friends card (green, amber, grey dot). The profile Friends tab shows names and
+  ratings only (Profile.dc.html), and the hero's "Online" pill marks any present user, away or not
+  (the mockup has no away hero state).
+- Tests: `ProfilePage.test.tsx` ("the Overview friends card shows Online, Away and Offline"),
+  `OverviewFriends.test.tsx` and `lobbyModel.test.ts` (presence sets instead of id sets),
+  `presenceStatus.test.ts` (the former `friendStatus` cases).
