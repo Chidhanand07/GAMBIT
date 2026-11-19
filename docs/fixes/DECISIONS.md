@@ -129,6 +129,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
 | [F-113](#f-113) | Intro splash: composited wordmark, Escape, 44 px Replay hit area | v2 | C |
 | [F-114](#f-114) | Landing metadata: canonical, share images, icons, robots, sitemap, JSON-LD from NEXT_PUBLIC_SITE_URL | v2 | C |
+| [F-116](#f-116) | Bundle analyzer behind ANALYZE=true (webpack build) | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
 
@@ -2739,3 +2740,16 @@ the Dependabot part of F-057).**
     (`lib/seo/publicRoutes.ts`).
   - JSON-LD: a `WebSite` and a free `SoftwareApplication` (GameApplication, Chess, web browser),
     serialised with `<`, `>`, `&`, U+2028 and U+2029 escaped so no value can end the script element.
+
+## F-116
+
+**Bundle analyzer behind `ANALYZE=true` (webpack build only).**
+
+- **Decision.** `@next/bundle-analyzer` is a devDependency; `npm run analyze` runs
+  `ANALYZE=true next build --webpack` and writes `.next/analyze/{client,nodejs,edge}.html`.
+  `next.config.js` requires the analyzer only when `ANALYZE=true`, so a production install without
+  dev dependencies never loads it. Webpack because the analyzer is a webpack plugin; Turbopack's
+  `next experimental-analyze` is the alternative.
+- **Result for `/`.** Initial chunks: Next/React runtime, 8 KB gz of shared app UI (header, nav,
+  icons), 7 KB tailwind-merge, 6 KB layout providers and 1 KB for the page (the splash). No
+  Supabase, socket.io, chess.js or audio.

@@ -15,7 +15,9 @@
     "test:coverage": "jest --coverage",
     "typecheck": "tsc --noEmit",
     "lint:baseline": "node ../scripts/lint-baseline/ratchet.js frontend",
-    "format:check": "prettier --check --no-error-on-unmatched-pattern \"features/**/*.{ts,tsx}\" \"types/**/*.ts\" \"lib/chess/**/*.ts\" \"lib/server/**/*.ts\" \"lib/api/**/*.ts\" \"lib/socket/**/*.ts\""
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"features/**/*.{ts,tsx}\" \"types/**/*.ts\" \"lib/chess/**/*.ts\" \"lib/server/**/*.ts\" \"lib/api/**/*.ts\" \"lib/socket/**/*.ts\"",
+    "analyze": "ANALYZE=true next build --webpack",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -36,7 +38,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@next/bundle-analyzer": "^16.4.6",
     "@next/eslint-plugin-next": "^16.4.6",
+    "@playwright/test": "^1.65.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
