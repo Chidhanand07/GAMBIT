@@ -29,6 +29,7 @@ const COLUMNS: { [S in Section]: Record<keyof AccountPreferences[S], string> } =
         allowSpectators: 'allow_spectators',
     },
     security: { emailOnNewSignIn: 'email_on_new_sign_in' },
+    gameplay: { premoves: 'premoves', allowTakebacks: 'allow_takebacks' },
 };
 
 const SECTIONS = Object.keys(COLUMNS) as Section[];
@@ -40,6 +41,7 @@ export interface PreferencesPatch {
     notifications?: Partial<AccountPreferences['notifications']>;
     privacy?: Partial<AccountPreferences['privacy']>;
     security?: Partial<AccountPreferences['security']>;
+    gameplay?: Partial<AccountPreferences['gameplay']>;
 }
 
 /** A row (or no row) as the API payload; no row = the defaults, `stored: false`. */

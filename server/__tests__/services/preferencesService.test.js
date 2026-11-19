@@ -279,3 +279,10 @@ describe('"Your turn (daily games)" notifications', () => {
         expect(off.notificationsRepo.insert).not.toHaveBeenCalled();
     });
 });
+
+describe('gameplay switches (ADR F-146)', () => {
+    test('premoves and allow_takebacks default off and are read from the row', () => {
+        expect(preferencesOf(null)).toMatchObject({ premoves: false, allow_takebacks: false });
+        expect(preferencesOf({ premoves: true, allow_takebacks: true })).toMatchObject({ premoves: true, allow_takebacks: true });
+    });
+});

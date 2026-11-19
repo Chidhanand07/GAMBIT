@@ -172,6 +172,7 @@ export const schemas = {
             })
             .optional(),
         security: z.object({ emailOnNewSignIn: optionalFlag }).optional(),
+        gameplay: z.object({ premoves: optionalFlag, allowTakebacks: optionalFlag }).optional(),
     }),
     gamePatch: z.object({ draw_offer: z.boolean().optional(), rematch_requested: z.boolean().optional() }),
     computerMove: z.object({

@@ -73,6 +73,7 @@ On a fresh project nothing is deployed yet, so all migrations can be applied tog
    | 15 | `20261114200000_profiles_revoke_service_role_update.sql` | `service_role` loses `UPDATE` on `profiles` |
    | 16 | `20261118300000_user_preferences.sql` | `user_preferences` (owner-only RLS; `service_role` reads only) and the `leaderboard_profiles` view (ADR F-140) |
    | 17 | `20261118300100_delete_account.sql` | `public.delete_account(uuid)`: a user's data removed atomically, finished games anonymised (service role only, ADR F-145) |
+   | 18 | `20261118300200_user_preferences_gameplay.sql` | `user_preferences.premoves` / `allow_takebacks` for the game server (ADR F-146) |
 
    On an existing project, follow the rollout rules in **Deploy order** above.
 3. If you apply files by hand and use the Supabase CLI history, record each one:

@@ -131,6 +131,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-143](#f-143) | Change e-mail: `updateUser` on the session client, token-hash confirm route, strict rate limit | B3 | CHANGE-EMAIL |
 | [F-144](#f-144) | Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced on account changes and at sign-in | B3 | TWO-FACTOR |
 | [F-145](#f-145) | Delete account: re-authenticate, ban, one SQL transaction (games anonymised to NULL), then the auth user | B3 | DELETE-ACCOUNT |
+| [F-146](#f-146) | `premoves` / `allow_takebacks` stored as typed preference columns for the game server | B3 | SETTINGS-PREFS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3487,4 +3488,19 @@ SEC-04, SEC-01, NODE-12.)
 - **Guard.** pgTAP 081 fails when any foreign key to `profiles` neither cascades nor is one of the
   four handled columns, so a table added later (e.g. by another track) must be added to the function
   before it ships.
+
+## F-146
+
+**`premoves` and `allow_takebacks` are typed `user_preferences` columns (default off), in the
+settings DTO as `gameplay: { premoves, allowTakebacks }`.**
+
+- **Context.** The game-actions track adds the Gameplay rows "Premoves" and "Allow takeback
+  requests" as browser preferences. Takeback requests and premoves involve the other player, so
+  the game server must read the player's choice (NODE-11: it cannot trust a client's claim).
+- **Decision.** Migration `20261118300200_user_preferences_gameplay.sql` adds both columns with the
+  same privileges as the other preferences (owner insert/update under RLS, `service_role` SELECT
+  only); pgTAP 082. `PATCH /api/settings` accepts `gameplay`, `GET` returns it, and the game
+  server's `preferencesOf` / `PREFERENCE_COLUMNS` already read them (nothing enforces them yet).
+  When that track's rows land, they save through `saveAccount` (section `gameplay`) instead of
+  the `play` blob.
 

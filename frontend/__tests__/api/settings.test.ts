@@ -234,3 +234,14 @@ describe('notifications: "Friend requests" (POST /api/friends/request)', () => {
         expect(db.callsFor('notifications')).toHaveLength(0)
     })
 })
+
+describe('gameplay switches for the game server (ADR F-146)', () => {
+    test('premoves / allowTakebacks: off by default, stored as their own columns', async () => {
+        signInWithCookie(uid('me'))
+        expect((await json(await GET())).body.gameplay).toEqual({ premoves: false, allowTakebacks: false })
+        db.queue('user_preferences', { data: [{ ...ROW, premoves: true, allow_takebacks: false }], error: null })
+        const res = await json(await patch({ gameplay: { premoves: true } }))
+        expect(db.op(db.callsFor('user_preferences')[1], 'update')![0]).toEqual({ premoves: true })
+        expect(res.body.gameplay).toEqual({ premoves: true, allowTakebacks: false })
+    })
+})

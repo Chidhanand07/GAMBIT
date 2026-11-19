@@ -230,7 +230,7 @@ describe('preferencesRepository [F-140]', () => {
         const { table, ops } = await run(createPreferencesRepository(supabase).findByUserIds(['a', 'b']));
         expect(table).toBe('user_preferences');
         expect(ops).toEqual([
-            ['select', 'user_id, challenge_policy, allow_spectators, notify_challenges, notify_game_results, notify_your_turn'],
+            ['select', 'user_id, challenge_policy, allow_spectators, notify_challenges, notify_game_results, notify_your_turn, premoves, allow_takebacks'],
             ['in', 'user_id', ['a', 'b']],
         ]);
     });

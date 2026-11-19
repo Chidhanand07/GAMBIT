@@ -37,10 +37,20 @@ export interface SecurityPrefs {
     emailOnNewSignIn: boolean;
 }
 
+/**
+ * Gameplay switches the game server enforces (ADR F-146). Their features (and Settings rows) come
+ * with the game-actions track; stored here so its server can read the player's choice.
+ */
+export interface GameplayPrefs {
+    premoves: boolean;
+    allowTakebacks: boolean;
+}
+
 export interface AccountPreferences {
     notifications: NotificationPrefs;
     privacy: PrivacyPrefs;
     security: SecurityPrefs;
+    gameplay: GameplayPrefs;
 }
 
 /** GET/PATCH /api/settings body: `stored` is false while the user has never saved. */

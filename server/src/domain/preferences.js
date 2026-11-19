@@ -16,6 +16,8 @@ const { timeControlOf } = require('./timeControl');
  * @property {boolean} notify_challenges
  * @property {boolean} notify_game_results
  * @property {boolean} notify_your_turn
+ * @property {boolean} premoves read by the game-actions features (ADR F-146)
+ * @property {boolean} allow_takebacks read by the game-actions features (ADR F-146)
  */
 
 /** @type {Readonly<EnforcedPreferences>} */
@@ -25,6 +27,8 @@ const DEFAULT_PREFERENCES = Object.freeze({
     notify_challenges: true,
     notify_game_results: true,
     notify_your_turn: true,
+    premoves: false,
+    allow_takebacks: false,
 });
 
 /** The columns read from user_preferences. */
@@ -56,6 +60,8 @@ function preferencesOf(row) {
         notify_challenges: flag('notify_challenges'),
         notify_game_results: flag('notify_game_results'),
         notify_your_turn: flag('notify_your_turn'),
+        premoves: flag('premoves'),
+        allow_takebacks: flag('allow_takebacks'),
     };
 }
 

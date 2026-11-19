@@ -4,6 +4,7 @@
 import type {
     AccountPreferences,
     ChallengePolicy,
+    GameplayPrefs,
     NotificationPrefs,
     PrivacyPrefs,
     SecurityPrefs,
@@ -28,6 +29,7 @@ export const DEFAULT_ACCOUNT_PREFERENCES: Readonly<AccountPreferences> = Object.
         allowSpectators: true,
     }),
     security: Object.freeze({ emailOnNewSignIn: true }),
+    gameplay: Object.freeze({ premoves: false, allowTakebacks: false }),
 });
 
 type Section = keyof AccountPreferences;
@@ -63,6 +65,7 @@ export function parseAccountPreferences(raw: unknown): AccountPreferences {
         notifications: booleans<NotificationPrefs>(DEFAULT_ACCOUNT_PREFERENCES.notifications, src.notifications),
         privacy: parsePrivacy(src.privacy),
         security: booleans<SecurityPrefs>(DEFAULT_ACCOUNT_PREFERENCES.security, src.security),
+        gameplay: booleans<GameplayPrefs>(DEFAULT_ACCOUNT_PREFERENCES.gameplay, src.gameplay),
     };
 }
 
