@@ -49,6 +49,8 @@ describe('join_game: game in Redis', () => {
             clockActive: false,
             whiteId: 'white-user',
             blackId: 'black-user',
+            // Was: no count. A player now sees how many watch (ADR F-130).
+            spectators: 0,
         });
         expect(supabase.calls).toEqual([]);
     });
@@ -152,6 +154,8 @@ describe('join_game: restore from the database (Redis empty)', () => {
             clockActive: true,
             whiteId: 'w',
             blackId: 'b',
+            // Was: no count. A player now sees how many watch (ADR F-130).
+            spectators: 0,
         });
         expect(sync.blackMs).toBeGreaterThan(279900);
         expect(sync.blackMs).toBeLessThanOrEqual(280000);
@@ -183,6 +187,8 @@ describe('join_game: restore from the database (Redis empty)', () => {
             clockActive: false,
             whiteId: 'w',
             blackId: 'b',
+            // Was: no count. A non-player joining a live game is counted as watching (ADR F-130).
+            spectators: 1,
         });
         expect(await getGame('db-2')).toMatchObject({
             whiteClockMs: 180000,

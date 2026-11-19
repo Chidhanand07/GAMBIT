@@ -19,6 +19,7 @@ const { resultLabel, colorOfPlayer, opponentColor, outcomeOfRow } = require('../
 const { gameRoom, playerRoom } = require('./emitter');
 const { createGameFinalizer } = require('./gameFinalizer');
 const { createMoveRecorder } = require('./moveRecorder');
+const { log } = require('../observability/log');
 
 const DISCONNECT_TIMEOUT_SECONDS = 20;
 
@@ -40,7 +41,14 @@ const DISCONNECT_TIMEOUT_SECONDS = 20;
  * @property {Pick<SessionRegistry, 'activeGameOf' | 'linkSocket' | 'clearGame' | 'forgetGame'>} sessions
  * @property {Emitter} emitter
  * @property {ReturnType<typeof createGameFinalizer>} [finalizer] the shared finalizer; one is built when absent
+ * @property {SpectatorsPort} [spectators] live spectator counts (F-130); without it none are sent
  * @property {() => number} [now]
+ */
+
+/**
+ * @typedef {object} SpectatorsPort
+ * @property {(gameId: string, userId: string, socketId: string) => Promise<number>} watch
+ * @property {(gameId: string) => Promise<number>} count
  */
 
 /**
@@ -101,7 +109,27 @@ async function joinGame(ctx, gameId, client, userId) {
         // Visible to every instance: is any socket of this player still at this board?
         client.join(playerRoom(gameId, userId));
     }
-    sendState(ctx, game, client);
+    sendState(ctx, game, client, await viewerCount(ctx, game, userId, client.id));
+}
+
+/**
+ * Count a non-player at a live board as a spectator; the number watching (F-130).
+ * The count is cosmetic: a failure to read it is logged and never keeps anyone from the board.
+ * @param {GameCtx} ctx
+ * @param {any} game
+ * @param {string} userId
+ * @param {string} socketId
+ * @returns {Promise<number | undefined>}
+ */
+async function viewerCount({ spectators }, game, userId, socketId) {
+    if (!spectators || game.status !== 'active') return undefined;
+    try {
+        if (isParticipant(game, userId)) return await spectators.count(game.id);
+        return await spectators.watch(game.id, userId, socketId);
+    } catch (e) {
+        log.error(`[spectators] game ${game.id}:`, /** @type {Error} */ (e).message);
+        return undefined;
+    }
 }
 
 /**
@@ -110,8 +138,9 @@ async function joinGame(ctx, gameId, client, userId) {
  * @param {GameCtx} ctx
  * @param {any} game
  * @param {ClientPort} client
+ * @param {number} [spectators] how many watch, when known
  */
-function sendState(ctx, game, client) {
+function sendState(ctx, game, client, spectators) {
     // If game is already completed in Redis, notify joining client
     if (game.status === 'completed') {
         client.emit('game_end', {
@@ -136,6 +165,7 @@ function sendState(ctx, game, client) {
         clockActive: isClockRunning(game),
         whiteId: game.whiteId,
         blackId: game.blackId,
+        ...(spectators === undefined ? {} : { spectators }),
     });
 }
 
@@ -276,12 +306,13 @@ function createGameService(deps) {
         joinGame: (gameId, client, userId) => joinGame(ctx, gameId, client, userId),
         /**
          * `spectate_game`: join the room only if the game exists (H8).
-         * @type {(gameId: string, client: ClientPort) => Promise<void>}
+         * @type {(gameId: string, client: ClientPort, userId?: string) => Promise<void>}
          */
-        spectate: async (gameId, client) => {
+        spectate: async (gameId, client, userId) => {
             const game = await deps.gameStore.getGame(gameId);
             if (!game) return;
             client.join(gameRoom(gameId));
+            if (userId) await viewerCount(ctx, game, userId, client.id);
         },
         /** @type {(userId: string, client: ClientPort) => Promise<void>} */
         reconnect: (userId, client) => reconnect(ctx, userId, client),

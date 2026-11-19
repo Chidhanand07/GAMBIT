@@ -1,10 +1,12 @@
-"use client";
+'use client';
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import { loadBrowserClient } from '@/lib/supabase/lazyClient';
 import { usePathname } from 'next/navigation';
+import { loadBrowserClient } from '@/lib/supabase/lazyClient';
 import { useProfile } from '@/components/ProfileProvider';
+import { presenceSets, type PresenceMeta, type PresenceSets, type TabStatus } from '@/lib/presence/presenceStatus';
+import { useIdleStatus } from './useIdleStatus';
 
 interface PresenceValue {
     /**
@@ -12,11 +14,14 @@ interface PresenceValue {
      * A guest watches the set without joining it, so the count is the real number (may be 0).
      */
     onlineCount: number;
-    /** Presence keys (profile ids) of the users currently online. */
+    /** Presence keys (profile ids) of the users currently online, away ones included. */
     onlineUserIds: ReadonlySet<string>;
+    /** Of those, the users whose every tab reports away (no input for AWAY_AFTER_MS). */
+    awayUserIds: ReadonlySet<string>;
 }
 
-const NO_ONE_ONLINE: ReadonlySet<string> = new Set();
+const NO_ONE: ReadonlySet<string> = new Set();
+const NOBODY: PresenceSets = { present: NO_ONE, away: NO_ONE };
 const CHANNEL = 'gambit-online-users';
 
 /**
@@ -26,54 +31,67 @@ const CHANNEL = 'gambit-online-users';
  */
 const GUEST_QUIET_PATHS = ['/'];
 
-const PresenceContext = createContext<PresenceValue>({ onlineCount: 0, onlineUserIds: NO_ONE_ONLINE });
+const PresenceContext = createContext<PresenceValue>({ onlineCount: 0, onlineUserIds: NO_ONE, awayUserIds: NO_ONE });
 
 export function usePresence() {
     return useContext(PresenceContext);
 }
 
+/** The payload this tab tracks: who it is and whether it is idle. */
+function payload(profileId: string, username: string | undefined, status: TabStatus) {
+    return { user_id: profileId, username: username || 'unknown', status };
+}
+
 interface PresenceOptions {
     profileId: string | undefined;
     usernameRef: { current: string | undefined };
-    update: (ids: ReadonlySet<string>) => void;
+    statusRef: { current: TabStatus };
+    update: (sets: PresenceSets) => void;
+    onSubscribed: (channel: RealtimeChannel) => void;
     isMounted: () => boolean;
 }
 
 /** Subscribes to the shared channel: joins it (tracked) when signed in, only listens as a guest. */
-function openPresence(supabase: SupabaseClient, { profileId, usernameRef, update, isMounted }: PresenceOptions) {
+function openPresence(supabase: SupabaseClient, options: PresenceOptions) {
+    const { profileId, usernameRef, statusRef, update, onSubscribed, isMounted } = options;
     const channel = profileId
         ? supabase.channel(CHANNEL, { config: { presence: { key: profileId } } })
         : supabase.channel(CHANNEL);
-    const updateCount = () => update(new Set(Object.keys(channel.presenceState())));
+    const refresh = () => update(presenceSets(channel.presenceState() as Record<string, PresenceMeta[]>));
 
     // ALL handlers registered before subscribe()
     channel
-        .on('presence', { event: 'sync' }, updateCount)
-        .on('presence', { event: 'join' }, updateCount)
-        .on('presence', { event: 'leave' }, updateCount);
+        .on('presence', { event: 'sync' }, refresh)
+        .on('presence', { event: 'join' }, refresh)
+        .on('presence', { event: 'leave' }, refresh);
 
-    channel.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED' && isMounted() && profileId) {
-            await channel.track({ user_id: profileId, username: usernameRef.current || 'unknown' });
-        }
+    channel.subscribe(async (subscription: string) => {
+        if (subscription !== 'SUBSCRIBED' || !isMounted() || !profileId) return;
+        onSubscribed(channel);
+        await channel.track(payload(profileId, usernameRef.current, statusRef.current));
     });
     return channel;
 }
 
 /**
- * The shared presence channel. A signed-in viewer joins it (tracked under their profile id); a
- * guest only listens, so the "online" figures the mockups show are real for guests too (F-104).
+ * The shared presence channel. A signed-in viewer joins it (tracked under their profile id, with
+ * the tab's idle status, F-131); a guest only listens, so the "online" figures the mockups show
+ * are real for guests too (F-104), except on the landing (F-111).
  */
 export default function PresenceProvider({ children }: { children: React.ReactNode }) {
-    const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(NO_ONE_ONLINE);
+    const [sets, setSets] = useState<PresenceSets>(NOBODY);
     const { profile, loading } = useProfile();
     const guestQuiet = GUEST_QUIET_PATHS.includes(usePathname() ?? '');
 
     const profileId = profile?.id;
-    // Read when the channel subscribes; a rename alone must not re-subscribe.
+    const status = useIdleStatus(Boolean(profileId));
+    // Read when the channel subscribes; a rename or an idle change alone must not re-subscribe.
     const usernameRef = useRef(profile?.username);
+    const statusRef = useRef(status);
+    const channelRef = useRef<RealtimeChannel | null>(null);
     useEffect(() => {
         usernameRef.current = profile?.username;
+        statusRef.current = status;
     });
 
     useEffect(() => {
@@ -82,8 +100,11 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
         if (!profileId && guestQuiet) return;
         let mounted = true;
         let joined: { supabase: SupabaseClient; channel: RealtimeChannel } | null = null;
-        const update = (ids: ReadonlySet<string>) => {
-            if (mounted) setOnlineUserIds(ids);
+        const update = (next: PresenceSets) => {
+            if (mounted) setSets(next);
+        };
+        const onSubscribed = (channel: RealtimeChannel) => {
+            channelRef.current = channel;
         };
 
         // supabase-js loads on first use, after the first paint (F-111).
@@ -91,13 +112,15 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
             .then((supabase) => {
                 if (!mounted) return;
                 const isMounted = () => mounted;
-                joined = { supabase, channel: openPresence(supabase, { profileId, usernameRef, update, isMounted }) };
+                const opts = { profileId, usernameRef, statusRef, update, onSubscribed, isMounted };
+                joined = { supabase, channel: openPresence(supabase, opts) };
             })
             .catch(() => {});
 
         return () => {
             mounted = false;
-            setOnlineUserIds(NO_ONE_ONLINE);
+            channelRef.current = null;
+            setSets(NOBODY);
             if (!joined) return;
             const { supabase, channel } = joined;
             const leave = profileId ? channel.untrack() : Promise.resolve();
@@ -105,17 +128,19 @@ export default function PresenceProvider({ children }: { children: React.ReactNo
         };
     }, [profileId, loading, guestQuiet]);
 
+    // Going idle or coming back re-tracks this tab's payload on the open channel.
+    useEffect(() => {
+        if (profileId) void channelRef.current?.track(payload(profileId, usernameRef.current, status)).catch(() => {});
+    }, [status, profileId]);
+
     const value = useMemo(
         () => ({
-            onlineCount: profileId ? Math.max(1, onlineUserIds.size) : onlineUserIds.size,
-            onlineUserIds,
+            onlineCount: profileId ? Math.max(1, sets.present.size) : sets.present.size,
+            onlineUserIds: sets.present,
+            awayUserIds: sets.away,
         }),
-        [profileId, onlineUserIds],
+        [profileId, sets],
     );
 
-    return (
-        <PresenceContext.Provider value={value}>
-            {children}
-        </PresenceContext.Provider>
-    );
+    return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;
 }

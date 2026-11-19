@@ -54,6 +54,14 @@ describe('emitWithAck: timeout and the one-retry policy [ACKS] (F-065)', () => {
 
     const handlers = () => ({ onAccepted: jest.fn(), onRejected: jest.fn() })
 
+    test('onAccepted receives the whole ack, so a read can carry its data [F-130]', () => {
+        const socket = fakeSocket()
+        const h = handlers()
+        emitWithAck(socket, 'spectator_counts', { game_ids: ['g'] }, h)
+        socket.answer(0, { ok: true, counts: { g: 2 } })
+        expect(h.onAccepted).toHaveBeenCalledWith({ ok: true, counts: { g: 2 } })
+    })
+
     test('an ok ack calls onAccepted once; a refusal calls onRejected with the code', () => {
         const socket = fakeSocket()
         const ok = handlers()

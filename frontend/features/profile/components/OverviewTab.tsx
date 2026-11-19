@@ -1,13 +1,19 @@
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { cn } from '@/lib/design/cn';
+import {
+    PRESENCE_LABELS,
+    presenceStatusOf,
+    type PresenceSets,
+    type PresenceStatus,
+} from '@/lib/presence/presenceStatus';
 import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
 import { displayTimeControl } from '@/lib/chess/timeControl';
 import type { Friend } from '@/types/friendship';
 import type { ProfileGameRow } from '@/types/profilePage';
 import { formatDate, gameOutcome } from '../format';
 import { profileHref } from '../links';
-import { friendStatus, type Badge, type Fact, type FriendStatus } from '../model';
+import type { Badge, Fact } from '../model';
 import { EMPTY, LINK_BUTTON, LIST_CARD, LIST_ROW, LIST_TITLE, PANEL, PANEL_TITLE } from './styles';
 
 const FRIENDS_SHOWN = 4;
@@ -41,18 +47,18 @@ function AboutCard({ facts }: { facts: Fact[] }) {
 
 interface FriendsCardProps {
     friends: Friend[];
-    onlineIds: ReadonlySet<string>;
-    awayIds?: ReadonlySet<string>;
+    presence: PresenceSets;
     onSeeAll: () => void;
 }
 
-const STATUS_DOT: Record<FriendStatus, string> = {
-    Online: 'bg-success',
-    Away: 'bg-accent',
-    Offline: 'bg-ink-disabled',
+/** Dot colour per status (Profile.dc.html: green, amber, grey). */
+const STATUS_DOT: Readonly<Record<PresenceStatus, string>> = {
+    online: 'bg-success',
+    away: 'bg-accent',
+    offline: 'bg-ink-disabled',
 };
 
-function FriendLine({ friend, status }: { friend: Friend; status: FriendStatus }) {
+function FriendLine({ friend, status }: { friend: Friend; status: PresenceStatus }) {
     const name = friend.display_name || friend.username;
     return (
         <div className="flex items-center gap-3">
@@ -71,12 +77,12 @@ function FriendLine({ friend, status }: { friend: Friend; status: FriendStatus }
             <Link href={profileHref(friend.username)} className="flex-1 font-medium no-underline">
                 {name}
             </Link>
-            <span className="text-[13px] text-ink-muted">{status}</span>
+            <span className="text-[13px] text-ink-muted">{PRESENCE_LABELS[status]}</span>
         </div>
     );
 }
 
-function FriendsCard({ friends, onlineIds, awayIds, onSeeAll }: FriendsCardProps) {
+function FriendsCard({ friends, presence, onSeeAll }: FriendsCardProps) {
     return (
         <Card className={cn(PANEL, 'flex-[1_1_260px]')}>
             <div className="flex items-center justify-between">
@@ -87,11 +93,7 @@ function FriendsCard({ friends, onlineIds, awayIds, onSeeAll }: FriendsCardProps
             </div>
             {friends.length === 0 && <span className="text-ink-muted">No friends yet.</span>}
             {friends.slice(0, FRIENDS_SHOWN).map((f) => (
-                <FriendLine
-                    key={f.friendship_id ?? f.username}
-                    friend={f}
-                    status={friendStatus(f.id, onlineIds, awayIds)}
-                />
+                <FriendLine key={f.friendship_id ?? f.username} friend={f} status={presenceStatusOf(f.id, presence)} />
             ))}
         </Card>
     );
@@ -182,9 +184,7 @@ export interface OverviewTabProps {
     facts: Fact[];
     badges: Badge[];
     friends: Friend[];
-    onlineIds: ReadonlySet<string>;
-    /** Friends who are away (Profile.dc.html "Away"); optional until presence reports it. */
-    awayIds?: ReadonlySet<string>;
+    presence: PresenceSets;
     recentGames: ProfileGameRow[];
     recentLoading: boolean;
     onSeeFriends: () => void;
@@ -197,12 +197,7 @@ export function OverviewTab(props: OverviewTabProps) {
         <>
             <div className="flex flex-wrap gap-3">
                 <AboutCard facts={props.facts} />
-                <FriendsCard
-                    friends={props.friends}
-                    onlineIds={props.onlineIds}
-                    awayIds={props.awayIds}
-                    onSeeAll={props.onSeeFriends}
-                />
+                <FriendsCard friends={props.friends} presence={props.presence} onSeeAll={props.onSeeFriends} />
             </div>
             {props.badges.length > 0 && <AchievementsCard badges={props.badges} />}
             <RecentGamesCard

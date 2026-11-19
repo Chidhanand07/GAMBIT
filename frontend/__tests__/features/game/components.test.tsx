@@ -1,3 +1,4 @@
+import type { ResignEstimate } from '@/features/game/hooks/useResignEstimate'
 /**
  * The live game screen's presentational pieces (Game.dc.html) [REDESIGN-GAME]. Rewritten from the
  * old strip/square/modal/history-controls tests: the behaviours they pinned are asserted on the
@@ -81,7 +82,7 @@ test('FocusActions: Draw / Flip / Resign in a column; spectators get Flip only',
 
 describe('ConfirmDialogs', () => {
     const props = (open: 'draw' | 'resign' | null) => ({
-        open, opponentName: 'Bob', rated: true,
+        open, opponentName: 'Bob', rated: true, estimate: null as ResignEstimate | null,
         onConfirmResign: jest.fn(), onConfirmDraw: jest.fn(), onCancel: jest.fn(),
     })
 
@@ -116,11 +117,23 @@ describe('ConfirmDialogs', () => {
         expect(screen.getByRole('alertdialog')).toHaveTextContent("You will lose this game. This can't be undone.")
     })
 
-    test('[F-102] with a rating estimate the text reads as the mockup: "about N rating points"', () => {
-        render(<ConfirmDialogs {...props('resign')} ratingRisk={7} />)
+    // Stacking (was: ratingRisk={7}): the F-102 slot is the server's estimate (F-133).
+    test("[F-102] with the server's estimate the text reads as the mockup: 'about N rating points'", () => {
+        render(<ConfirmDialogs {...props('resign')} estimate={{ rated: true, points: 7 }} />)
         expect(screen.getByRole('alertdialog')).toHaveTextContent(
             "You will lose this game and about 7 rating points. This can't be undone.",
         )
+    })
+
+    test('the server\'s figure: "about N rating points" (Game.dc.html); unrated per the server [F-133]', () => {
+        const { rerender } = render(<ConfirmDialogs {...props('resign')} estimate={{ rated: true, points: 7 }} />)
+        expect(screen.getByRole('alertdialog')).toHaveTextContent(
+            "You will lose this game and about 7 rating points. This can't be undone.",
+        )
+        rerender(<ConfirmDialogs {...props('resign')} estimate={{ rated: true, points: 1 }} />)
+        expect(screen.getByRole('alertdialog')).toHaveTextContent('about 1 rating point.')
+        rerender(<ConfirmDialogs {...props('resign')} estimate={{ rated: false }} />)
+        expect(screen.getByRole('alertdialog')).toHaveTextContent("You will lose this game. This can't be undone.")
     })
 })
 

@@ -9,7 +9,6 @@ import {
     statFacts,
     timeControlLabel,
     gameRowDetail,
-    friendStatus,
 } from '@/features/profile/model';
 import type { ProfileGameRow } from '@/types/profilePage';
 
@@ -162,16 +161,6 @@ describe('gameRowDetail [F-104]', () => {
         expect(gameRowDetail({ time_control: '3+2' })).toBe('Blitz · 3+2')
         expect(gameRowDetail({ time_control: '3+2', opening: null, move_count: null })).toBe('Blitz · 3+2')
         expect(gameRowDetail({ time_control: '10+0', move_count: 0 })).toBe('Rapid · 10 min · 0 moves')
-    })
-})
-
-describe('friendStatus [F-104]', () => {
-    const online = new Set(['a', 'b'])
-    test('Online / Offline from presence; Away only when an away set says so', () => {
-        expect(friendStatus('a', online)).toBe('Online')
-        expect(friendStatus('z', online)).toBe('Offline')
-        expect(friendStatus(undefined, online)).toBe('Offline')
-        expect(friendStatus('b', online, new Set(['b']))).toBe('Away')
     })
 })
 

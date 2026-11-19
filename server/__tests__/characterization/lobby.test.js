@@ -43,9 +43,10 @@ async function queued(id, joinData = {}, profileOverrides = {}) {
 describe('join_queue', () => {
     test('emits queue_joined with position and a fixed estimated wait', async () => {
         const { joined } = await queued('q1');
-        expect(joined).toEqual({ position: 1, estimated_wait: 10 });
+        // Was: no window. queue_joined now carries the rating window the matchmaker uses (ADR F-132).
+        expect(joined).toEqual({ position: 1, estimated_wait: 10, search_window: { min: 953, max: 1053 } });
         const { joined: second } = await queued('q2');
-        expect(second).toEqual({ position: 2, estimated_wait: 10 });
+        expect(second).toEqual({ position: 2, estimated_wait: 10, search_window: { min: 953, max: 1053 } });
     });
 
     test('looks the profile up by id with a fixed column list', async () => {
@@ -169,7 +170,7 @@ describe('join_queue acks and the automatic re-queue after a reconnect [ACKS]', 
         supabase.queue('profiles', { data: profile('p1', { rating_rapid: 1500 }), error: null });
         expect(await emitAck(fresh, 'join_queue', { user: { id: 'p1' }, time_control: '10', is_rated: true })).toEqual({ ok: true });
         // Was: a silent no-op; the entry kept the dead socket's id, so match_found went nowhere.
-        expect(await rejoined).toEqual({ position: 1, estimated_wait: 10 });
+        expect(await rejoined).toEqual({ position: 1, estimated_wait: 10, search_window: { min: 1450, max: 1550 } });
         expect((await ctx.matchmaking.queuedEntry('p1')).socketId).toBe(fresh.id);
 
         // The old socket's disconnect, when the server finally sees it, does not dequeue the player.

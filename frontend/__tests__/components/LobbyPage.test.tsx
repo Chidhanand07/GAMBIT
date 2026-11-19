@@ -24,7 +24,7 @@ const serverSends = (event: string, payload: any) => act(() => { handlers.get(ev
 let profile: any = { id: 'me', username: 'me1', rating_blitz: 1400 }
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42, onlineUserIds: new Set(['f-on']) }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42, onlineUserIds: new Set(['f-on', 'f-away']), awayUserIds: new Set(['f-away']) }) }))
 
 import LobbyPage from '@/app/lobby/page'
 
@@ -36,6 +36,7 @@ const liveGames = [{
 const friends = [
     { id: 'f-off', username: 'zed', display_name: null, avatar_url: null, rating_rapid: 1100.4, rating_blitz: 1050, friendship_id: 'x' },
     { id: 'f-on', username: 'amy', display_name: 'Amy', avatar_url: null, rating_rapid: 1376, rating_blitz: 1239, friendship_id: 'y' },
+    { id: 'f-away', username: 'moe', display_name: null, avatar_url: null, rating_rapid: 1200, rating_blitz: 1200, friendship_id: 'z' },
 ]
 
 let fetchMock: jest.Mock
@@ -83,6 +84,16 @@ test('Cancel search leaves the queue', async () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(socket.emit).toHaveBeenCalledWith('leave_queue', 'me')
     expect(screen.queryByText('Finding an opponent...')).not.toBeInTheDocument()
+})
+
+test('the search line shows the real rating range from the server (Main.dc.html) [F-132]', async () => {
+    render(<LobbyPage />)
+    await userEvent.click(screen.getByText('Play Online'))
+    expect(screen.getByRole('status')).not.toHaveTextContent('rating range')
+    serverSends('queue_joined', { position: 1, estimated_wait: 10, search_window: { min: 925, max: 1125 } })
+    expect(screen.getByRole('status')).toHaveTextContent(/· rating range 925 to 1125 · 0:00/)
+    serverSends('search_window', { min: null, max: null })
+    expect(screen.getByRole('status')).toHaveTextContent(/· any rating · 0:00/)
 })
 
 test('a match sends the player to the game page', async () => {
@@ -139,6 +150,9 @@ test('Friend lists my friends, online first, and Challenge opens the challenge p
     expect(screen.getByText('Online · 1239')).toBeInTheDocument()
     expect(screen.getByText('Offline · 1050')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Challenge Amy' })).toHaveAttribute('href', '/challenge/amy')
+    // Away (every tab idle) can still be challenged, as in Main.dc.html [LIVE-2].
+    expect(screen.getByText('Away · 1200')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Challenge moe' })).toHaveAttribute('href', '/challenge/moe')
     expect(screen.queryByRole('link', { name: 'Challenge zed' })).not.toBeInTheDocument()
 })
 
@@ -156,6 +170,16 @@ test('live games list both players with ratings and a Watch link to the game', a
     expect(screen.getByText('1 now')).toBeInTheDocument()
     expect(screen.getByText('Blitz 3+0 · move 21')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Watch alice vs bob' })).toHaveAttribute('href', '/game/live-1')
+})
+
+test('each live game shows how many watch it, from the game server (Main.dc.html) [F-130]', async () => {
+    socket.emit.mockImplementation((event: string, _payload: unknown, ack?: (a: unknown) => void) => {
+        if (event === 'spectator_counts') ack?.({ ok: true, counts: { 'live-1': 4 } })
+    })
+    render(<LobbyPage />)
+    expect(await screen.findByText('4 watching')).toBeInTheDocument()
+    expect(socket.emit).toHaveBeenCalledWith('spectator_counts', { game_ids: ['live-1'] }, expect.any(Function))
+    socket.emit.mockReset()
 })
 
 test('creating a private game shows an invite link and joins its room', async () => {

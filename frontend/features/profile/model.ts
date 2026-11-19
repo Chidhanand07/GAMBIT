@@ -126,22 +126,6 @@ export function timeControlLabel(timeControl: string | null): string {
     return `${SPEED_BUCKET_LABELS[classifyTimeControl(timeControl)]} · ${displayTimeControl(timeControl)}`;
 }
 
-export type FriendStatus = 'Online' | 'Away' | 'Offline';
-
-/**
- * A friend's status in the Overview's Friends card (Profile.dc.html: Online, Away, Offline).
- * "Away" needs `awayIds`, which presence does not provide yet (data-live track).
- */
-export function friendStatus(
-    id: string | undefined,
-    onlineIds: ReadonlySet<string>,
-    awayIds?: ReadonlySet<string>,
-): FriendStatus {
-    if (!id) return 'Offline';
-    if (awayIds?.has(id)) return 'Away';
-    return onlineIds.has(id) ? 'Online' : 'Offline';
-}
-
 /**
  * A Games-tab row's second line, as in Profile.dc.html: "Italian Game · 5 min · 34 moves". Without
  * an opening the speed bucket takes its place ("Blitz · 5 min"); the move count is left out when

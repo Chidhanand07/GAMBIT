@@ -1,4 +1,5 @@
 import { usePresence } from '@/components/PresenceProvider';
+import type { PresenceSets } from '@/lib/presence/presenceStatus';
 
 /**
  * Whether `profileId` is in the shared presence set that every signed-in tab
@@ -12,7 +13,8 @@ export function useProfilePresence(profileId: string | undefined): boolean {
     return profileId !== undefined && onlineUserIds.has(profileId);
 }
 
-/** The shared presence set (profile ids), for the Overview's friends list. */
-export function useOnlineIds(): ReadonlySet<string> {
-    return usePresence().onlineUserIds;
+/** Who is present and who is away (profile ids), for the Overview's friends list. */
+export function usePresenceSets(): PresenceSets {
+    const { onlineUserIds, awayUserIds } = usePresence();
+    return { present: onlineUserIds, away: awayUserIds };
 }

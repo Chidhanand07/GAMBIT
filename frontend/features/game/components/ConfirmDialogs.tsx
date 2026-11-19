@@ -2,6 +2,7 @@
 
 import { Dialog } from '@/components/ui/Dialog';
 import { cn } from '@/lib/design/cn';
+import type { ResignEstimate } from '../hooks/useResignEstimate';
 import type { ConfirmDialog } from '../state/gameReducer';
 import { GAME_ICONS } from './gameIcons';
 
@@ -9,11 +10,8 @@ interface ConfirmDialogsProps {
     open: ConfirmDialog;
     opponentName: string;
     rated: boolean;
-    /**
-     * Rating points at stake (Game.dc.html "about 7 rating points"). Optional: no estimate is
-     * computed yet (data-live track); without it the text names no figure.
-     */
-    ratingRisk?: number | null;
+    /** The server's figure for a loss now; null until it has answered. */
+    estimate: ResignEstimate | null;
     onConfirmResign: () => void;
     onConfirmDraw: () => void;
     onCancel: () => void;
@@ -58,21 +56,27 @@ function Answers({
     );
 }
 
-/** " and about 7 rating points" with an estimate, " and rating points" without, "" unrated. */
-function resignStake(rated: boolean, ratingRisk?: number | null): string {
-    if (!rated) return '';
-    return typeof ratingRisk === 'number' ? ` and about ${ratingRisk} rating points` : ' and rating points';
+/**
+ * "You will lose this game and about 7 rating points." (Game.dc.html) with the server's figure;
+ * "and rating points" while it is on its way or unknown; no rating words for an unrated game.
+ */
+export function resignText(rated: boolean, estimate: ResignEstimate | null): string {
+    const tail = " This can't be undone.";
+    if (estimate?.rated === false || (!rated && !estimate)) return `You will lose this game.${tail}`;
+    if (!estimate) return `You will lose this game and rating points.${tail}`;
+    const unit = estimate.points === 1 ? 'rating point' : 'rating points';
+    return `You will lose this game and about ${estimate.points} ${unit}.${tail}`;
 }
 
 /**
  * The Draw and Resign confirmations (Game.dc.html): focus-trapped alert dialogs, Esc or the
- * backdrop cancels. The resign text names a rating figure only when an estimate is passed in.
+ * backdrop cancels. The rating figure in the resign text is computed by the server (F-133).
  */
 export function ConfirmDialogs({
     open,
     opponentName,
     rated,
-    ratingRisk,
+    estimate,
     onConfirmResign,
     onConfirmDraw,
     onCancel,
@@ -86,7 +90,7 @@ export function ConfirmDialogs({
                 tone="danger"
                 iconPath={GAME_ICONS.resign}
                 title="Resign this game?"
-                description={`You will lose this game${resignStake(rated, ratingRisk)}. This can't be undone.`}
+                description={resignText(rated, estimate)}
             >
                 <Answers yes="Yes, resign" no="Keep playing" onYes={onConfirmResign} onNo={onCancel} tone="danger" />
             </Dialog>

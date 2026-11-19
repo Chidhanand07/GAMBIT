@@ -150,6 +150,18 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | ADR | Title | PR | Items |
 |---|---|---|---|
 
+**Redesign v2, live data** (branch `feat/design-data-live`; PR column = B2).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-130](#f-130) | Spectator counts in Redis with a heartbeat; the lobby reads them over its socket | B2 | LIVE-1 |
+| [F-131](#f-131) | Friend "Away": each tab reports idleness in its presence payload | B2 | LIVE-2 |
+| [F-132](#f-132) | The lobby's rating range is the matchmaker's own window, pushed when it widens | B2 | LIVE-3 |
+| [F-133](#f-133) | The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service | B2 | LIVE-4 |
+| [F-134](#f-134) | `/analysis?game=<id>`: a finished game's moves and stored review, private games for players only | B2 | LIVE-5 |
+| [F-161](#f-161) | The Overview's Away slot (F-104) is fed by presence's away set; the profile-only `friendStatus` goes | STACK | AWAY-WIRING |
+| [F-162](#f-162) | Finished games open on `/analysis?game=<id>`: profile Games "Review" and the result page's "Open in analysis" | STACK | ANALYSIS-LINKS |
+
 ---
 
 ## F-001
@@ -3117,3 +3129,186 @@ their owner (B1 item 8).**
   URL; nothing the browser sends feeds it (NODE-10).
 - Tests: `model.test.ts` (badges, thresholds), `api/profile.test.ts` (standing from
   `leaderboard_rank` on the best pool; null cases), `ProfilePage.test.tsx` (Overview shows them).
+
+## F-130
+
+**Spectator counts live in Redis with a heartbeat; the lobby reads them over its socket (LIVE-1).**
+
+- **Context.** Game.dc.html shows "3 watching" under the title and Main.dc.html shows "N watching" on every
+  live game. `games.spectator_count` was never written, so the redesign left both unwired. With several
+  replicas (F-059) a count kept in process memory would show each replica's share only.
+- **Store.** Per game a sorted set `{spec}:game:<id>`, member `<userId>:<socketId>`, score = the time the
+  member lapses; plus `{spec}:games`, the games that may have spectators. Four Lua scripts (join, leave,
+  prune, refresh) so a join, a leave and a prune never interleave. The count is the number of distinct
+  viewers (two tabs count once); players are never members.
+- **Crash safety: heartbeat, not a per-key TTL.** Each instance remembers only its own watching sockets and
+  moves their scores forward every 20 s (`SPECTATOR_HEARTBEAT_MS`); a member not refreshed for 60 s
+  (`SPECTATOR_TTL_MS`) has lapsed. The same heartbeat prunes every listed game and announces any drop, so a
+  crashed replica's viewers disappear within ~80 s without any replica knowing which one died. A live
+  watcher pruned during a long pause is put back by its own heartbeat. The set key itself expires after two
+  TTLs of silence.
+- **Protocol.** A non-player `join_game` (or `spectate_game`) on an active game adds the socket;
+  `game_state_sync` carries `spectators`; every change is broadcast as `spectators_changed { game_id, count }`
+  to `game_<id>`, which the Socket.IO Redis adapter delivers on every replica. New client events:
+  `leave_game` (the game page unmounts; it only affects a watching socket, never a player's links or rooms)
+  and `spectator_counts { game_ids ≤ 20 }`, acked `{ ok, counts }`. A disconnect stops every watch.
+- **Lobby: read over the socket, not in `/api/games/live`.** Options: (a) the Next route calls a new
+  authenticated game-server endpoint (needs a server-side game-server URL, a shared secret or the user's
+  access token, timeouts, and a second service on the lobby's critical path); (b) the Next route reads
+  Redis (the web app only has Upstash REST for rate limits, F-046, not the game server's Redis); (c) the
+  browser, which already holds an authenticated socket to the game server, asks for the counts of the
+  games it was just given. (c) adds no secret, no env var and no server-to-server call, and a failure only
+  hides the count. Chosen: (c). `/api/games/live` is unchanged; `useLiveGames` merges the counts.
+- **Failure policy.** The count is cosmetic: a failed count is logged and the board still loads (an
+  exception to F-042's "errors propagate", which is about game state). A failed lobby read shows no count;
+  nothing is ever made up.
+- **Not done.** `games.spectator_count` stays unused (not dropped: other readers may exist). Counts for a
+  private game can be read by anyone who knows its UUID; the number is not sensitive and ids are not
+  guessable.
+- **Proof.** `domain/spectators.test.js`; `repositories/spectators.contract.test.js` (Redis mock and real
+  Redis: shared add, leave, lapse and prune, refresh never resurrects); `services/spectatorService.test.js`
+  (two services over one store: shared count, second tab, crashed instance, re-add after a pause);
+  `integration/spectatorsTwoInstances.test.js` (two full instances over one real Redis: viewers on both,
+  players see every change, a killed instance's viewer is pruned by the survivor); socket, schema and
+  frontend tests.
+
+## F-131
+
+**Friend "Away": each tab reports idleness in its presence payload (LIVE-2).**
+
+- **Context.** Profile.dc.html and Main.dc.html list friends as Online (green), Away (amber) or Offline
+  (grey); presence (F-080) only knew present or not.
+- **Decision.** The existing Supabase presence channel (`gambit-online-users`, keyed by profile id)
+  carries a `status` in each tab's payload: `online`, or `away` after `AWAY_AFTER_MS` (5 minutes) with no
+  pointer, key, wheel or touch input. A hidden tab gets no input, so it goes away on the same timer;
+  becoming visible counts as input. A change re-tracks the payload on the open channel (no re-subscribe).
+  A user is Away only when every tab says so; one active tab is Online; a tab of an older client without
+  a status counts as Online. `PresenceProvider` exposes `awayUserIds` next to `onlineUserIds` (still every
+  present user, so the online counts do not change).
+- **Trust.** Idleness is the client's own report about itself and only changes a label; nothing is
+  authorised by it (identity is still the presence key the provider tracks for the signed-in profile).
+- **UI.** Lobby: Online, then Away, then Offline; Away friends can still be challenged (Main.dc.html
+  enables Challenge for every status but Offline). Profile Overview: dot and label per status.
+- **Not done.** The live game seat's "online" flag keeps using presence only (the design has no Away there).
+- **Proof.** `lib/presence/presenceStatus.test.ts`, `components/useIdleStatus.test.tsx`,
+  `characterization/PresenceProvider.test.tsx` (re-track after idle and on input), lobby and profile
+  page tests.
+
+## F-132
+
+**The lobby's rating range is the matchmaker's own window, pushed when it widens (LIVE-3).**
+
+- **Context.** Main.dc.html shows "rating range 925 to 1125" while searching; the redesign left it out
+  because nothing computed it. It must be the range the matchmaker would really use, not a guess.
+- **Decision.** A pure `searchWindow(entry, waitedSec)` in `domain/matchmaking/pairing.js`, built from the
+  same constants `isRatingCompatible` uses: an established player accepts rating ± `getSearchRadius(wait)`
+  (floored at 0); once the radius is unlimited the window is open (`{ min: null, max: null }`, shown as
+  "any rating"); a provisional player accepts established opponents in the provisional band (800 to 1400).
+  The server sends it in `queue_joined.search_window`, and the instance that queued the player emits
+  `search_window` to that socket on its 1 s pass whenever it changes (a handful of times per search, as
+  the radius steps up). The client never computes it: no copy of the rules in the browser.
+- **Honest limits (documented, not hidden).** The window is the player's own side of the rule: an opponent
+  who has waited longer may accept them from further away, and a provisional player also meets any other
+  provisional player. The text says what this player accepts, which is what the mockup's line means.
+- **Multi-instance.** Each instance only tells the players it queued (`local`); the queue entry, and so
+  `joined_at` and the rating, are the ones in Redis. A player re-queued on another instance after a
+  reconnect gets a fresh `queue_joined` from it.
+- **Proof.** `domain/pairing.test.js` (every radius step, floor, provisional, agreement with
+  `isRatingCompatible`), `services/matchmakingService.test.js` (sent once per step, to the right socket,
+  stops after leaving), lobby hook and page tests. `queue_joined` expectations gained the field.
+
+## F-133
+
+**The resign dialog's "about N rating points" is a socket ack from the real Glicko-2 service (LIVE-4).**
+
+- **Context.** Game.dc.html's resign dialog says "You will lose this game and about 7 rating points." The
+  redesign said only "and rating points" because no figure was computed anywhere.
+- **Decision.** A socket event `rating_estimate { game_id }`, acked `{ ok, rated: false }` or
+  `{ ok, rated: true, points }`. The game server reads the live game from Redis, refuses anyone who is not
+  a player of an active game (`playerRejection`: `not_a_player`, `game_not_active`, `game_not_found`), and
+  for a rated game runs `ratingService.estimate`: the same `findPair` + `computeRatings` (Glicko-2, ±50
+  cap, floor 100) that `processGameEnd` applies, from the profiles as stored, with the opponent winning.
+  Nothing is written. Missing profiles answer `estimate_unavailable`, never a guess. The asking player is
+  the connection's verified user; a user id in the payload is stripped by the schema.
+- **Why a socket ack, not an HTTP route.** The game state (who plays, whether it is rated, the time
+  control) lives in the game server's Redis; the web app would have to re-derive it from the database row.
+- **Client.** `useResignEstimate` asks each time the dialog opens for a player. Text: the figure when it
+  has arrived ("about 1 rating point" in the singular); "and rating points" while it is on its way or if
+  the server could not say; "You will lose this game." for an unrated game (by the game row, or by the
+  server's `rated: false`). The mockup has no separate unrated wording; this keeps the redesign's.
+- **Rate limit.** The general `socketEvent` rule (60 per 10 s); one ask per dialog opening.
+- **Proof.** `services/ratingService.test.js` (estimate equals what `processGameEnd` then applies, nothing
+  written), `services/ratingEstimateService.test.js` (players only, unrated, missing profiles, colour),
+  schema and handler tests, `useResignEstimate.test.ts`, `ConfirmDialogs` and game page tests.
+
+## F-134
+
+**`/analysis?game=<id>`: a finished game's moves and stored review; private games for players only (LIVE-5).**
+
+- **Context.** The analysis page could not open a game ("analysis accuracies (no game id)"). The engine
+  stores `white_accuracy`, `black_accuracy` and per-move classifications on the `games` row after a game
+  (F-049); `games.pgn` is never written.
+- **Route.** `GET /api/games/[id]/analysis` (NX-07 order): `requireUser`, the id must be a UUID (else 404,
+  nothing read), then `lib/server/gameAnalysis.loadGameAnalysis` on the admin client:
+  - visibility: a player always; anyone else only when the game has no `game_invites` row (a private
+    game, F-018). A private game is answered 404 to a non-player, so its existence is not revealed; a
+    failing invite check answers 500 (fail closed);
+  - only `completed` games: a game in play is 409, so the page cannot be used for engine help mid-game;
+  - moves: from the stored review when there is one (complete: the engine reviewed the server's own move
+    log), else from the `moves` table ordered by `move_number`; returned as PGN movetext;
+  - DTO allow-list: `id`, `pgn`, and per side `name`, `accuracy`, and the reviewed plies'
+    `ply/san/classification/accuracy`. No ids, tokens or other columns (NX-04).
+- **Page.** `app/analysis/page.tsx` passes its `searchParams` to a client `AnalysisRoute`, which reads a
+  single `game` value; `useGameAnalysis` fetches it, puts its moves on the board (cursor on the last move,
+  every existing navigation works) and the Analysis tab shows a "Game review" block above the engine:
+  each side's name, accuracy and classification counts, or "not reviewed yet".
+- **Design note.** Analysis.dc.html has no accuracy block (its board is always a free board). The block is
+  built only from that page's own vocabulary (panel heading like "Stockfish 16", the FEN/engine well
+  surface, mono figures in the accent colour) and appears only when a game is opened, so the free-board
+  page is pixel-identical to before.
+- **Not done.** Nothing in the app links to `/analysis?game=<id>` yet (the result page keeps its own
+  review); adding links is a UI decision for the page owners.
+- **Proof.** `api/gameAnalysis.test.ts` (401, malformed id, public reviewed and unreviewed games, private
+  game for a stranger and for a player, fail-closed invite check, game in play, not found, DB error,
+  DTO shape) and `features/analysis/gameReview.test.tsx` (moves on the board, accuracies, error, no fetch
+  without `?game=`).
+
+## F-161
+
+**Friends' "Away" comes from presence everywhere a friend's status is shown (stacking follow-up b).**
+
+- **Context.** Parity fixes (F-104) gave the profile Overview's Friends card an optional `awayIds` prop
+  and a `friendStatus(id, onlineIds, awayIds?)` helper, left empty until presence could tell idleness.
+  B2 (F-131) made every tab report `online`/`away` and PresenceProvider expose `awayUserIds`, and wired
+  the lobby friend list and the Overview card through `presenceStatusOf(id, { present, away })`.
+- **Decision.** When B2 was stacked on the parity fixes the two met in the same files. The stack keeps
+  B2's single model (PresenceProvider sets → `presenceStatusOf` → `PRESENCE_LABELS`) and joins it with
+  the parity fixes' guest presence (a signed-out viewer listens to the channel without joining it, so
+  `onlineCount` may be 0 for a guest, F-104). The F-104 slot is therefore fed: the Overview card takes
+  the presence sets, and the now-unused profile `friendStatus` helper is removed; its cases move to the
+  presence tests unchanged.
+- **Where a status shows.** Lobby friend list (Online · Away · Offline, Away challengeable) and the
+  profile Overview's Friends card (green, amber, grey dot). The profile Friends tab shows names and
+  ratings only (Profile.dc.html), and the hero's "Online" pill marks any present user, away or not
+  (the mockup has no away hero state).
+- Tests: `ProfilePage.test.tsx` ("the Overview friends card shows Online, Away and Offline"),
+  `OverviewFriends.test.tsx` and `lobbyModel.test.ts` (presence sets instead of id sets),
+  `presenceStatus.test.ts` (the former `friendStatus` cases).
+
+## F-162
+
+**Finished games link to the analysis board (stacking follow-up c).**
+
+- **Context.** B2 made `/analysis?game=<id>` open a finished game with its stored review (F-134) but
+  left it unlinked. Profile.dc.html's Games rows have a "Review" button whose link is
+  `Analysis.dc.html`; the app sent it to `/game/<id>` (the live game page, which for a finished game
+  redirects to the result review).
+- **Decision.** `features/analysis/links.analysisGameHref(id)` builds `/analysis?game=<id>` (id
+  URI-encoded, F12). The profile Games row's Review uses it for a `completed` game; an aborted game
+  (no moves to analyse; the analysis route answers 409 for anything not completed) keeps `/game/<id>`.
+  The result page (no mockup; inferred from Game.dc.html) gets an outline "Open in analysis" button
+  above "Back to lobby", from the same button vocabulary. Game.dc.html's game-over card has only
+  Rematch and New game, so the game page gets no new link. The Overview's Recent games rows have no
+  Review affordance in the mockup and stay as they are.
+- Tests: `ProfilePage.test.tsx` (Review → `/analysis?game=g-row`, was `/game/g-row`; aborted row keeps
+  `/game/<id>`), `GameResultPage.test.tsx` ("Open in analysis"), `features/analysis/links.test.ts`.

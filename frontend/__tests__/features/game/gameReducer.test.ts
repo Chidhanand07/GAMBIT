@@ -166,3 +166,14 @@ describe('ui toggles', () => {
         expect(s).toMatchObject({ confirm: null, gameOver: { result: 'Draw', reason: 'Stalemate' } })
     })
 })
+
+describe('spectator count [F-130]', () => {
+    test('unknown until the server says; a sync without a count keeps the last one', () => {
+        expect(createInitialGameState().spectators).toBeNull()
+        const synced = run([{ type: 'stateSynced', history: null, whiteMs: 0, blackMs: 0, clockActive: false, spectators: 2 }])
+        expect(synced.spectators).toBe(2)
+        const kept = gameReducer(synced, { type: 'stateSynced', history: null, whiteMs: 0, blackMs: 0, clockActive: false })
+        expect(kept.spectators).toBe(2)
+        expect(gameReducer(kept, { type: 'spectatorsChanged', count: 5 }).spectators).toBe(5)
+    })
+})

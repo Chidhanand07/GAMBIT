@@ -107,3 +107,21 @@ test('rating function errors raise an alert in the error tracker (SEC-12) [OBSER
         setErrorReporter(undefined);
     }
 });
+
+describe('estimate [F-133]', () => {
+    test('the same changes processGameEnd would apply, and nothing is written', async () => {
+        const repo = repoWith([profile('w', { rating_blitz: 1250 }), profile('b', { rating_blitz: 1300 })]);
+        const svc = serviceOn(repo);
+        const estimate = await svc.estimate({ whiteId: 'w', blackId: 'b', timeControl: '3+0', result: 'black' });
+        expect(repo.applyGameResult).not.toHaveBeenCalled();
+        const applied = await svc.processGameEnd('g', 'w', 'b', 'black', '3+0', true);
+        expect(estimate).toEqual(applied);
+        expect(estimate.white.oldRating).toBe(1250);
+        expect(estimate.white.change).toBeLessThan(0);
+    });
+
+    test('null when a profile is missing', async () => {
+        const repo = repoWith([profile('w')]);
+        expect(await serviceOn(repo).estimate({ whiteId: 'w', blackId: 'b', timeControl: '10', result: 'black' })).toBeNull();
+    });
+});

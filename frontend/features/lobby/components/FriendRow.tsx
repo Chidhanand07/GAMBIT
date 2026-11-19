@@ -1,29 +1,25 @@
 import Link from 'next/link';
 import { Avatar } from '@/components/ui/Avatar';
 import { cn } from '@/lib/design/cn';
+import { PRESENCE_LABELS } from '@/lib/presence/presenceStatus';
 import type { LobbyFriend } from '../types';
 
 const ACTION = 'flex min-h-[44px] items-center rounded-pill border-0 px-[18px] font-semibold no-underline';
 
-/** One friend: avatar with presence dot, status and rating, and Challenge (online only). */
+/** One friend: avatar with presence dot, status and rating, and Challenge (online or away, Main.dc.html). */
 export function FriendRow({ friend }: { friend: LobbyFriend }) {
     const name = friend.display_name || friend.username;
+    const reachable = friend.status !== 'offline';
     return (
         <div className="flex items-center gap-[14px] rounded-14 border-1 border-line-subtle bg-bg-base px-3 py-[10px]">
-            <Avatar
-                name={name}
-                src={friend.avatar_url}
-                size="md"
-                tone="surface"
-                status={friend.online ? 'online' : 'offline'}
-            />
+            <Avatar name={name} src={friend.avatar_url} size="md" tone="surface" status={friend.status} />
             <span className="flex min-w-0 flex-1 flex-col">
                 <span className="font-semibold">{name}</span>
                 <span className="text-[13px] text-ink-muted">
-                    {friend.online ? 'Online' : 'Offline'} · {friend.rating}
+                    {PRESENCE_LABELS[friend.status]} · {friend.rating}
                 </span>
             </span>
-            {friend.online ? (
+            {reachable ? (
                 <Link
                     href={`/challenge/${encodeURIComponent(friend.username)}`}
                     aria-label={`Challenge ${name}`}

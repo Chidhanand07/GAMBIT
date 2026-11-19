@@ -62,11 +62,44 @@ const WHITE_FOR_FIRST_THRESHOLD = 0.5;
  */
 
 /**
+ * @typedef {{ entry: QueueEntry, sent: string }} WindowWatch
  * @typedef {Required<MatchmakingDeps> & {
- *   local: Map<string, string>, searching: { count: number }, nextToken: () => string }} Matchmaker
+ *   local: Map<string, string>, windows: Map<string, WindowWatch>, searching: { count: number },
+ *   nextToken: () => string }} Matchmaker
  * `local`: userId → socketId for the entries THIS instance queued (refreshed
- * every pass; looked up on disconnect). `searching`: the last queue size seen.
+ * every pass; looked up on disconnect). `windows`: the rating window last sent
+ * to each of those players (F-132). `searching`: the last queue size seen.
  */
+
+/**
+ * The rating window `entry` accepts right now (domain rules, F-132).
+ * @param {Matchmaker} mm
+ * @param {QueueEntry} entry
+ */
+function windowOf(mm, entry) {
+    return pairing.searchWindow(entry, pairing.waitedSeconds(entry, mm.now()));
+}
+
+/**
+ * Tell each player this instance queued their rating window when it has widened since
+ * the last time (a few times per search, as the radius steps up). Players no longer
+ * queued here are forgotten.
+ * @param {Matchmaker} mm
+ */
+function notifyWindows(mm) {
+    for (const [userId, watch] of mm.windows) {
+        const socketId = mm.local.get(userId);
+        if (!socketId) {
+            mm.windows.delete(userId);
+            continue;
+        }
+        const next = windowOf(mm, watch.entry);
+        const key = JSON.stringify(next);
+        if (key === watch.sent) continue;
+        watch.sent = key;
+        mm.emitter.toRoom(socketId, 'search_window', next);
+    }
+}
 
 /**
  * Add a player (no-op when already queued) and tell their socket.
@@ -89,10 +122,13 @@ async function joinQueue(mm, { user, socketId, timeControl, increment, isRated =
     if (position === null) return;
     mm.local.set(user.id, socketId);
     mm.searching.count = position;
+    const window = windowOf(mm, entry);
+    mm.windows.set(user.id, { entry, sent: JSON.stringify(window) });
 
     mm.emitter.toRoom(socketId, 'queue_joined', {
         position,
         estimated_wait: ESTIMATED_WAIT_SECONDS,
+        search_window: window,
     });
 }
 
@@ -233,6 +269,7 @@ async function pairQueued(mm) {
  */
 async function matchPlayers(mm) {
     await refreshLocalEntries(mm);
+    notifyWindows(mm);
     const token = mm.nextToken();
     if (!(await mm.queue.acquirePairingLock(token, mm.lockTtlMs))) {
         mm.searching.count = await mm.queue.size();
@@ -300,6 +337,7 @@ function createMatchmakingService({
         instanceId,
         lockTtlMs,
         local: new Map(),
+        windows: new Map(),
         searching: { count: 0 },
         nextToken: () => `${instanceId}:${++seq}`,
     };

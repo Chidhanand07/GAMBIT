@@ -1,26 +1,29 @@
 import { useEffect, useState } from 'react';
 import { usePresence } from '@/components/PresenceProvider';
 import { fetchMyFriends } from '@/lib/api/lobby';
+import { presenceStatusOf, type PresenceSets, type PresenceStatus } from '@/lib/presence/presenceStatus';
 import type { Friend } from '@/types/friendship';
 import type { SpeedBucket } from '@/types/timeControl';
 import { DEFAULT_RATING } from '../constants';
 import type { LobbyFriend } from '../types';
 
-/** Friends with their presence and their rating in `pool`: online first, then by name. */
-export function toLobbyFriends(
-    friends: Friend[],
-    onlineIds: ReadonlySet<string>,
-    pool: SpeedBucket = 'rapid',
-): LobbyFriend[] {
+/** List order: online, then away, then offline. */
+const STATUS_ORDER: Readonly<Record<PresenceStatus, number>> = { online: 0, away: 1, offline: 2 };
+
+/**
+ * Friends with their presence and their rating in `pool`: online first, then away, then offline,
+ * each by name.
+ */
+export function toLobbyFriends(friends: Friend[], presence: PresenceSets, pool: SpeedBucket = 'rapid'): LobbyFriend[] {
     return friends
         .map((f) => ({
             username: f.username,
             display_name: f.display_name ?? null,
             avatar_url: f.avatar_url ?? null,
             rating: Math.round(f[`rating_${pool}`] ?? DEFAULT_RATING),
-            online: Boolean(f.id && onlineIds.has(f.id)),
+            status: presenceStatusOf(f.id, presence),
         }))
-        .sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username));
+        .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.username.localeCompare(b.username));
 }
 
 /**
@@ -28,7 +31,7 @@ export function toLobbyFriends(
  * PresenceProvider. Null until loaded; a failed read is an empty list.
  */
 export function useLobbyFriends(enabled: boolean, pool: SpeedBucket): LobbyFriend[] | null {
-    const { onlineUserIds } = usePresence();
+    const { onlineUserIds, awayUserIds } = usePresence();
     const [friends, setFriends] = useState<Friend[] | null>(null);
     const [requested, setRequested] = useState(false);
 
@@ -47,5 +50,5 @@ export function useLobbyFriends(enabled: boolean, pool: SpeedBucket): LobbyFrien
         };
     }, [requested]);
 
-    return friends && toLobbyFriends(friends, onlineUserIds, pool);
+    return friends && toLobbyFriends(friends, { present: onlineUserIds, away: awayUserIds }, pool);
 }

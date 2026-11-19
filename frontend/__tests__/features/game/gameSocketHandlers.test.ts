@@ -37,8 +37,22 @@ test('registers the legacy 13 events in order, plus move_rejected [S1]', () => {
     expect([...handlers.keys()]).toEqual([
         'disconnect', 'connect', 'game_state_sync', 'move_made', 'chat_message', 'game_end', 'rating_updated',
         'rematch_request', 'rematch_ready', 'rematch_declined', 'opponent_disconnected', 'opponent_reconnected', 'clock_sync',
-        'move_rejected',
+        'move_rejected', 'spectators_changed',
     ])
+})
+
+test('spectators_changed: updates the count for this game only [F-130]', () => {
+    const { fire, dispatched } = makeCtx()
+    fire('spectators_changed', { game_id: 'other', count: 9 })
+    expect(dispatched()).toEqual([])
+    fire('spectators_changed', { game_id: 'g1', count: 3 })
+    expect(dispatched()).toEqual([{ type: 'spectatorsChanged', count: 3 }])
+})
+
+test('game_state_sync carries the spectator count into stateSynced [F-130]', () => {
+    const { fire, dispatched } = makeCtx()
+    fire('game_state_sync', { fen: AFTER_E4, moveLog: [], whiteMs: 1, blackMs: 2, clockActive: false, spectators: 4 })
+    expect(dispatched()[1]).toMatchObject({ type: 'stateSynced', spectators: 4 })
 })
 
 test('connect marks connected then re-emits join_game only (no authenticate) [S2]', () => {

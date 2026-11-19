@@ -9,6 +9,7 @@ import { ReviewBoard } from '@/features/game-result/components/ReviewBoard';
 import { EvalGraph } from '@/features/game-result/components/EvalGraph';
 import { MoveCaption, ReviewControls, ReviewMoveList } from '@/features/game-result/components/ReviewMoves';
 import { ReviewStatusScreen } from '@/features/game-result/components/ReviewChrome';
+import { analysisGameHref } from '@/features/analysis/links';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 
@@ -65,6 +66,9 @@ export default function GameResultPage(props: { params: Promise<{ id: string }> 
                         counts={counts.black}
                     />
                     <ReviewMoveList moves={moves} ply={ply} onSeek={setPly} />
+                    <Button href={analysisGameHref(params.id)} variant="outline">
+                        Open in analysis
+                    </Button>
                     <Button href="/lobby" variant="outline">
                         Back to lobby
                     </Button>

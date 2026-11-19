@@ -17,6 +17,7 @@ export function LobbyPlayArea({ lobby }: { lobby: Lobby }) {
                 <MatchmakingStatus
                     timeControlName={name}
                     elapsed={matchmaking.searchTime}
+                    searchWindow={matchmaking.searchWindow}
                     onCancel={matchmaking.cancelSearch}
                 />
             )}

@@ -18,6 +18,7 @@ import { useMoveListAutoScroll } from './useGameEffects';
 import { useGameSocket } from './useGameSocket';
 import { useMoveHistory } from './useMoveHistory';
 import { useOpponentDisconnect } from './useOpponentDisconnect';
+import { useResignEstimate } from './useResignEstimate';
 
 function useGameRefs() {
     return {
@@ -62,8 +63,15 @@ export function useGameController(gameId: string) {
         dispatch,
     });
 
+    const resignEstimate = useResignEstimate({
+        socket,
+        gameId,
+        open: state.confirm === 'resign' && myColor !== 'spectator',
+    });
+
     return {
         state,
+        resignEstimate,
         board,
         disconnect,
         liveChess: chessRef.current,

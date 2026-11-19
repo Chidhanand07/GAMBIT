@@ -214,6 +214,19 @@ function createRatingService({ profilesRepo, gameResultsRepo }) {
         },
 
         /**
+         * What a result would do to both ratings if the game ended now: the same
+         * Glicko-2 and caps `processGameEnd` applies, from the profiles as stored,
+         * written nowhere (F-133). Null when either profile is missing.
+         * @param {{ whiteId: string, blackId: string, timeControl: unknown, result: 'white' | 'black' | 'draw' }} game
+         * @returns {Promise<RatingChanges | null>}
+         */
+        async estimate({ whiteId, blackId, timeControl, result }) {
+            const pair = await findPair(profilesRepo, whiteId, blackId);
+            if (!pair) return null;
+            return computeRatings(service, { field: service._ratingField(timeControl), ...pair, result }).changes;
+        },
+
+        /**
          * The profiles rating column for a time control.
          * @param {unknown} timeControl
          */

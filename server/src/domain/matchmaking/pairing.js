@@ -46,6 +46,29 @@ function getSearchRadius(elapsedSec) {
 }
 
 /**
+ * @typedef {{ min: number, max: number } | { min: null, max: null }} SearchWindow
+ *   ratings the player accepts; both null once the search is open to any rating
+ */
+
+/**
+ * The opponent ratings this player accepts after waiting `waitedSec` seconds,
+ * by the same rules `isRatingCompatible` applies to their own side: a
+ * provisional player accepts established opponents in the provisional band
+ * (and any other provisional player); an established player accepts their
+ * rating ± their current radius, or anyone once the radius is unlimited.
+ * An opponent who has waited longer may still accept them from further away.
+ * @param {{ rating: number, isProvisional: boolean }} entry
+ * @param {number} waitedSec
+ * @returns {SearchWindow}
+ */
+function searchWindow({ rating, isProvisional }, waitedSec) {
+    if (isProvisional) return { min: PROVISIONAL_BAND.min, max: PROVISIONAL_BAND.max };
+    const radius = getSearchRadius(waitedSec);
+    if (radius === UNLIMITED_RADIUS) return { min: null, max: null };
+    return { min: Math.max(0, Math.round(rating - radius)), max: Math.round(rating + radius) };
+}
+
+/**
  * Fewer than 5 games played (missing/0/null count as 0).
  * @param {number | null | undefined} gamesPlayed
  * @returns {boolean}
@@ -205,4 +228,6 @@ module.exports = {
     sortByLongestWaiting,
     sameTimeControl,
     findOpponent,
+    searchWindow,
+    waitedSeconds,
 };

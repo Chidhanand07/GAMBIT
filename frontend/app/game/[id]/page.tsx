@@ -34,6 +34,7 @@ export default function GamePage(props: { params: Promise<{ id: string }> }) {
                 open={state.confirm}
                 opponentName={view.opponentName}
                 rated={Boolean(gameData?.is_rated)}
+                estimate={screen.resignEstimate}
                 onConfirmResign={controls.onConfirmResign}
                 onConfirmDraw={controls.onConfirmDraw}
                 onCancel={controls.onCancelConfirm}

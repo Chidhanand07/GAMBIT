@@ -46,7 +46,8 @@ jest.mock('@/lib/supabase/client', () => ({
 
 // F11: the Online badge reads PresenceProvider's shared presence set.
 let onlineUserIds: ReadonlySet<string> = new Set()
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 1, onlineUserIds, awayUserIds }) }))
+let awayUserIds: ReadonlySet<string> = new Set()
 
 import ProfilePage from '@/app/profile/[username]/page'
 import { routeParams } from '../helpers/params'
@@ -78,6 +79,7 @@ beforeEach(() => {
     channels.length = 0
     removeChannel.mockClear()
     onlineUserIds = new Set()
+    awayUserIds = new Set()
     window.history.replaceState(null, '', '/')
     routes = {
         '/api/profile/bob': BOB,
@@ -443,7 +445,19 @@ describe('games tab', () => {
         expect(screen.getByText('91%')).toBeInTheDocument()
         expect(screen.queryByText('64%')).not.toBeInTheDocument()
         expect(screen.getByText('Rapid · 10 min')).toBeInTheDocument()
-        expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/game/g-row')
+        // F-162 (was: '/game/g-row'): Profile.dc.html's Review opens the analysis board.
+        expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/analysis?game=g-row')
+    })
+
+    test('Review opens a finished game on the analysis board, an aborted one on its game page [F-162]', async () => {
+        routes['/api/profile/bob/games?limit=15&offset=0'] = {
+            games: [game('g-done'), game('g-abort', { status: 'aborted', result: 'aborted', winner_id: null })],
+        }
+        await renderProfile()
+        click(tab(/^Games/))
+        await settle()
+        const hrefs = screen.getAllByRole('link', { name: 'Review' }).map((a) => a.getAttribute('href'))
+        expect(hrefs).toEqual(['/analysis?game=g-done', '/game/g-abort'])
     })
 
     test('loss and draw rows; time controls are bucketed bullet<=2, blitz<=5, rapid<=15, else classical', async () => {
@@ -689,6 +703,21 @@ describe('presence', () => {
         onlineUserIds = new Set(['someone-else'])
         rerender(page())
         expect(screen.queryByText('Online')).not.toBeInTheDocument()
+    })
+
+    test('the Overview friends card shows Online, Away and Offline (Profile.dc.html) [LIVE-2]', async () => {
+        routes['/api/friends?userId=u-bob'] = [
+            { id: 'f1', username: 'ann', display_name: null, friendship_id: 'a' },
+            { id: 'f2', username: 'cal', display_name: null, friendship_id: 'b' },
+            { id: 'f3', username: 'dee', display_name: null, friendship_id: 'c' },
+        ]
+        onlineUserIds = new Set(['f1', 'f2'])
+        awayUserIds = new Set(['f2'])
+        await renderProfile()
+        const line = (name: string) => screen.getByRole('link', { name }).parentElement!
+        expect(line('ann')).toHaveTextContent('Online')
+        expect(line('cal')).toHaveTextContent('Away')
+        expect(line('dee')).toHaveTextContent('Offline')
     })
 
     // F11 (was: 'unmount removes the channel'): there is no page-owned channel to remove.

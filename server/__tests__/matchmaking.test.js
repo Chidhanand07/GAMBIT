@@ -44,7 +44,7 @@ describe('queue', () => {
     test('joinQueue adds the player and tells their socket', async () => {
         await mm.joinQueue(user('a', 1500), 'sock-a', '10', 0);
         expect(await mm.queuedEntry('a')).toMatchObject({ rating: 1500, time_control: '10+0', increment: 0, isProvisional: false, isRated: true });
-        expect(io.emitted).toContainEqual({ room: 'sock-a', event: 'queue_joined', payload: { position: 1, estimated_wait: 10 } });
+        expect(io.emitted).toContainEqual({ room: 'sock-a', event: 'queue_joined', payload: { position: 1, estimated_wait: 10, search_window: { min: 1450, max: 1550 } } });
     });
 
     test('joining twice keeps one entry; a join from a new socket (reconnect) moves it there [ACKS]', async () => {

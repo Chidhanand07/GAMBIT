@@ -72,6 +72,9 @@ export const ACK_POLICY: Readonly<Record<string, RetryRule>> = {
     leave_queue: { retryOnce: true },
     join_game: { retryOnce: true },
     spectate_game: { retryOnce: true },
+    // Reads (F-130), and leaving a game you no longer watch is a no-op the second time.
+    leave_game: { retryOnce: true },
+    spectator_counts: { retryOnce: true },
     // The answer consumes the pending request: a repeat that finds nothing means "done".
     challenge_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
     rematch_decline: { retryOnce: true, doneOnRetry: ['no_pending_request'] },
@@ -94,21 +97,21 @@ export interface AckSocket {
 }
 
 export interface AckHandlers {
-    /** The server accepted the request. */
-    onAccepted?: () => void;
+    /** The server accepted the request; `ack` is its whole answer (some carry data, F-130). */
+    onAccepted?: (ack: unknown) => void;
     /** The server refused it (its code), or never answered (`ack_timeout`). */
     onRejected: (code: string) => void;
     /** Per call, for tests; default ACK_TIMEOUT_MS. */
     timeoutMs?: number;
 }
 
-/** Settle exactly once, whichever attempt answers first. `null` means accepted. */
-function settler(handlers: AckHandlers): (code: string | null) => void {
+/** Settle exactly once, whichever attempt answers first. `null` means accepted (with its ack). */
+function settler(handlers: AckHandlers): (code: string | null, ack?: unknown) => void {
     let settled = false;
-    return (code) => {
+    return (code, ack) => {
         if (settled) return;
         settled = true;
-        if (code === null) handlers.onAccepted?.();
+        if (code === null) handlers.onAccepted?.(ack);
         else handlers.onRejected(code);
     };
 }
@@ -122,9 +125,9 @@ export function emitWithAck(socket: AckSocket, event: string, payload: unknown, 
     const timeoutMs = handlers.timeoutMs ?? ACK_TIMEOUT_MS;
     const settle = settler(handlers);
     const timers: ReturnType<typeof setTimeout>[] = [];
-    const finish = (code: string | null) => {
+    const finish = (code: string | null, ack?: unknown) => {
         timers.forEach(clearTimeout);
-        settle(code);
+        settle(code, ack);
     };
 
     const attempt = (isRetry: boolean) => {
@@ -135,7 +138,7 @@ export function emitWithAck(socket: AckSocket, event: string, payload: unknown, 
             }, timeoutMs),
         );
         socket.emit(event, payload, (ack?: unknown) => {
-            if (!isRejection(ack)) return finish(null);
+            if (!isRejection(ack)) return finish(null, ack);
             const code = ack.error ?? FALLBACK_CODE;
             finish(isRetry && rule.doneOnRetry?.includes(code) ? null : code);
         });

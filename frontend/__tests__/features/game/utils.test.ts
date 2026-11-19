@@ -101,7 +101,7 @@ describe('deriveGameView', () => {
         whiteTime: 10, blackTime: 200, whiteRatingChange: 5,
         ...over,
     })
-    const view = (over: object = {}, opts: { turn?: 'w' | 'b'; mine?: boolean; inCheck?: boolean; online?: string[]; away?: boolean; fen?: string; watching?: number | null } = {}) =>
+    const view = (over: object = {}, opts: { turn?: 'w' | 'b'; mine?: boolean; inCheck?: boolean; online?: string[]; away?: boolean; fen?: string } = {}) =>
         deriveGameView({
             state: state(over),
             liveChess: { turn: () => opts.turn ?? 'w', inCheck: () => opts.inCheck ?? false },
@@ -109,7 +109,6 @@ describe('deriveGameView', () => {
             isMyTurn: opts.mine ?? false,
             onlineUserIds: new Set(opts.online ?? []),
             opponentDisconnected: opts.away ?? false,
-            watching: opts.watching,
         })
 
     test('unflipped: black on top; the side to move is active; ratings by time control with the change', () => {
@@ -165,16 +164,24 @@ describe('deriveGameView', () => {
         expect(view({ myColor: 'spectator' }).header).toMatchObject({ title: 'Alice vs bob', subtitle: 'Blitz · 5 min · spectating', pills: ['Rated', 'Blitz 5 min', 'Spectating'] })
     })
 
-    test('[F-102] "N watching" pill (Game.dc.html) only when a spectator count is passed in', () => {
-        expect(view({ myColor: 'white' }, { watching: 3 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '3 watching'])
-        expect(view({ myColor: 'white' }, { watching: 0 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '0 watching'])
-        expect(view({ myColor: 'white' }, { watching: null }).header.pills).toEqual(['Rated', 'Blitz 5 min'])
+    // Stacking (was: the count passed in as `watching`): the slot F-102 left is fed by the game
+    // state's live spectator count (F-130).
+    test('[F-102] "N watching" pill (Game.dc.html) only when a spectator count is known', () => {
+        expect(view({ myColor: 'white', spectators: 3 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '3 watching'])
+        expect(view({ myColor: 'white', spectators: 0 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '0 watching'])
+        expect(view({ myColor: 'white', spectators: null }).header.pills).toEqual(['Rated', 'Blitz 5 min'])
     })
 
     test('[F-102] the country chip comes from the player when the game API sends it', () => {
         const v = view({ myColor: 'white', gameData: { ...(state().gameData as object), white: { username: 'alice', display_name: 'Alice', country: 'IN' } } })
         expect(v.bottom.country).toBe('IN')
         expect(v.top.country).toBeNull()
+    })
+
+    test('"N watching" once the server has counted (Game.dc.html) [F-130]', () => {
+        expect(view({ myColor: 'white', spectators: 3 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '3 watching'])
+        expect(view({ myColor: 'white', spectators: 0 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '0 watching'])
+        expect(view({ myColor: 'spectator', spectators: 1 }).header.pills).toEqual(['Rated', 'Blitz 5 min', '1 watching', 'Spectating'])
     })
 
     test('game info: move number, captures, material from my side, my clock', () => {
