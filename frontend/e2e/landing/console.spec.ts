@@ -16,7 +16,9 @@ test('a full visit logs nothing and hydrates cleanly', async ({ page }) => {
     expect(problems).toEqual([]);
 });
 
-test('hydration: the server HTML is what React renders (no mismatch, no client-only re-render of content)', async ({ page }) => {
+test('hydration: the server HTML is what React renders (no mismatch, no client-only re-render of content)', async ({
+    page,
+}) => {
     const problems = collectProblems(page);
     const response = await page.request.get('/');
     const html = await response.text();

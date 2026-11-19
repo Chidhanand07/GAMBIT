@@ -52,7 +52,8 @@ test('robots.txt lets crawlers in, keeps them out of private routes and names th
     const body = await res.text();
     expect(body).toMatch(/User-Agent: \*/i);
     expect(body).toContain('Allow: /');
-    for (const path of ['/api/', '/lobby', '/game/', '/profile/', '/settings']) expect(body).toContain(`Disallow: ${path}`);
+    for (const path of ['/api/', '/lobby', '/game/', '/profile/', '/settings'])
+        expect(body).toContain(`Disallow: ${path}`);
     expect(body).toMatch(/Sitemap: https?:\/\/\S+\/sitemap\.xml/);
 });
 
