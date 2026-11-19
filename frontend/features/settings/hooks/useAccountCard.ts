@@ -1,15 +1,17 @@
 import type { AccountPrefsDraft } from './useAccountPrefsDraft';
 import { useAuthAccount } from './useAuthAccount';
+import { useDeleteAccount } from './useDeleteAccount';
 import { useEmailChange } from './useEmailChange';
 import { useEmailLinkResult } from './useEmailLinkResult';
 import { useTwoFactor } from './useTwoFactor';
 
 /**
- * The Account card (Settings.dc.html "Account"): sign-in e-mail and its change, the account
- * switches, and the card's Save / Reset.
+ * The Account card (Settings.dc.html "Account"): sign-in e-mail and its change, two-factor, the
+ * account switches, account deletion, and the card's Save / Reset.
  */
-export function useAccountCard(prefs: AccountPrefsDraft) {
+export function useAccountCard(prefs: AccountPrefsDraft, username: string) {
     const auth = useAuthAccount();
+    const deletion = useDeleteAccount(username, auth.hasPassword);
     const emailChange = useEmailChange(auth);
     const emailLink = useEmailLinkResult();
     const twoFactor = useTwoFactor();
@@ -22,7 +24,7 @@ export function useAccountCard(prefs: AccountPrefsDraft) {
     /** Part of the page's one "Reset to defaults": the e-mail field shows the current address again. */
     const reset = () => emailChange.reset();
 
-    return { email: auth.email, emailChange, emailLink, twoFactor, save, reset };
+    return { email: auth.email, emailChange, emailLink, twoFactor, deletion, save, reset };
 }
 
 export type AccountCardState = ReturnType<typeof useAccountCard>;

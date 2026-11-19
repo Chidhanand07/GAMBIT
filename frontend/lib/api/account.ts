@@ -6,3 +6,8 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 export function requestEmailChange(email: string): Promise<Response> {
     return fetch('/api/account/email', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email }) });
 }
+
+/** POST /api/account/delete — irreversible; the server re-authenticates first. */
+export function requestAccountDeletion(body: { confirmUsername: string; password?: string }): Promise<Response> {
+    return fetch('/api/account/delete', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) });
+}

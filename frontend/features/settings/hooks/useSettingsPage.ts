@@ -17,7 +17,7 @@ export function useSettingsPage(profile: SettingsProfile | null, refetch: () => 
     const form = useProfileSettings(profile, refetch);
     const draft = useSettingsDraft();
     const accountDraft = useAccountPrefsDraft();
-    const account = useAccountCard(accountDraft);
+    const account = useAccountCard(accountDraft, profile?.username ?? '');
     const browser = useBrowserNotifications();
     // Back from an e-mail confirmation link: open the Account card, where the result is shown.
     const [shownLink, setShownLink] = useState(account.emailLink);

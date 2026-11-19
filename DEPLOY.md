@@ -72,6 +72,7 @@ On a fresh project nothing is deployed yet, so all migrations can be applied tog
    | 14 | `20261114100000_drop_legacy_clock_columns.sql` | drops `games.white_time_ms` / `black_time_ms` |
    | 15 | `20261114200000_profiles_revoke_service_role_update.sql` | `service_role` loses `UPDATE` on `profiles` |
    | 16 | `20261118300000_user_preferences.sql` | `user_preferences` (owner-only RLS; `service_role` reads only) and the `leaderboard_profiles` view (ADR F-140) |
+   | 17 | `20261118300100_delete_account.sql` | `public.delete_account(uuid)`: a user's data removed atomically, finished games anonymised (service role only, ADR F-145) |
 
    On an existing project, follow the rollout rules in **Deploy order** above.
 3. If you apply files by hand and use the Supabase CLI history, record each one:
@@ -93,6 +94,13 @@ Notes on the late migrations:
   read `user_preferences` (fail closed). pgTAP: `supabase/tests/080_user_preferences.test.sql`.
   Rollback: `DROP VIEW public.leaderboard_profiles; DROP TABLE public.user_preferences;
   DROP FUNCTION public.user_preferences_touch();`.
+
+- `20261118300100_delete_account.sql` (DELETE-ACCOUNT, ADR F-145): additive (one function). Apply
+  before deploying the web app with Settings → Account → Delete account. The web app also needs the
+  Auth admin API (secret key, already configured) and the `avatars` bucket (§1c) to clean up files.
+  pgTAP: `supabase/tests/081_delete_account.test.sql`, including a guard that fails when a new
+  foreign key to `profiles` neither cascades nor is handled by the function.
+  Rollback: `DROP FUNCTION public.delete_account(uuid);`.
 
 The same migrations and the pgTAP tests in `supabase/tests/` run in CI on an empty database
 (job `Database (Supabase)`, section 8).

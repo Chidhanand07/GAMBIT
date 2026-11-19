@@ -6,13 +6,20 @@ export interface AuthAccount {
     email: string | null;
     /** An e-mail change waiting for its confirmation link(s), if any. */
     newEmail: string | null;
+    /** The account has a password (an `email` identity), so deleting it asks for that password. */
+    hasPassword: boolean;
 }
 
-const UNKNOWN: AuthAccount = { email: null, newEmail: null };
+const UNKNOWN: AuthAccount = { email: null, newEmail: null, hasPassword: true };
 
 async function readAccount(): Promise<AuthAccount> {
     const { data } = await createClient().auth.getUser();
-    return { email: data.user?.email ?? null, newEmail: data.user?.new_email ?? null };
+    const user = data.user;
+    return {
+        email: user?.email ?? null,
+        newEmail: user?.new_email ?? null,
+        hasPassword: user ? (user.identities ?? []).some((i) => i.provider === 'email') : true,
+    };
 }
 
 /** The current user's e-mail and pending e-mail change; `refresh()` re-reads them. */

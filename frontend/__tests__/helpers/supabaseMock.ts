@@ -39,16 +39,22 @@ export function createSupabaseMock() {
     })
 
     /** `rpc(fn, args)`: recorded as table `rpc:<fn>`, resolved from `queue('rpc:<fn>', …)`. */
-    const rpc = jest.fn((fn: string, args?: unknown) => {
+    const rpcFromQueue = (fn: string, args?: unknown) => {
         const call: Call = { table: `rpc:${fn}`, ops: [['rpc', fn, args]] }
         calls.push(call)
         return next(call)
-    })
+    }
+    const rpc = jest.fn(rpcFromQueue)
 
+    const storageBucket = {
+        list: jest.fn(async (_prefix?: string): Promise<{ data: unknown; error: unknown }> => ({ data: [], error: null })),
+        remove: jest.fn(async (_paths?: string[]): Promise<{ data: unknown; error: unknown }> => ({ data: [], error: null })),
+    }
     const client = {
         from,
         rpc,
         calls,
+        storage: { from: jest.fn((_bucket: string) => storageBucket), bucket: storageBucket },
         auth: {
             getUser: jest.fn(async () => ({ data: { user: null }, error: null })),
             /** Verified JWT claims (NX-10). Default: nothing verifies. */
@@ -57,7 +63,9 @@ export function createSupabaseMock() {
             signInWithPassword: jest.fn(async () => ({ data: { session: null }, error: null })),
             updateUser: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: { user: null }, error: null })),
             verifyOtp: jest.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: { user: null }, error: null })),
+            signOut: jest.fn(async (_opts?: unknown): Promise<{ error: unknown }> => ({ error: null })),
             admin: {
+                updateUserById: jest.fn(async (_id: string, _attrs: unknown): Promise<{ data: unknown; error: unknown }> => ({ data: { user: null }, error: null })),
                 createUser: jest.fn(async () => ({ data: { user: null }, error: null })),
                 deleteUser: jest.fn(async () => ({ data: null, error: null })),
                 getUserById: jest.fn(async () => ({ data: { user: null }, error: null })),
@@ -85,13 +93,18 @@ export function createSupabaseMock() {
             queues.clear()
             calls.length = 0
             from.mockClear()
-            rpc.mockClear()
             client.auth.getUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.getClaims.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.getSession.mockReset().mockResolvedValue({ data: { session: null }, error: null })
             client.auth.signInWithPassword.mockReset().mockResolvedValue({ data: { session: null }, error: null })
             client.auth.updateUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.verifyOtp.mockReset().mockResolvedValue({ data: { user: null }, error: null })
+            client.auth.signOut.mockReset().mockResolvedValue({ error: null })
+            client.auth.admin.updateUserById.mockReset().mockResolvedValue({ data: { user: null }, error: null })
+            rpc.mockReset().mockImplementation(rpcFromQueue)
+            client.storage.from.mockClear()
+            storageBucket.list.mockReset().mockResolvedValue({ data: [], error: null })
+            storageBucket.remove.mockReset().mockResolvedValue({ data: [], error: null })
             client.auth.admin.createUser.mockReset().mockResolvedValue({ data: { user: null }, error: null })
             client.auth.admin.deleteUser.mockReset().mockResolvedValue({ data: null, error: null })
             client.auth.admin.getUserById.mockReset().mockResolvedValue({ data: { user: null }, error: null })

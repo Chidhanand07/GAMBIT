@@ -130,6 +130,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-142](#f-142) | Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet | B3 | SETTINGS-PREFS |
 | [F-143](#f-143) | Change e-mail: `updateUser` on the session client, token-hash confirm route, strict rate limit | B3 | CHANGE-EMAIL |
 | [F-144](#f-144) | Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced on account changes and at sign-in | B3 | TWO-FACTOR |
+| [F-145](#f-145) | Delete account: re-authenticate, ban, one SQL transaction (games anonymised to NULL), then the auth user | B3 | DELETE-ACCOUNT |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3449,4 +3450,41 @@ and by the app at sign-in.** (Track B3, item 3; NX-07, NX-10, SEC-09.)
   `getUser()` round trip or a Custom Access Token Hook that adds a "has verified factor" claim; the
   hook is the planned follow-up (DEPLOY.md would gain one dashboard step).
 - **Operations.** MFA (TOTP) must be enabled in the Supabase project: DEPLOY.md §1b-3.
+
+## F-145
+
+**Delete account: re-authenticate, ban, remove the data in one SQL transaction (finished games kept
+with the player's side set to NULL), then delete the auth user.** (Track B3, item 4; SEC-03,
+SEC-04, SEC-01, NODE-12.)
+
+- **Context.** Settings.dc.html's Account card ends with a red "Delete account" zone. `games`
+  references `profiles` three times (`white_id`, `black_id`, `winner_id`) and `messages.user_id`
+  once, all without an ON DELETE action, so a profile with games could not be deleted at all;
+  `profiles.id` references `auth.users`, so the auth user cannot go first either.
+- **Options for the games.** (a) delete them (removes the opponents' history and their rating
+  context); (b) a shared "deleted player" tombstone profile (needs a fake `auth.users` row, because
+  `profiles.id` references it, and would aggregate strangers' games under one name); (c) set the
+  deleted player's side to NULL and keep `result` (which already says who won).
+- **Decision.** (c), in `public.delete_account(uuid)` (migration `20261118300100`, SECURITY DEFINER,
+  `search_path=''`, EXECUTE for `service_role` only): locks the profile; refuses with SQLSTATE 55000
+  `active_game` while the user plays a live game (no game loses a player mid-way); deletes the
+  user's never-started private invites (cascades their moves, chat, invite token), their chat lines,
+  friendships, their notifications and other users' notifications that name them, their
+  preferences and the profile; nulls their side and `winner_id` in every other game. One
+  transaction: all or nothing. The UI already shows a missing opponent as "Unknown".
+- **The route** `POST /api/account/delete` (body `{ confirmUsername, password? }`):
+  `requireFreshUser()` (AAL2 when two-factor is on, F-144) → strict rate limit 5/user/hour (fails
+  closed, F-143) → the username typed exactly (case-sensitive) → re-authentication: the password
+  for accounts that have one (checked on a throwaway client with no session storage, then signed
+  out), else a sign-in less than 10 minutes old (the token's `amr` timestamp) → **ban** the auth
+  user (`ban_duration`) so nobody can sign in or refresh while data goes → `delete_account` (on
+  failure: unban, 409/500) → avatar files in `avatars/<id>/` (best effort) → `auth.admin.deleteUser`
+  (on failure: 500 `auth_delete_failed`, the user stays banned and holds no data) → session cookies
+  cleared. Logs carry `ref <12 hex of sha256(user id)>` only.
+- **Why not delete `auth.users` inside the SQL function.** The brief asks for the Auth admin API,
+  which also revokes sessions and identities the way Supabase Auth expects; the ban closes the gap
+  between the transaction and that call.
+- **Guard.** pgTAP 081 fails when any foreign key to `profiles` neither cascades nor is one of the
+  four handled columns, so a table added later (e.g. by another track) must be added to the function
+  before it ships.
 

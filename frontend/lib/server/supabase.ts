@@ -38,6 +38,14 @@ export function createAdminClient(): SupabaseClient {
 }
 
 /**
+ * Public-key client with no session storage and no cookies: checks a password (re-authentication
+ * before deleting an account, ADR F-145) without touching the caller's own session.
+ */
+export function createPasswordProbeClient(): SupabaseClient {
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, supabasePublicKey()!, { auth: noSessionPersistence() });
+}
+
+/**
  * Public-key (publishable / legacy anon) @supabase/ssr client bound to the request's session cookies. Used only to ask
  * verify who the caller is (`auth.getClaims()`, see identity.ts); it is never used to bypass RLS.
  *

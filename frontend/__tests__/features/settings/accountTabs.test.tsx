@@ -2,16 +2,18 @@
 // design/Settings.dc.html edit the account preferences, preview them and save them.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 
-jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }))
+const push = jest.fn()
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: jest.fn() }) }))
 jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href }: any) => <a href={href}>{children}</a> }))
 const profile = {
     id: 'u-1', username: 'me1', display_name: 'Maverick', bio: '', country: '', avatar_url: null,
     rating_bullet: 1200, rating_blitz: 1200, rating_rapid: 1025.4, rating_classical: 1200, created_at: '2024-01-01',
 }
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile, loading: false, refetch: jest.fn() }) }))
-let authUser: { email: string; new_email: string | null } = { email: 'me@example.com', new_email: null }
+let authUser: { email: string; new_email: string | null; identities?: { provider: string }[] } = { email: 'me@example.com', new_email: null }
+const signOut = jest.fn(async () => ({ error: null }))
 jest.mock('@/lib/supabase/client', () => ({
-    createClient: () => ({ auth: { getUser: async () => ({ data: { user: authUser } }) } }),
+    createClient: () => ({ auth: { getUser: async () => ({ data: { user: authUser } }), signOut } }),
 }))
 
 import SettingsPage from '@/app/settings/page'
@@ -26,11 +28,14 @@ const flush = async () => {
 const reply = (status: number, body: unknown) => ({ ok: status < 300, status, headers: new Headers(), json: async () => body })
 let fetchMock: jest.Mock
 let emailReply = reply(200, { pending: true, email: 'new@example.com' })
+let deleteReply = reply(200, { deleted: true })
 beforeEach(() => {
+    deleteReply = reply(200, { deleted: true })
+    push.mockClear()
     authUser = { email: 'me@example.com', new_email: null }
     emailReply = reply(200, { pending: true, email: 'new@example.com' })
     fetchMock = jest.fn(async (url: string) =>
-        url === '/api/account/email' ? emailReply : reply(200, [{ username: 'x' }, { username: 'me1' }]))
+        url === '/api/account/email' ? emailReply : url === '/api/account/delete' ? deleteReply : reply(200, [{ username: 'x' }, { username: 'me1' }]))
     ;(global as any).fetch = fetchMock
     window.history.replaceState(null, '', '/settings')
 })
@@ -188,6 +193,48 @@ describe('Account: change email (F-143)', () => {
         expect(screen.getByRole('heading', { name: 'Account' })).toBeInTheDocument()
         expect(screen.getByRole('alert')).toHaveTextContent('That confirmation link is invalid or has expired.')
         expect(window.location.search).toBe('')
+    })
+})
+
+describe('Account: delete account (F-145)', () => {
+    async function openDialog(identities = [{ provider: 'email' }]) {
+        authUser = { email: 'me@example.com', new_email: null, identities }
+        open('Account')
+        await flush()
+        fireEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+        return screen.getByRole('alertdialog', { name: 'Delete account' })
+    }
+
+    test('the red zone of the mockup; the dialog only submits with the exact username and the password', async () => {
+        const dialog = await openDialog()
+        expect(screen.getByText('Permanently removes your profile, games and ratings.')).toBeInTheDocument()
+        const submit = within(dialog).getByRole('button', { name: 'Delete my account' })
+        expect(submit).toBeDisabled()
+        fireEvent.change(within(dialog).getByPlaceholderText('me1'), { target: { value: 'ME1' } })
+        expect(submit).toBeDisabled()
+        fireEvent.change(within(dialog).getByPlaceholderText('me1'), { target: { value: 'me1' } })
+        expect(submit).toBeDisabled()
+        fireEvent.change(within(dialog).getByLabelText('Password'), { target: { value: 'pw' } })
+        expect(submit).toBeEnabled()
+        fireEvent.click(submit)
+        await flush()
+        const call = fetchMock.mock.calls.find(([url]) => url === '/api/account/delete')!
+        expect(JSON.parse(call[1].body)).toEqual({ confirmUsername: 'me1', password: 'pw' })
+        expect(signOut).toHaveBeenCalledWith({ scope: 'local' })
+        expect(push).toHaveBeenCalledWith('/')
+    })
+
+    test('an OAuth-only account is not asked for a password; a refusal is explained and nothing is left', async () => {
+        deleteReply = reply(409, { error: 'active_game' })
+        const dialog = await openDialog([{ provider: 'google' }])
+        expect(within(dialog).queryByLabelText('Password')).not.toBeInTheDocument()
+        fireEvent.change(within(dialog).getByPlaceholderText('me1'), { target: { value: 'me1' } })
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Delete my account' }))
+        await flush()
+        expect(within(dialog).getByRole('alert')).toHaveTextContent('Finish or resign your current game first.')
+        expect(push).not.toHaveBeenCalled()
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
 })
 

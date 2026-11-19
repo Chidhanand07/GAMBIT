@@ -144,6 +144,11 @@ export const schemas = {
     emailChange: z.object({
         email: z.string().trim().toLowerCase().max(MAX_EMAIL_LENGTH).pipe(z.email()),
     }),
+    /** POST /api/account/delete (ADR F-145): the typed username, and the password when there is one. */
+    accountDelete: z.object({
+        confirmUsername: z.string().min(1).max(MAX_USERNAME_PARAM_LENGTH),
+        password: z.string().min(1).max(MAX_PASSWORD_LENGTH).optional(),
+    }),
     /** PATCH /api/settings (ADR F-140): any subset of the sections and their keys. */
     preferencesPatch: z.object({
         play: playPreferences.optional(),

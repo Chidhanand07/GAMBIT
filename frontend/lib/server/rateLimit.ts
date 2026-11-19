@@ -38,6 +38,8 @@ export const RATE_LIMITS = {
     friendRequest: { id: 'friendRequest', limit: 30, windowMs: HOUR_MS },
     /** Per verified user: each request mails one or two confirmation links (ADR F-143). */
     changeEmail: { id: 'changeEmail', limit: 5, windowMs: HOUR_MS },
+    /** Per verified user: password guesses against the delete confirmation (ADR F-145). */
+    deleteAccount: { id: 'deleteAccount', limit: 5, windowMs: HOUR_MS },
 } as const satisfies Record<string, RateLimitRule>;
 
 const ALLOWED: LimitResult = { ok: true };

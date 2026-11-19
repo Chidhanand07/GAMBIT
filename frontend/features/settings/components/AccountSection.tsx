@@ -1,6 +1,7 @@
 import { SIGN_IN_EMAIL_ROW } from '../accountRows';
 import type { SettingsPageState } from '../hooks/useSettingsPage';
 import type { SettingsProfile } from '../types';
+import { DeleteAccountZone } from './DeleteAccountZone';
 import { EmailField } from './EmailField';
 import { SaveBar } from './SettingsCard';
 import { Switch } from '@/components/ui/Switch';
@@ -59,6 +60,7 @@ export function AccountSection({ profile, state }: { profile: SettingsProfile; s
                 <AccountSettingRow row={SIGN_IN_EMAIL_ROW} prefs={accountDraft.draft} onChange={state.setAccountPref} />
             </div>
             <TwoFactorDialog tf={account.twoFactor} />
+            <DeleteAccountZone del={account.deletion} username={profile.username} />
             <SaveBar
                 onSave={() => void account.save()}
                 onReset={state.resetAll}
