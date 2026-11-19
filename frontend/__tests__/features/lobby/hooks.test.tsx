@@ -9,6 +9,9 @@ import { useActiveGame } from '@/features/lobby/hooks/useActiveGame';
 import { queuePayload, useMatchmaking } from '@/features/lobby/hooks/useMatchmaking';
 import { usePrivateGame } from '@/features/lobby/hooks/usePrivateGame';
 import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSelection';
+import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model';
+import { SettingsProvider, useUserSettings } from '@/features/settings/SettingsProvider';
+import type { SettingsStore } from '@/features/settings/store';
 
 const fake = createFakeSocket();
 const socket = fake as unknown as Socket;
@@ -48,6 +51,37 @@ describe('useTimeControlSelection', () => {
         expect(result.current.getTcMinutes).not.toBe(first);
         act(() => result.current.setSelectedTc('custom'));
         expect(result.current.playOnlineTimeControl).toBe('5+4');
+    });
+
+    const withSettings = (store: SettingsStore) =>
+        function Wrapper({ children }: { children: React.ReactNode }) {
+            return <SettingsProvider store={store}>{children}</SettingsProvider>;
+        };
+
+    test('preselects the "Default time control" setting until the player picks a card', () => {
+        const stored: UserSettings = { ...DEFAULT_SETTINGS, defaultTimeControl: 'rapid' };
+        const { result } = renderHook(() => useTimeControlSelection(), {
+            wrapper: withSettings({ load: () => stored, save: jest.fn() }),
+        });
+        expect(result.current.selectedTc).toBe('rapid');
+        expect(result.current.playOnlineTimeControl).toBe('10+0');
+        act(() => result.current.setSelectedTc('bullet'));
+        expect(result.current.selectedTc).toBe('bullet');
+    });
+
+    test("the default setting reproduces the old default (blitz); a card the player picked survives a settings change", () => {
+        let stored: UserSettings = { ...DEFAULT_SETTINGS };
+        const store: SettingsStore = { load: () => stored, save: (s) => (stored = s) };
+        const { result } = renderHook(
+            () => ({ tc: useTimeControlSelection(), settings: useUserSettings() }),
+            { wrapper: withSettings(store) },
+        );
+        expect(result.current.tc.selectedTc).toBe('blitz');
+        act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'classical' }));
+        expect(result.current.tc.selectedTc).toBe('classical');
+        act(() => result.current.tc.setSelectedTc('bullet'));
+        act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'rapid' }));
+        expect(result.current.tc.selectedTc).toBe('bullet');
     });
 });
 

@@ -7,17 +7,32 @@ jest.mock('@/lib/sounds', () => ({
     playGameEndSound: jest.fn(),
 }))
 import * as sounds from '@/lib/sounds'
-import { playerMoveCount, playSoundForMove, resolveColor, resultText, tryMove, undoToPlayerTurn } from '@/features/offline/game'
+import { isPromotion, playerMoveCount, playSoundForMove, resolveColor, resultText, tryMove, undoToPlayerTurn } from '@/features/offline/game'
 import { handleSquareClick, type SquareClickContext } from '@/features/offline/squareClick'
 import { requestMaverickMove } from '@/lib/api/offline'
 
 beforeEach(() => jest.clearAllMocks())
+
+/** White pawn on a7, one step from promoting. */
+const PROMOTION_FEN = '7k/P7/8/8/8/8/8/4K3 w - - 0 1'
 
 describe('tryMove', () => {
     test('returns the move or null when illegal', () => {
         const g = new Chess()
         expect(tryMove(g, 'e2', 'e5')).toBeNull()
         expect(tryMove(g, 'e2', 'e4')?.san).toBe('e4')
+    })
+
+    test('a promoting pawn becomes a queen unless another piece is given', () => {
+        expect(tryMove(new Chess(PROMOTION_FEN), 'a7', 'a8')?.promotion).toBe('q')
+        expect(tryMove(new Chess(PROMOTION_FEN), 'a7', 'a8', 'n')?.promotion).toBe('n')
+    })
+
+    test('isPromotion: only a legal pawn move to the last rank', () => {
+        const g = new Chess(PROMOTION_FEN)
+        expect(isPromotion(g, 'a7', 'a8')).toBe(true)
+        expect(isPromotion(g, 'e1', 'e2')).toBe(false)
+        expect(isPromotion(new Chess(), 'e2', 'e4')).toBe(false)
     })
 })
 
@@ -137,6 +152,20 @@ describe('handleSquareClick', () => {
         expect(c.selection.clearSelection).toHaveBeenCalledTimes(2)
         handleSquareClick(c, 'e4')
         expect(c.onPlayerMove).toHaveBeenCalledWith(expect.objectContaining({ from: 'e2', to: 'e4' }))
+    })
+    test('auto-queen off (onPromotion set): a promoting move asks for the piece instead of moving', () => {
+        const base = ctx({ game: new Chess(PROMOTION_FEN), onPromotion: jest.fn() })
+        const c = { ...base, selection: { ...base.selection, selectedSquare: 'a7' } }
+        handleSquareClick(c, 'a8')
+        expect(c.onPromotion).toHaveBeenCalledWith('a7', 'a8')
+        expect(c.onPlayerMove).not.toHaveBeenCalled()
+        expect(c.game.get('a7')).toEqual({ type: 'p', color: 'w' })
+    })
+    test('auto-queen on (no onPromotion): a promoting move plays a queen', () => {
+        const base = ctx({ game: new Chess(PROMOTION_FEN) })
+        const c = { ...base, selection: { ...base.selection, selectedSquare: 'a7' } }
+        handleSquareClick(c, 'a8')
+        expect(c.onPlayerMove).toHaveBeenCalledWith(expect.objectContaining({ from: 'a7', to: 'a8', promotion: 'q' }))
     })
 })
 

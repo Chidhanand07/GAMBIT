@@ -27,7 +27,10 @@ export const RATE_LIMITS = {
     maverickMove: { id: 'maverickMove', limit: 60, windowMs: MINUTE_MS },
     /** Per IP: a household or office behind one NAT, with typos, stays well under it. */
     loginIp: { id: 'loginIp', limit: 20, windowMs: 10 * MINUTE_MS },
-    /** Per e-mail across IPs: slows guessing one account's password from a botnet. */
+    /**
+     * Per sign-in identifier (e-mail or username, lower-cased) across IPs: slows guessing one
+     * account's password from a botnet. The id keeps its old name so live counters carry over (F-101).
+     */
     loginEmail: { id: 'loginEmail', limit: 10, windowMs: 15 * MINUTE_MS },
     /** Per IP: nobody creates more than a few accounts an hour. */
     signup: { id: 'signup', limit: 5, windowMs: HOUR_MS },

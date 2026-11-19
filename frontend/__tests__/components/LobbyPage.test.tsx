@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 const push = jest.fn()
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push, replace: jest.fn(), prefetch: jest.fn() }) }))
 jest.mock('next/dynamic', () => () => () => null)
-jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href }: any) => <a href={href}>{children}</a> }))
+jest.mock('next/link', () => ({ __esModule: true, default: ({ children, href, prefetch: _p, ...rest }: any) => <a href={href} {...rest}>{children}</a> }))
 jest.mock('qrcode.react', () => ({ QRCodeSVG: () => null }))
 jest.mock('@/lib/supabase/client', () => ({ createClient: () => ({}) }))
 
@@ -24,9 +24,19 @@ const serverSends = (event: string, payload: any) => act(() => { handlers.get(ev
 let profile: any = { id: 'me', username: 'me1', rating_blitz: 1400 }
 jest.mock('@/components/SocketProvider', () => ({ useSocket: () => socket }))
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile }) }))
-jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42 }) }))
+jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ onlineCount: 42, onlineUserIds: new Set(['f-on']) }) }))
 
 import LobbyPage from '@/app/lobby/page'
+
+const liveGames = [{
+    id: 'live-1', time_control: '3+0', category: 'blitz', move_number: 21, started_at: null,
+    white: { username: 'alice', display_name: null, avatar_url: null, rating: 1228 },
+    black: { username: 'bob', display_name: null, avatar_url: null, rating: 1200 },
+}]
+const friends = [
+    { id: 'f-off', username: 'zed', display_name: null, avatar_url: null, rating_rapid: 1100.4, friendship_id: 'x' },
+    { id: 'f-on', username: 'amy', display_name: 'Amy', avatar_url: null, rating_rapid: 1376, friendship_id: 'y' },
+]
 
 let fetchMock: jest.Mock
 beforeEach(() => {
@@ -36,6 +46,8 @@ beforeEach(() => {
     profile = { id: 'me', username: 'me1', rating_blitz: 1400 }
     fetchMock = jest.fn(async (url: string) => {
         if (url === '/api/games/active') return { ok: true, json: async () => null }
+        if (url === '/api/games/live') return { ok: true, json: async () => liveGames }
+        if (url === '/api/friends') return { ok: true, json: async () => friends }
         if (url === '/api/games/private/create') return { ok: true, json: async () => ({ token: 'abc123XYZ0', game_id: 'g-priv' }) }
         return { ok: false, json: async () => ({}) }
     })
@@ -51,7 +63,7 @@ test('Play Online with the default (Blitz) queues for a 3-minute game', async ()
     await userEvent.click(screen.getByText('Play Online'))
     expect(joinQueueCalls()).toHaveLength(1)
     expect(joinQueueCalls()[0][1]).toMatchObject({ user: { id: 'me' }, time_control: '3+0', increment: 0 })
-    expect(screen.getByText('Finding opponent…')).toBeInTheDocument()
+    expect(screen.getByText('Finding an opponent...')).toBeInTheDocument()
 })
 
 test.each([
@@ -68,9 +80,9 @@ test.each([
 test('Cancel search leaves the queue', async () => {
     render(<LobbyPage />)
     await userEvent.click(screen.getByText('Play Online'))
-    await userEvent.click(screen.getByText('Cancel search'))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(socket.emit).toHaveBeenCalledWith('leave_queue', 'me')
-    expect(screen.queryByText('Finding opponent…')).not.toBeInTheDocument()
+    expect(screen.queryByText('Finding an opponent...')).not.toBeInTheDocument()
 })
 
 test('a match sends the player to the game page', async () => {
@@ -104,15 +116,43 @@ test('a player already in a game is warned instead of queued', async () => {
     expect(push).toHaveBeenCalledWith('/game/live-1')
 })
 
-test('Computer opens the offline board', async () => {
+// Redesign: Computer opens the MAVERICK setup; Start game opens the offline board with the choice.
+test('Computer opens the MAVERICK setup; Start game links to the offline board with difficulty and side', async () => {
     render(<LobbyPage />)
-    await userEvent.click(screen.getByText('Computer'))
-    expect(push).toHaveBeenCalledWith('/offline')
+    await userEvent.click(screen.getByRole('button', { name: 'Computer' }))
+    expect(screen.getByText('Play MAVERICK')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Medium/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('link', { name: 'Start game' })).toHaveAttribute('href', '/offline?difficulty=medium&side=w')
+    await userEvent.click(screen.getByRole('button', { name: /Hard/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Black/ }))
+    expect(screen.getByRole('link', { name: 'Start game' })).toHaveAttribute('href', '/offline?difficulty=hard&side=b')
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByText('Play MAVERICK')).not.toBeInTheDocument()
+})
+
+test('Friend lists my friends, online first, and Challenge opens the challenge page for online ones', async () => {
+    render(<LobbyPage />)
+    await userEvent.click(screen.getByRole('button', { name: 'Friend' }))
+    expect(await screen.findByText('Amy')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/friends')
+    expect(screen.getByText('Online · 1376')).toBeInTheDocument()
+    expect(screen.getByText('Offline · 1100')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Challenge Amy' })).toHaveAttribute('href', '/challenge/amy')
+    expect(screen.queryByRole('link', { name: 'Challenge zed' })).not.toBeInTheDocument()
+})
+
+test('live games list both players with ratings and a Watch link to the game', async () => {
+    render(<LobbyPage />)
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    expect(screen.getByText('1 now')).toBeInTheDocument()
+    expect(screen.getByText('Blitz 3+0 · move 21')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Watch alice vs bob' })).toHaveAttribute('href', '/game/live-1')
 })
 
 test('creating a private game shows an invite link and joins its room', async () => {
     render(<LobbyPage />)
     await userEvent.click(screen.getByRole('button', { name: 'Friend' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Invite with a link' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Generate Invite Link' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/games/private/create', expect.anything()))

@@ -9,10 +9,10 @@ export function replayTo(history: Move[], index: number): Chess {
 }
 
 /** Legal target squares for the piece on `square`, or null when it is not a piece of the side to move. */
-export function targetsFor(game: Chess, square: string): string[] | null {
-    const piece = game.get(square as Square);
+export function targetsFor(game: Chess, square: Square): Square[] | null {
+    const piece = game.get(square);
     if (!piece || piece.color !== game.turn()) return null;
-    return game.moves({ square: square as Square, verbose: true }).map((m) => m.to);
+    return game.moves({ square, verbose: true }).map((m) => m.to);
 }
 
 /** Load a FEN into a fresh game; throws on an invalid FEN. */
@@ -20,6 +20,15 @@ export function gameFromFen(fen: string): Chess {
     const g = new Chess();
     g.load(fen);
     return g;
+}
+
+/** `fen` as chess.js writes it (e.g. an en-passant square no pawn can use becomes "-"); null when invalid. */
+export function normalizeFen(fen: string): string | null {
+    try {
+        return gameFromFen(fen).fen();
+    } catch {
+        return null;
+    }
 }
 
 /** Load a PGN into a fresh game; throws on an invalid PGN. */
@@ -32,7 +41,7 @@ export function gameFromPgn(pgn: string): { game: Chess; history: Move[] } {
 export type SquareClickOutcome =
     | { type: 'none' }
     | { type: 'clear' }
-    | { type: 'select'; targets: string[] }
+    | { type: 'select'; targets: Square[] }
     | { type: 'move'; game: Chess; move: Move };
 
 /**
@@ -40,7 +49,7 @@ export type SquareClickOutcome =
  * side to move (else nothing); with a selection, play the move (then clear),
  * or on an illegal move reselect a piece of the side to move (else clear).
  */
-export function resolveSquareClick(game: Chess, selectedSquare: string | null, square: string): SquareClickOutcome {
+export function resolveSquareClick(game: Chess, selectedSquare: Square | null, square: Square): SquareClickOutcome {
     const select = (): SquareClickOutcome | null => {
         const targets = targetsFor(game, square);
         return targets ? { type: 'select', targets } : null;

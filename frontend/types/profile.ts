@@ -43,5 +43,5 @@ export interface Profile extends ProfileRatings {
  * different column subset, so everything except `username` is optional.
  */
 export type ProfileSummary = Pick<Profile, 'username'> &
-    Partial<Pick<Profile, 'id' | 'display_name' | 'avatar_url'>> &
+    Partial<Pick<Profile, 'id' | 'display_name' | 'avatar_url' | 'country'>> &
     Partial<Record<RatingField, number | null>>;

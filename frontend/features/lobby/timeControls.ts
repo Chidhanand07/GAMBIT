@@ -31,15 +31,6 @@ export const BASE_TIME_CONTROLS: LobbyTimeControl[] = [
     preset('daily', 'Daily', '1 day/move'),
 ];
 
-export const TIME_CONTROL_META: Record<string, { subtitle: string; badge?: string }> = {
-    bullet: { subtitle: 'Fastest games · Pure instinct' },
-    blitz: { subtitle: 'Standard competitive play', badge: 'Popular' },
-    rapid: { subtitle: 'Longer games · Deep strategy' },
-    classical: { subtitle: 'Maximum depth & preparation' },
-    custom: { subtitle: 'Set your own time control' },
-    daily: { subtitle: 'Days per move · Correspondence' },
-};
-
 /** Options of the private-game modal. */
 export const PRIVATE_TIME_CONTROL_IDS: LobbyTimeControlId[] = [
     'bullet',

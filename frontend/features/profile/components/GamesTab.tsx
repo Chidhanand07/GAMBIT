@@ -1,49 +1,150 @@
-import type { Profile } from '@/types/profile';
+import Link from 'next/link';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Tabs } from '@/components/ui/Tabs';
+import { cn } from '@/lib/design/cn';
+import type { PlayerOutcome } from '@/lib/chess/gameOutcome';
+import { classifyTimeControl } from '@/lib/chess/timeControl';
 import type { ProfileGameRow } from '@/types/profilePage';
-import { GameHistoryRow } from './GameHistoryRow';
+import { formatDate, gameOutcome } from '../format';
+import { gameHref, profileHref } from '../links';
+import { GAME_FILTERS, gameRowDetail, type GameFilter } from '../model';
+import { EMPTY, LIST_CARD, LIST_ROW } from './styles';
 
-interface GamesTabProps {
-    profile: Pick<Profile, 'id' | 'username' | 'display_name'>;
+const DEFAULT_RATING = 1200;
+
+const OUTCOME_STYLES: Record<
+    PlayerOutcome,
+    { letter: string; score: string; badge: string; ink: string; bar: string }
+> = {
+    win: { letter: 'W', score: '1-0', badge: 'bg-success-bg', ink: 'text-success', bar: 'bg-success' },
+    loss: { letter: 'L', score: '0-1', badge: 'bg-danger-bg', ink: 'text-danger', bar: 'bg-danger' },
+    draw: { letter: 'D', score: '½-½', badge: 'bg-bg-base', ink: 'text-ink-muted', bar: 'bg-ink-muted' },
+    aborted: { letter: 'A', score: 'Aborted', badge: 'bg-bg-base', ink: 'text-ink-disabled', bar: 'bg-ink-disabled' },
+};
+
+function Opponent({ game, isWhite }: { game: ProfileGameRow; isWhite: boolean }) {
+    const opp = isWhite ? game.black : game.white;
+    const rating = opp?.[`rating_${classifyTimeControl(game.time_control)}`] ?? DEFAULT_RATING;
+    return (
+        <span className="flex items-center gap-2 font-semibold">
+            <span
+                aria-hidden="true"
+                className={cn(
+                    'box-content h-[10px] w-[10px] rounded-3 border-1 border-line-muted',
+                    isWhite ? 'bg-ink' : 'bg-on-accent',
+                )}
+            />
+            <span>vs</span>
+            {opp?.username ? (
+                <Link href={profileHref(opp.username)} className="no-underline">
+                    {opp.display_name || opp.username}
+                </Link>
+            ) : (
+                <span>Unknown</span>
+            )}
+            <span className="font-mono text-[13px] font-medium text-ink-muted">({Math.round(rating)})</span>
+        </span>
+    );
+}
+
+function Accuracy({ value, bar }: { value: number | null; bar: string }) {
+    return (
+        <span className="flex w-[130px] flex-col gap-[5px]">
+            <span className="flex justify-between text-[12px] text-ink-muted">
+                <span>Accuracy</span>
+                <span className="font-mono text-ink">{value != null ? `${value}%` : '—'}</span>
+            </span>
+            <span aria-hidden="true" className="h-[5px] rounded-pill bg-bg-base">
+                <span className={cn('block h-full rounded-pill', bar)} style={{ width: `${value ?? 0}%` }} />
+            </span>
+        </span>
+    );
+}
+
+/** One Games-tab row: result badge, colour and opponent, speed, the player's accuracy, score and Review. */
+function GameRow({ game, profileId }: { game: ProfileGameRow; profileId: string }) {
+    const isWhite = game.white_id === profileId;
+    const s = OUTCOME_STYLES[gameOutcome(game, profileId)];
+    return (
+        <div className={LIST_ROW}>
+            <span
+                aria-hidden="true"
+                className={cn(
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold',
+                    s.badge,
+                    s.ink,
+                )}
+            >
+                {s.letter}
+            </span>
+            <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-[2px]">
+                <Opponent game={game} isWhite={isWhite} />
+                <span className="text-[14px] text-ink-muted">{gameRowDetail(game)}</span>
+            </span>
+            <Accuracy value={isWhite ? game.white_accuracy : game.black_accuracy} bar={s.bar} />
+            <span className="flex w-[110px] flex-col items-end">
+                <span className="font-mono text-[15px] font-bold">{s.score}</span>
+                <span className="text-[12px] text-ink-muted">{formatDate(game.created_at)}</span>
+            </span>
+            <Link
+                href={gameHref(game.id)}
+                className="box-border flex min-h-[40px] w-[84px] items-center justify-center rounded-pill border-1.5 border-line-muted text-[14px] font-semibold text-ink no-underline"
+            >
+                Review
+            </Link>
+        </div>
+    );
+}
+
+export interface GamesTabProps {
+    profileId: string;
+    /** Lifetime games, for "Showing N of M games". */
+    total: number;
     games: ProfileGameRow[];
-    gamesLoading: boolean;
-    hasMoreGames: boolean;
+    shown: ProfileGameRow[];
+    filter: GameFilter;
+    onFilter: (filter: GameFilter) => void;
+    loading: boolean;
+    hasMore: boolean;
     onLoadMore: () => void;
 }
 
-/** Full games table with a spinner, an empty state and "Load more games" pagination. */
-export function GamesTab({ profile, games, gamesLoading, hasMoreGames, onLoadMore }: GamesTabProps) {
+const FILTER_ITEMS = GAME_FILTERS.map((f) => ({ id: f, label: f }));
+
+/** Filter pills, the paginated games list and "Load more games". */
+export function GamesTab({
+    profileId,
+    total,
+    games,
+    shown,
+    filter,
+    onFilter,
+    loading,
+    hasMore,
+    onLoadMore,
+}: GamesTabProps) {
+    const empty = games.length === 0 ? 'No completed games yet.' : 'No games match this filter.';
     return (
-        <div className="bg-surface border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[1fr_80px_80px_100px_80px] gap-0 border-b border-border bg-elevated px-4 py-2.5 text-xs uppercase tracking-wider text-text-tertiary font-medium hidden md:grid">
-                <span>Players</span>
-                <span className="text-center">Result</span>
-                <span className="text-center">Accuracy</span>
-                <span className="text-center">Date</span>
-                <span></span>
+        <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <Tabs label="Filter games" tone="creamSm" items={FILTER_ITEMS} value={filter} onChange={onFilter} />
+                <span className="text-[14px] text-ink-muted">
+                    Showing {shown.length} of {total} games
+                </span>
             </div>
-            <div className="divide-y divide-border/50">
-                {games.map((game, i) => (
-                    <GameHistoryRow key={game.id} game={game} profile={profile} striped={i % 2 === 1} />
+            <Card className={LIST_CARD}>
+                {shown.map((g) => (
+                    <GameRow key={g.id} game={g} profileId={profileId} />
                 ))}
-            </div>
-            {games.length === 0 && !gamesLoading && (
-                <div className="py-16 text-center text-text-tertiary">No completed games yet.</div>
+                {loading && <div className={EMPTY}>Loading games…</div>}
+                {!loading && shown.length === 0 && <div className={EMPTY}>{empty}</div>}
+            </Card>
+            {hasMore && games.length > 0 && !loading && (
+                <Button variant="outline" className="self-center" onClick={onLoadMore}>
+                    Load more games
+                </Button>
             )}
-            {gamesLoading && (
-                <div className="py-8 flex justify-center">
-                    <div className="w-6 h-6 border-2 border-border border-t-accent rounded-full animate-spin" />
-                </div>
-            )}
-            {hasMoreGames && !gamesLoading && games.length > 0 && (
-                <div className="px-5 py-4 border-t border-border">
-                    <button
-                        onClick={onLoadMore}
-                        className="w-full py-2.5 border border-border rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
-                    >
-                        Load more games
-                    </button>
-                </div>
-            )}
-        </div>
+        </>
     );
 }

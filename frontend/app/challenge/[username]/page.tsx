@@ -2,7 +2,9 @@
 
 import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
+import { Card } from '@/components/ui/Card';
+import { Icon } from '@/components/ui/Icon';
+import { Spinner } from '@/components/ui/Spinner';
 import { useProfile } from '@/components/ProfileProvider';
 import { OpponentCard } from '@/features/challenge/components/OpponentCard';
 import { ColorPicker, RatedToggle, TimeControlPicker } from '@/features/challenge/components/ChallengeOptions';
@@ -41,37 +43,38 @@ export default function ChallengePage(props: { params: Promise<{ username: strin
 
     if (!opponentProfile) return (
         <div className="flex justify-center p-20">
-            <div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin" />
+            <Spinner label="Loading player" />
         </div>
     );
 
     return (
-        <div className="max-w-lg mx-auto px-4 py-10">
-            <div className="flex items-center gap-3 mb-6">
-                <button onClick={() => router.back()} className="p-1.5 text-text-tertiary hover:text-text-primary transition-colors">
-                    <ChevronLeft size={20} strokeWidth={1.5} />
+        <div className="mx-auto box-border flex max-w-[640px] flex-col gap-6 px-6 pb-16 pt-9 sm:px-8">
+            <div className="flex items-center gap-3">
+                <button
+                    type="button"
+                    aria-label="Back"
+                    onClick={() => router.back()}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-1 border-line bg-surface text-ink"
+                >
+                    <Icon path="M15 18l-6-6 6-6" size={20} />
                 </button>
-                <h1 className="text-xl font-medium text-text-primary">Challenge a Player</h1>
+                <h1 className="m-0 font-display text-[30px] font-bold leading-[1.2] tracking-[-0.02em]">Challenge a Player</h1>
             </div>
 
-            <div className="bg-surface border border-border rounded-xl overflow-hidden">
-                {/* Opponent */}
+            <Card className="overflow-hidden p-0">
                 <OpponentCard opponent={opponentProfile} />
-
-                <div className="p-5 space-y-6">
-                    <TimeControlPicker value={timeControl} onChange={setTimeControl} />
-                    <RatedToggle value={isRated} onToggle={() => setIsRated(!isRated)} />
-                    <ColorPicker value={color} onChange={setColor} />
-                    <ChallengeStatus
-                        opponentUsername={opponentProfile.username}
-                        sending={sending}
-                        sent={sent}
-                        declined={declined}
-                        signedIn={!!myProfile}
-                        onSend={handleSend}
-                    />
-                </div>
-            </div>
+                <TimeControlPicker value={timeControl} onChange={setTimeControl} />
+                <RatedToggle value={isRated} onToggle={() => setIsRated(!isRated)} />
+                <ColorPicker value={color} onChange={setColor} />
+                <ChallengeStatus
+                    opponentUsername={opponentProfile.username}
+                    sending={sending}
+                    sent={sent}
+                    declined={declined}
+                    signedIn={!!myProfile}
+                    onSend={handleSend}
+                />
+            </Card>
         </div>
     );
 }

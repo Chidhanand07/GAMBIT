@@ -22,6 +22,9 @@ interface StatsProfileRow {
 
 interface StatsGameRow extends OutcomeRow {
     time_control: string | null;
+    white_accuracy?: number | null;
+    black_accuracy?: number | null;
+    created_at?: string | null;
 }
 
 const emptyCategory = (): CategoryStats => ({ played: 0, wins: 0, losses: 0, draws: 0 });
@@ -49,6 +52,57 @@ function statsByCategory(games: StatsGameRow[], profileId: string): Record<Speed
     return stats;
 }
 
+/** W/L/D with the white pieces and with the black pieces (aborted games skipped). */
+function statsByColour(games: StatsGameRow[], profileId: string): Record<'white' | 'black', CategoryStats> {
+    const stats = { white: emptyCategory(), black: emptyCategory() };
+    for (const game of games) {
+        const outcome = playerOutcome(game, profileId);
+        if (outcome === 'aborted') continue;
+        const side = game.white_id === profileId ? stats.white : stats.black;
+        side.played++;
+        side[OUTCOME_COUNTER[outcome]]++;
+    }
+    return stats;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const ownAccuracy = (game: StatsGameRow, profileId: string) =>
+    game.white_id === profileId ? game.white_accuracy : game.black_accuracy;
+
+/** Mean of the player's analysed accuracies, rounded; null when no game was analysed. */
+function averageAccuracy(games: StatsGameRow[], profileId: string): number | null {
+    const values = games.map((g) => ownAccuracy(g, profileId)).filter((a): a is number => typeof a === 'number');
+    if (values.length === 0) return null;
+    return Math.round(values.reduce((sum, a) => sum + a, 0) / values.length);
+}
+
+/** Most consecutive wins, oldest game first (aborted games neither extend nor break a streak). */
+function longestWinStreak(games: StatsGameRow[], profileId: string): number {
+    const ordered = [...games].sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
+    let best = 0;
+    let current = 0;
+    for (const game of ordered) {
+        const outcome = playerOutcome(game, profileId);
+        if (outcome === 'aborted') continue;
+        current = outcome === 'win' ? current + 1 : 0;
+        best = Math.max(best, current);
+    }
+    return best;
+}
+
+/** The weekday (UTC) with the most played (not aborted) games; null without any. */
+function mostActiveDay(games: StatsGameRow[], profileId: string): string | null {
+    const counts = new Array<number>(WEEKDAYS.length).fill(0);
+    for (const game of games) {
+        if (game.created_at && playerOutcome(game, profileId) !== 'aborted') {
+            counts[new Date(game.created_at).getUTCDay()]++;
+        }
+    }
+    const top = Math.max(...counts);
+    return top > 0 ? WEEKDAYS[counts.indexOf(top)] : null;
+}
+
 /** Response body of GET /api/profile/[username]/stats. */
 export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[]) {
     return {
@@ -63,5 +117,11 @@ export function buildProfileStats(profile: StatsProfileRow, games: StatsGameRow[
             classical: profile.rating_classical ?? DEFAULT_RATING,
         },
         byCategory: statsByCategory(games, profile.id),
+        byColour: statsByColour(games, profile.id),
+        facts: {
+            averageAccuracy: averageAccuracy(games, profile.id),
+            longestWinStreak: longestWinStreak(games, profile.id),
+            mostActiveDay: mostActiveDay(games, profile.id),
+        },
     };
 }

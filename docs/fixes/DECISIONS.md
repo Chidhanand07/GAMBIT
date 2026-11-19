@@ -112,6 +112,34 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-093](#f-093) | Unused axios removed; nanoid stays on 3.x | L4 | SUPPLY-CHAIN |
 | [F-094](#f-094) | zod 3 → 4 with identical validation | L4 | SUPPLY-CHAIN |
 | [F-095](#f-095) | No automatic dependency PRs: Dependabot config removed (owner decision; GIT-06 deviation) | – | SUPPLY-CHAIN |
+| [F-096](#f-096) | Visual parity harness: Playwright + pixelmatch, five widths, shared masks, PARITY.md | V2-A1 | PARITY-HARNESS |
+| [F-097](#f-097) | TEST Supabase project guard: env files, fail-closed production check, `db push --remote` | V2-A1 | PARITY-HARNESS |
+| [F-098](#f-098) | Idempotent TEST seed via the admin API; live game through the private-invite flow; local stack | V2-A1 | PARITY-HARNESS |
+| [F-099](#f-099) | Opt-in `Parity (visual)` CI job: manual or `parity` label; not a required check | V2-A1 | PARITY-HARNESS |
+
+**Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
+| [F-100](#f-100) | Board coordinates are off by default: the Game and Analysis mockups win over the Settings sample row | v2 | A2-1 |
+| [F-101](#f-101) | Sign in with "Email or username": server-side lookup, one failure message, one timing class | v2 | A2-2 |
+| [F-102](#f-102) | Game screen = Game.dc.html: sound lives in Settings, no bell in a game, no "You" chip, typed slots for watchers / rating risk / country | v2 | A2-3 |
+| [F-103](#f-103) | Analysis engine readout rebuilt from the design's "Game info" rows; no Reset (the mockup has none) | v2 | A2-4 |
+| [F-104](#f-104) | Remaining chosen deviations follow the mockups: Mark all read, guest presence, Games row, friend status, preview marks, one Reset | v2 | A2-5 |
+| [F-105](#f-105) | Screens without a mockup are built from the mockups' components; the legacy theme is deleted | v2 | A3 |
+| [F-106](#f-106) | Accessibility at parity: focus ring, reduced motion, AA contrast fixes, notifications panel as a dialog, axe tests | v2 | A4 |
+| [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
+| [F-111](#f-111) | Landing performance: lazy Supabase/socket.io, no guest 401, lazy audio, 2 KB symbol font, no trail on touch | v2 | C |
+| [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
+| [F-113](#f-113) | Intro splash: composited wordmark, Escape, 44 px Replay hit area | v2 | C |
+| [F-114](#f-114) | Landing metadata: canonical, share images, icons, robots, sitemap, JSON-LD from NEXT_PUBLIC_SITE_URL | v2 | C |
+| [F-115](#f-115) | Landing e2e (Playwright) and the Landing (Lighthouse) workflow, not required yet | v2 | C |
+| [F-116](#f-116) | Bundle analyzer behind ANALYZE=true (webpack build) | v2 | C |
+
+**Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
+
+| ADR | Title | PR | Items |
+|---|---|---|---|
 
 ---
 
@@ -2385,3 +2413,487 @@ the Dependabot part of F-057).**
   (notifications only) may be enabled in the repository settings.
 - **Deviation.** GIT-06 says Dependabot MUST be enabled. This ADR records the owner's decision to
   deviate. To restore it, re-add the file from F-057 (`git show 6746d8b:.github/dependabot.yml`).
+
+## F-100
+
+**Board coordinates default to off (A2-1).**
+
+- **Context.** `Game.dc.html` and `Analysis.dc.html` draw their boards without rank or file labels.
+  `Settings.dc.html` shows the "Show coordinates" row switched on in its sample. The app-wide
+  default (`DEFAULT_SETTINGS.showCoordinates`) cannot match both.
+- **Options.** (a) default on, as the Settings sample shows, and the default Game/Analysis boards
+  differ from their mockups; (b) default off, and the Settings sample row differs; (c) hard-code
+  "no coordinates" on the Game/Analysis boards and ignore the setting there.
+- **Decision.** (b). The default app looks like the two screens people spend their time on; the
+  Settings page is the place where a preference is *changed*, so its sample row is read as "a
+  switch", not as "the default". (c) would make the switch do nothing on the main boards.
+- **Consequences.** The switch still works everywhere (game, analysis, offline, result review),
+  and the Settings live preview follows the draft value. A stored `showCoordinates: true` keeps
+  working; only users with nothing stored see the change. "Reset to defaults" now turns
+  coordinates off.
+
+## F-101
+
+**Sign in with "Email or username" (A2-2, `Signin.dc.html`).**
+
+- **Context.** The mockup's first field is "Email or username" (`type="text"`,
+  `autocomplete="username"`). The app signed in from the browser with an e-mail only. A username
+  has to become an e-mail somewhere; doing that in the browser would hand anyone the e-mail of any
+  username.
+- **Decision.** The form posts `{ identifier, password }` to `POST /api/auth/login` (the older
+  `{ email, password }` body is still accepted). The route:
+  1. rate limits per client IP, then per identifier (lower-cased, across IPs) with the existing
+     Upstash limiter (F-046), before any lookup;
+  2. treats an identifier with `@` as an e-mail (usernames cannot contain `@`); otherwise
+     `lib/server/loginIdentity.resolveLoginEmail` finds the profile with the secret-key client by a
+     case-insensitive **exact** match (`ilike` with `_` escaped; `%`, `*`, `\` are refused by the
+     username rule) and reads the auth user's e-mail with `auth.admin.getUserById`. When two
+     names differ only in case (the column is case-sensitive UNIQUE) the exact spelling wins,
+     otherwise nobody matches;
+  3. always runs one admin lookup and one password check: an unknown user is checked against a
+     fresh `<uuid>@login.invalid` address (RFC 2606 reserved TLD) and refused even if that check
+     passed;
+  4. answers every failure with 401 and the same `Invalid email, username or password` (only a
+     correct password on an unconfirmed account gets "Please confirm your email"), after padding
+     the response to at least `FAILED_LOGIN_MIN_MS` (800 ms) from the start of the lookup, so an
+     unknown user, a wrong password and Supabase's own fast "no such e-mail" path share one
+     timing class. Success is not padded.
+  The e-mail is never returned or logged (a test checks every console call). The browser then
+  refetches the profile (the session cookies came back on the response) and navigates as before.
+- **Options rejected.** Resolving in the browser or through a public "email for username"
+  endpoint (enumeration and e-mail disclosure). Also limiting the resolved account's e-mail key
+  on the username path: a 429 there would reveal that a username belongs to an e-mail an attacker
+  had just exhausted. So an account's e-mail and username have separate allowances (2 × 10 per
+  15 min), which the per-IP limit still bounds.
+- **Not changed.** Sign-up's username availability check (`GET /api/users/check-username` on
+  the realtime server) stays as is: usernames are public (profile URLs), it answers only
+  "available or not", and it is already rate limited (`httpUsernameCheck`).
+- **Consequences.** A username login without `SUPABASE_SECRET_KEY` reads as unknown (logged
+  once per request, without the identifier). The message text changed from "Invalid email or
+  password" to "Invalid email, username or password".
+
+## F-102
+
+**The live game screen follows `Game.dc.html` control for control (A2-3).**
+
+- **Context.** The previous pass kept two controls the mockup has no slot for (a sound pill above
+  the board; the notification bell, unreachable because the header is hidden on `/game/<id>`) and
+  added a "You" chip to the player's own strip. The brief: place such features only where the
+  design system's patterns allow, without changing the mockup's layout.
+- **Sound.** The mockup's row above the board holds one pill (Focus mode). The design system
+  already has a home for this preference: Settings → Board & pieces → "Move sounds", a stored
+  switch that `SettingsProvider` applies app-wide. The game page now reads it
+  (`useBoardPrefs().sound`) and has no sound control of its own; the per-game `soundOn` state and
+  its `soundToggled` action are gone. The F2 guarantees are kept and re-tested through the
+  Settings switch: changing it mid-game never re-joins the room, and a game that loads after the
+  switch was turned off plays no start sound. Rejected: a second pill (changes the layout), a
+  popover (the game page has none to put it in).
+- **Notifications during a game.** No bell: the mockup's game page has no header and no menu. A
+  challenge still arrives as the design's toast (`ChallengeToast`, mounted app-wide); every other
+  notification waits in the header bell, which is back as soon as the player leaves the game page.
+- **"You" chip.** Removed: the mockup's strips show name, rating, country chip and colour swatch
+  only. The player's strip stays identifiable to assistive tech through its clock ("Your clock"),
+  which also follows a flip (F4).
+- **Data the mockup shows that the app does not have yet** (data-live track): typed optional
+  inputs that render exactly as the mockup once a value is passed, and render nothing otherwise
+  (never a placeholder):
+  - `GameViewInput.watching?: number | null` → the "N watching" pill;
+  - `ConfirmDialogs.ratingRisk?: number | null` → "…and about N rating points…";
+  - `ProfileSummary.country?` → the strip's country chip (`SeatView.country`).
+- **Re-checked against the mockup, kept as is.** Flip / Draw / Resign grid and the focus column;
+  status line; Rematch / New game after the result (`showEnd`); Game info rows; chat: last 5
+  lines, 140 characters, quick replies send at once (the mockup's `say()` appends immediately);
+  moves card. History navigation (clicking a move, the "Viewing move … Return to live" notice)
+  adds no control to the layout and stays. Spectators get the read-only chat, an "A vs B" title
+  and a "Spectating" pill. Nothing the mockup shows had been removed, so nothing was restored.
+
+## F-103
+
+**Analysis: the engine readout is kept and rebuilt from the design's label / value rows (A2-4).**
+
+- **Context.** `Analysis.dc.html` shows the engine header (Stockfish 16, note, switch), the
+  evaluation bar, the move list and the FEN; it has no engine-on output state. The app showed a
+  bespoke readout card (coloured score, "Best", a "d18" tag, the line).
+- **Search of the nine mockups for a matching component.** `Game.dc.html` "Game info" has the
+  exact pattern for named values: a hairline row, muted label left, JetBrains Mono bold value
+  right (Move, Captures, Material, Time control, Your clock). Profile, Leaderboard and Settings
+  have stat tiles and setting rows, which fit worse (tiles are for totals, setting rows hold
+  controls).
+- **Decision.** Keep the readout, rebuilt as those rows: Evaluation (`+0.3`, `M3`), Best move,
+  Depth, and Line when the engine sends one. The row is now a shared primitive,
+  `components/ui/InfoRow`, used by the game's info card and the analysis panel (tokens only; the
+  success/danger score colours went, the design's rows have none). The evaluation bar stays the
+  visual of the score.
+- **Reset.** The mockup has no Reset button, so the earlier choice stands: the Import tab's
+  "Starting Position" preset is the way back to a fresh board.
+
+## F-104
+
+**The remaining deviations that were choices, not data gaps, now follow the mockups (A2-5).**
+
+- **"Mark all read"** is always in the notifications panel's heading row (every mockup shows it);
+  with nothing unread it is disabled (`disabled:opacity-50`, the design's disabled treatment)
+  instead of disappearing.
+- **Online count for guests.** The signed-out header follows `Signin.dc.html` / `Signup.dc.html`
+  (no online pill; unchanged). Where a guest sees an online figure (the leaderboard's "Online
+  now", a profile's Online badge) it is now real: `PresenceProvider` lets a guest *listen* to the
+  public `gambit-online-users` presence channel without tracking itself, after the session is
+  known. The old fallback "at least 1" (the viewer) applies only to a signed-in viewer; a guest
+  sees the true count, 0 included, and the context default is 0. No new data is exposed: the
+  channel is public to the publishable key already.
+- **Profile Games row** second line follows `Profile.dc.html` ("Italian Game · 5 min · 34 moves")
+  through `gameRowDetail()`, fed by two optional fields on `ProfileGameRow` (`opening`,
+  `move_count`) that the data-profile track fills. Without an opening the speed bucket stands in
+  ("Blitz · 5 min"), without a count the "N moves" part is left out; no placeholder.
+- **Overview friends** show the mockup's three states with its dot colours (Online `success`,
+  Away `accent`, Offline `ink-disabled`). "Away" comes from an optional `awayIds` set; presence
+  has no away state yet (data-live track), so today a friend is Online or Offline.
+- **Settings live preview** marks the selected piece's square and its legal moves in the
+  mockup's green (`mark-preview-hint`, `mark-preview-dot`, 34 % dots), via `Board frame="preview"`.
+  Game, analysis and offline boards keep the gold selection and dark dots of `Game.dc.html`.
+- **"Reset to defaults"** works as in the mockup: one reset for every section. It puts the play
+  preferences back to their defaults and unsaved profile edits back to the saved profile, stores
+  nothing until Save, and says "Defaults restored." (the profile bar said "Changes discarded.").
+- **Data items on the game page** ("3 watching", "about N rating points") have typed optional
+  inputs since F-102.
+
+## F-105
+
+**Screens with no mockup reuse the mockups' components and tokens; the legacy theme is deleted (A3).**
+
+- **Rule used.** No new visual language: every screen without a mockup is assembled from a
+  pattern that some mockup already has. Logic and copy are unchanged (tests that pinned legacy
+  class names now check roles and `aria-pressed` / `aria-checked` instead).
+- **Mapping.**
+  - Not found (`app/not-found.tsx`, new), error (`app/error.tsx`, new), invite and expired invite:
+    the sign-in card (`components/layout/CenteredCard`, which `AuthCard` now wraps unchanged).
+    The error page shows nothing of the error and logs nothing (S14).
+  - Challenge page: Settings' card with option rows (label left; segmented `Tabs` or the
+    `Switch`, now a shared `components/ui/Switch`), the game screen's notice row for
+    sent / declined, the primary pill button.
+  - Invite details: the "Game info" rows (`InfoRow`, F-103).
+  - Offline setup: the lobby's "Play MAVERICK" choices, moved to
+    `features/offline/components/MaverickChoices` (+ `features/offline/choices.ts`) and used by both
+    the lobby card and `/offline` (the lobby re-exports the choices, so its imports still work).
+  - Toasts: the header popover surface that `ChallengeToast` already used, with a coloured left
+    rule per type; errors are `role="alert"`, others `role="status"`.
+  - Loading: `components/ui/Spinner` (line track, gold arc) and `components/layout/PageSkeleton`
+    (card-surface blocks in the page's outline) in a `loading.tsx` for every route that fetches
+    data (lobby, leaderboard, profile, game, game review, settings, challenge, join). Both move
+    only under `motion-safe`.
+  - Game review: already on tokens; its ten classification colours became tokens too
+    (`--color-review-*`), values unchanged.
+- **Legacy theme deleted.** `--bg-page`, `--bg-surface`, `--bg-elevated`, `--bg-hover`,
+  `--accent`, `--accent-hover`, `--text-*`, `--border*`, `--green`, `--red`, the Tailwind names
+  that pointed at them (`page`, `elevated`, `hover`, `text-*`, `border-*`, `accent-hover`), the
+  legacy `rounded-lg`, `shadow-board`, the 0.5px default border width and the `.btn-press` /
+  `.toast-enter` utilities. A test fails if any of them comes back.
+
+## F-106
+
+**Accessibility at parity (A4).**
+
+- **Focus.** One rule in `globals.css` gives every control without its own focus style a 2px
+  solid accent outline (offset 2px; inside the square on the board) plus the design's
+  `--shadow-focus-ring` halo. The halo alone (gold at 28 %) is under 3:1 on the dark surfaces,
+  so the solid outline carries the contrast (accent ≥ 6.3:1 on every surface). Fields keep the
+  mockups' own focus (accent border + halo).
+- **Reduced motion.** A global `prefers-reduced-motion: reduce` rule stops every animation,
+  transition and smooth scroll; components also use `motion-safe:` for spinners, pulses and
+  transitions, and a test fails on an unguarded `animate-*` or `transition-[…]` class.
+- **Keyboard and names.** The notifications panel was `role="menu"` (as in the mockups) but
+  holds a heading, the "Mark all read" button and status / alert messages, which a menu may not
+  contain (axe `aria-required-children`). It is now a non-modal `role="dialog"` named
+  "Notifications" (the bell says `aria-haspopup="dialog"`), and the notifications themselves stay
+  a `role="menu"` list with arrow-key navigation. The settings avatar file input got a name.
+- **Contrast (WCAG AA), checked from the tokens** by `__tests__/a11y/contrast.test.ts` (jsdom
+  cannot measure rendered colour). Only pairs the mockups themselves fail were changed:
+
+  | Pair (mockup values) | Mockup | Now |
+  |---|---|---|
+  | `ink-faint` #7C8E83 on `surface` #183026 (chat empty line, move numbers, slider ticks) | 4.06:1 | #87998D, 4.68:1 (also 5.72:1 on `bg-base`) |
+  | coordinate `board-dark` #B58863 on `board-light` #F0D9B5 (maple) | 2.29:1 | `on-accent` #10140F, 13.55:1 / 5.90:1 on the dark square |
+  | coordinate on green squares | 2.84:1 | `on-accent`, 15.76:1 / 5.55:1 |
+  | coordinate on slate squares | 2.06:1 | `on-accent`, 14.38:1 / 6.99:1 |
+  | coordinate on walnut squares | 3.69:1 | `on-accent` on light 10.06:1, `ink` on dark 6.00:1 |
+
+  Everything else the screens use passes as designed (e.g. `ink-muted` ≥ 5.89:1,
+  `accent` ≥ 6.35:1 on every surface, `on-accent` on `accent` 10.87:1, `success-ink` on
+  `success-bg` 7.37:1, field border `line-field` on `bg-base` 3.34:1).
+- **Tests.** `jest-axe` (devDependency) runs axe-core on each page's main composition: game
+  (player, resign dialog, spectator), analysis, lobby, profile, leaderboard, challenge, invite,
+  offline (setup and game), game review, sign-in / sign-up, every settings section, the header
+  with notifications open, 404, error, a loading skeleton and the challenge toast. `region` is off
+  (pages render without the root layout's landmarks) and `color-contrast` is off (no layout in
+  jsdom; covered by the token test).
+## F-110
+
+**Home.dc.html is the landing page (`/`); its signed-in and signed-out variants; what the hero claims.**
+
+- **Context.** `design/design/Home.dc.html` is the only mockup of `/`. It is drawn with a signed-in
+  header (avatar, bell, "1 online") and yet the hero offers "Create Account". The signed-out header
+  exists only in `Signin.dc.html`. The brief asks for real numbers only and for every call to action to
+  go to the right place for both kinds of viewer.
+- **Decision.**
+  - `/` is Home.dc.html, pixel for pixel: intro splash, header, hero, "Why Gambit", footer.
+  - Signed out: the header is the Signin.dc.html guest header ("Sign in", "Create account"); the hero
+    shows "Play Now" → `/lobby` (the proxy sends a guest to `/login?redirect=%2Flobby`) and "Create
+    Account" → `/signup`. Parity is measured against Home.dc.html with Signin's guest header in place.
+  - Signed in: the header is the account cluster of Home.dc.html; "Play Now" → `/lobby` with no detour;
+    the second hero button becomes **"My Profile"** → `/profile/<username>` (the label of the account
+    menu's own item), same style and size. A verified viewer whose profile row cannot be read gets no
+    second button rather than a sign-up offer.
+  - Footer: Play → `/lobby`, Leaderboard → `/leaderboard`, Analysis → `/analysis`, Offline →
+    `/offline` (play the computer offline).
+  - Live numbers: the only live number Home.dc.html shows is "N online" in the signed-in header; it
+    already comes from Supabase presence (at least 1: the viewer). The guest header shows no number in
+    the design, so no new public endpoint is needed.
+  - Claims, each kept because it is literally true and drawn: "∞ games available" (no game cap exists),
+    "6 time controls" (computed: the 5 lobby presets + Custom; a test fails if that stops being 6) and
+    "Free always" (nothing in the app is paid).
+- **Why.** A signed-in player offered "Create Account" is a dead end; the closest drawn element is the
+  account menu's "My Profile". Everything else follows the mockups as drawn.
+
+## F-111
+
+**Landing performance: no avoidable bytes or work before the first paint.**
+
+- **Context.** Lighthouse (mobile) on the old landing: performance 44, LCP 6.0 s, a console error
+  (`401` from `/api/profile/me` for every guest), 235 KB of symbol font, 77 KB of game audio, the
+  Supabase client (69 KB gz) and socket.io-client (14 KB gz) in every page's first-load JavaScript,
+  and a client `Board` for a static picture.
+- **Decision.**
+  - The hero board is a Server Component with the mockup's own DOM (grid of 64 cells, pieces at 86%).
+  - Root providers load `@supabase/supabase-js` lazily (`lib/supabase/lazyClient.ts`) and
+    `SocketProvider` imports socket.io-client only when it opens a socket (NX-18).
+  - `ProfileProvider` asks `/api/profile/me` only when the browser holds a session: guests no longer
+    get a 401 (which browsers log as a console error).
+  - `lib/sounds.ts` creates and preloads the clips on the first sound, not at import.
+  - The trail font is Noto Sans Symbols 2 cut to U+265A–265F (2 KB, `next/font/local`, not preloaded;
+    OFL text in `frontend/assets/fonts`). The other fonts stay on `next/font/google`, preloaded, with
+    the metric-matched fallbacks (`size-adjust`, ascent/descent overrides) that keep CLS at 0.
+  - `HoverTrail` builds no cells on touch-only devices (`(hover: hover) and (pointer: fine)`).
+  - On `/` a guest does not listen to the presence channel (F-104's guest presence): the guest
+    header shows no count, and the realtime socket otherwise logs browser errors when the page is
+    left mid-handshake (WebKit) or its CDN cookie is refused (Firefox). Signed-in viewers still join.
+- **Measured.** First-load JS of `/`: framework + 21 KB of app code (+1 KB page); the bundle analyzer
+  (F-116) shows no Supabase, socket.io or audio. Lighthouse results are in the landing report.
+- **Limit.** Lighthouse's default *simulated* throttling (Lantern) counts every async script that
+  starts before the observed LCP; with Next.js's own runtime alone (all app code removed) it estimates
+  LCP 2.8 s on `next start` (HTTP/1.1, gzip). Under applied throttling of the same mobile profile the
+  real LCP is 1.7–1.8 s. CI asserts LCP < 2.0 s under applied throttling and warns under simulation.
+- **Rejected.** `experimental.inlineCss` (no measurable gain, and it changes every route);
+  re-subsetting the Google fonts (16 KB saved app-wide, glyph coverage at risk).
+
+## F-112
+
+**The landing resolves its viewer on the server and renders its own seeded header.**
+
+- **Context.** The header lives in the root layout and learns the session on the client: the first
+  paint shows a placeholder, then the guest buttons or the account cluster. On a phone the signed-in
+  cluster wraps to a second row, so the whole page moved down by 54 px after hydration (CLS), and the
+  hero could not know which buttons to show.
+- **Decision.** `app/page.tsx` calls `getViewer()` (`lib/server/viewer.ts`): verified claims
+  (`getVerifiedUserId`, NX-07/NX-10), then the viewer's own profile read as that user (RLS and the
+  column grants apply, NX-08), mapped to an allow-listed `ViewerProfile` DTO (NX-04). The result is
+  `guest`, `signed-in` or `unknown` (verified but unreadable). `hidesAppHeader('/')` is true; the page
+  renders `SeededAppHeader`, the same connected header seeded with that viewer until
+  `ProfileProvider` has loaded (`unknown` keeps the placeholder). `/` is therefore rendered per
+  request (it reads cookies) and is never cached (NX-11).
+- **Cost.** A guest request does no network work (no cookie, no claims); a signed-in one adds one
+  profile query to the TTFB.
+- **Trade-off.** The landing's header is rendered inside the layout's `<main>`, so it is not a
+  `banner` landmark there (and the footer is not `contentinfo`); the navigation keeps its "Main"
+  label. Rejected: reading cookies in the root layout (would make every route dynamic).
+
+## F-113
+
+**Intro splash: composited wordmark, Escape, a 44 px hit area for "Replay intro".**
+
+- **Context.** Home.dc.html animates the wordmark's `letter-spacing` from .7em to .3em. That relayouts
+  every frame, moves the centred column (Lighthouse counted layout shifts) and, at 64 px, makes
+  "GAMBIT" the page's largest text when it fades in at 2.6 s, so Lighthouse reported it as the LCP
+  (6.0 s). "Replay intro" is drawn 40 px tall, under the 44 px touch target.
+- **Decision.**
+  - The wordmark keeps `letter-spacing: .3em`; each letter is an inline-block that starts at
+    `translateX((i − n/2)·0.4em)` and slides to 0 with the same easing, delay and duration. In a
+    centred line with trailing spacing that is exactly the letter-spacing animation (unit-tested for
+    any letter widths), but composited: no relayout, no shift, and each letter is too small to be an
+    LCP candidate. The wordmark is one `role="img"` named "GAMBIT".
+  - Escape ends the splash, like Skip. It still mounts after hydration, plays once per session
+    (sessionStorage) and never under `prefers-reduced-motion`.
+  - "Replay intro" stays drawn at 40 px; a `::before` strip 3 px above and below makes the hit area
+    44 px without painting anything.
+- **Measured.** Splash key frames (0.5–4.6 s) differ from the mockup by ≤ 0.17% at 375 and 1440 px.
+
+## F-114
+
+**Landing metadata: canonical, share images, icons, robots, sitemap and JSON-LD from one site URL.**
+
+- **Decision.**
+  - `NEXT_PUBLIC_SITE_URL` (an http(s) origin; else Vercel's production domain; else localhost) feeds
+    `metadataBase`, the canonical link, `robots.txt` and `sitemap.xml` (`lib/siteUrl.ts`).
+  - `/` sets title, description, canonical `/`, Open Graph and a `summary_large_image` Twitter card.
+    `app/opengraph-image.tsx` and `app/twitter-image.tsx` render one 1200×630 card with `next/og`:
+    the page background, the logo tile, "Gambit / Chess, perfected." and the gold knight, in Space
+    Grotesk and Inter (static subsets committed under `frontend/assets/fonts`, OFL). Colours come
+    from `lib/design/brandColors.ts`, which a test keeps equal to the `globals.css` tokens.
+  - Icons: `app/icon.tsx` (32 px logo tile), `app/apple-icon.tsx` (180 px, opaque) and
+    `app/favicon.ico` built from the same tile.
+  - `robots.txt` allows the site and disallows the signed-in, per-user and API routes;
+    `sitemap.xml` lists only `/`, `/offline`, `/analysis`, `/signup` and `/login`
+    (`lib/seo/publicRoutes.ts`).
+  - JSON-LD: a `WebSite` and a free `SoftwareApplication` (GameApplication, Chess, web browser),
+    serialised with `<`, `>`, `&`, U+2028 and U+2029 escaped so no value can end the script element.
+
+## F-116
+
+**Bundle analyzer behind `ANALYZE=true` (webpack build only).**
+
+- **Decision.** `@next/bundle-analyzer` is a devDependency; `npm run analyze` runs
+  `ANALYZE=true next build --webpack` and writes `.next/analyze/{client,nodejs,edge}.html`.
+  `next.config.js` requires the analyzer only when `ANALYZE=true`, so a production install without
+  dev dependencies never loads it. Webpack because the analyzer is a webpack plugin; Turbopack's
+  `next experimental-analyze` is the alternative.
+- **Result for `/`.** Initial chunks: Next/React runtime, 8 KB gz of shared app UI (header, nav,
+  icons), 7 KB tailwind-merge, 6 KB layout providers and 1 KB for the page (the splash). No
+  Supabase, socket.io, chess.js or audio.
+
+## F-115
+
+**Landing end-to-end tests and the `Landing (Lighthouse)` workflow (not a required check yet).**
+
+- **Decision.**
+  - `frontend/playwright.config.ts` with projects chromium, firefox, webkit and iphone (iPhone 13,
+    WebKit, touch), against `next start` on port 3203. Tests in `frontend/e2e/landing/`: every call
+    to action, the splash (first visit, Skip, Escape, ends by itself, once per session, Replay and its
+    44 px hit area, reduced motion), zero console errors/warnings and no hydration mismatch, metadata,
+    share images and icons, JSON-LD, robots.txt, sitemap.xml, and an Event-Timing INP check (< 200 ms,
+    Chromium). The parity track adds its own Playwright config; the lead reconciles the two.
+  - `.github/workflows/landing-lighthouse.yml` ("Landing (Lighthouse)"): a production build, then
+    Lighthouse CI (`@lhci/cli` 0.16.1 through npx, no new dependency) three times: mobile simulated
+    (`lighthouserc.json`: performance ≥ 0.95, accessibility, best practices and SEO = 1, CLS = 0,
+    TBT ≤ 200 ms, no console errors; LCP ≤ 2 s as a warning, see F-111), mobile with applied
+    throttling (`lighthouserc.applied.json`: LCP ≤ 2 s, CLS = 0, TBT ≤ 200 ms as errors) and desktop.
+    The landing e2e runs on chromium, firefox and webkit.
+  - It is **not** a required status check yet: Lighthouse's simulated mobile score varies by a few
+    points between runs on shared CI machines. Make it required once it has been stable on `preprod`.
+- **Signed-in e2e** needs the test Supabase project (`frontend/.env.test.local`) and is pending; the
+  signed-in variant is covered by component tests.
+## F-097
+
+**Scripts that write to a database only ever reach the owner's separate TEST Supabase project; the
+guard reads the env files and fails closed (SEC-08, NODE-16).**
+
+- **Context.** The parity harness (F-096) needs real signed-in pages and a live game, so it needs a
+  database with seeded rows. Local Supabase needs Docker (unavailable here) and production must never
+  be touched. The owner provides a TEST project in `frontend/.env.test.local` and `server/.env.test`
+  (git-ignored), plus `SUPABASE_TEST_DB_URL` (the Postgres connection string) in `server/.env.test`.
+- **Decision.** `scripts/test-db/env.js` is the only loader. `loadTestEnv()` refuses unless: both test
+  files exist; the frontend file has `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  and `SUPABASE_SECRET_KEY` and the server file `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and
+  `SUPABASE_TEST_DB_URL`; both files name the same project; at least one production URL is known
+  (`frontend/.env.local`, `server/.env`, or `PRODUCTION_SUPABASE_URL` in CI) and the test project differs
+  from it in URL (normalised origin), in secret key, and the DB URL does not contain the production
+  project ref. With no production URL to compare against it refuses (fail closed). Messages never
+  contain keys or connection strings.
+- **Migrations.** `scripts/test-db/migrate.js` runs
+  `supabase db push --remote=<SUPABASE_TEST_DB_URL> --include-all --yes`. CLI v3.2.0 still accepts
+  `--db-url` but prints a deprecation warning ("removed in v4"); `--remote=<url>` is its documented
+  replacement and targets the same database. `--yes` because hosted pushes do not prompt otherwise.
+- **Why canonical key names are required.** `next dev` loads `.env.local` (production) too; process
+  variables win over it, so the test file must override all three Supabase variables by their canonical
+  names, or a production key could leak in through a legacy fallback name.
+- **Tests.** `scripts/test-db/env.test.js` (`node --test`, in the Server job's script self-tests):
+  refuses missing files, a missing DB URL, the production URL in any spelling, a production key, a DB URL
+  naming the production ref, mismatched projects and an unknown production URL; never prints a secret.
+
+## F-098
+
+**The TEST project is seeded through the Supabase admin API with fixed ids and ON CONFLICT DO NOTHING;
+the harness's live game is a real private-invite game played on a local game server.**
+
+- **Seed (`scripts/test-db/seed.js`, data in `seed-data.js`).** Six accounts (`parity_white`,
+  `parity_black`, `parity_viewer`, `parity_rival_1..3`) on the RFC 2606 domain `gambit-parity.test`, with
+  passwords from `crypto.randomBytes(24)` stored only in the git-ignored `frontend/e2e/.auth/accounts.json`
+  (mode 600). Users are created with `auth.admin.createUser` (email confirmed) or, when they exist, get
+  their password reset to the stored one, so CI (fresh file each run) and local runs both work. Profiles
+  (ratings 1199-1611, counters computed from the seeded games), ten completed rated games with real
+  chess.js move rows, PGN and final FEN, friendships (accepted and pending) and notifications (read and
+  unread) use fixed `7a1e…` UUIDs or natural keys and `upsert(..., { ignoreDuplicates: true })`.
+  Re-running changes nothing, and nothing needs UPDATE (service_role has none on `profiles`,
+  migration 20261114200000). `rated_at` is set so the rating worker never re-rates seeded games.
+- **Why the private-invite flow for the live game.** Matchmaking pairs whoever is queued, so a parallel
+  player could be paired instead; an invite is addressed by token. White creates a rated 3+0 game as
+  white with the lobby's own call (`POST /api/games/private/create`), black opens `/join/<token>` and
+  presses "Accept & Play" (the game server's join), then both play 1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5 by
+  clicking squares: the mockup's position, so only clocks, names and ratings need masks. After the
+  capture black resigns, so each width starts from no active game.
+- **Stack (`scripts/test-db/stack.js`).** A throwaway `redis-server` (port 6390, no persistence) and
+  `server/server.js` on port 3202 with `server/.env.test` on top of the environment, CORS for the
+  harness's web port, run from an empty temp directory so dotenv never loads the production
+  `server/.env`. Playwright starts it as a webServer only when the guard (F-097) accepts the env files.
+- **Tests.** `seed-data.test.js` (counters agree with games, winner matches result, mating lines are
+  wins for the mating side, UUIDs unique and valid, reserved domain), `stack.test.js` (test values and
+  local ports override the inherited environment).
+
+## F-096
+
+**A committed visual parity harness: Playwright (Chromium) screenshots of each app page and its
+mockup at 375, 768, 1024, 1440 and 1920 px, diffed with pixelmatch; target at most 0.5 %.**
+
+- **Context.** The redesign must match `design/design/*.dc.html` at five widths. Until now parity was
+  checked by eye from headless-Chrome screenshots. The owner asked for a repeatable, committed check.
+- **Options.** (a) Playwright's own `toHaveScreenshot`: compares against committed baselines of the
+  *same* page, not against a second page, and its threshold is per-test pixel counts. (b) A bespoke
+  Puppeteer script: no test runner, fixtures, web-server management or projects. (c) `@playwright/test`
+  driving both pages, with `pixelmatch` + `pngjs` for the comparison. Chosen: (c). Playwright gives
+  projects (one per width), `webServer` (next dev, and the game stack of F-098), storageState for signed-
+  in pages, multi-context fixtures for a two-player game and built-in screenshot masks; pixelmatch gives
+  an anti-aliasing-aware count and a diff image. Versions pinned exactly (`@playwright/test` 1.64.1,
+  `pixelmatch` 8.0.0, `pngjs` 7.0.0, `@types/pngjs` 6.0.5): all older than two weeks; 1.65.x was not.
+- **Comparison.** Full-page screenshots at device scale 1, `reducedMotion: reduce` (the mockups and the
+  app both switch motion off, and the splash is not shown), animations disabled, caret hidden, the
+  Next.js dev overlay hidden. Different sizes are padded onto one canvas with a colour that always
+  differs, so a height or width mismatch counts. pixelmatch threshold 0.1 (its default). Each result
+  lists the three 160 px grid cells with the highest share of differing pixels ("worst regions").
+- **Masks.** Data-driven regions are painted `#FF00FF` on both sides by Playwright's `mask`. A mask is
+  one selector per side; where the app and the mockup share accessible names, text or structure (the
+  header's "Account menu, …" button, "N online", "Welcome back, …", the "Live games" list, clocks,
+  "@handle", the rankings rows) one Playwright selector serves both, so no app component needed a
+  `data-parity-mask` attribute; `appMaskSelector()` falls back to `[data-parity-mask="<key>"]` for a
+  region with no such hook. A selector that matches nothing is reported, not fatal. Masks cover only
+  the data, so the layout around them still counts; exceptions are documented in `config/pages.ts`
+  (Home signed out masks the header, because Home.dc.html draws the signed-in header; the Profile
+  Games/Stats/Friends tabs compare only the panels' frames, because everything inside is data).
+- **States.** Each page has a default state plus scenario steps (click) for dialogs, menus, panels,
+  focus mode and every Profile and Settings tab. Header menus are captured once, on the lobby.
+- **Output.** `PARITY_OUT_DIR` (default `<repo>/design`, which is untracked by the owner's choice):
+  `PARITY.md` (page × state × width table, failures worst first with diff image paths and worst
+  regions, mask misses, pending reasons) and `parity/` (app, mockup and diff PNGs, one JSON per case).
+  CI points it at a workspace folder and uploads it (F-099). `PARITY_MOCKUP_DIR` locates the mockups.
+- **Without the TEST project** (F-097) only the signed-out pages run; signed-in cases still capture
+  the mockup and are reported as "pending". One worker: the seeded accounts play one game at a time.
+- **Tests.** Jest: `__tests__/e2e/parityCanvas.test.ts` (padding, percentages, worst regions),
+  `parityReport.test.ts` (PARITY.md), `parityPages.test.ts` (page list, tabs, roles, masks).
+
+## F-099
+
+**`Parity (visual)` runs in CI only on demand (`workflow_dispatch`, or a PR labelled `parity`) and is
+not a required check.**
+
+- **Context.** A full run starts next dev, the game server and Redis, migrates and seeds the TEST
+  project and takes ~100 screenshot pairs: minutes of runner time, and it writes to a shared TEST
+  database. Visual parity is also a moving target while the redesign tracks land.
+- **Decision.** `.github/workflows/parity.yml`, job `Parity (visual)`: one run at a time
+  (`concurrency: parity`, the accounts play one game at a time); writes `frontend/.env.test.local` and
+  `server/.env.test` from secrets with `umask 077`; installs Chromium, Redis and Supabase CLI 3.2.0;
+  runs `test-db:migrate`, `test-db:seed` and `test:parity` with `PARITY_OUT_DIR=parity-report`; uploads
+  `PARITY.md`, the PNGs and the per-case JSON as the `parity-report` artifact (14 days) even on failure.
+  Not added to branch protection.
+- **Secrets.** `TEST_SUPABASE_URL`, `TEST_SUPABASE_PUBLISHABLE_KEY`, `TEST_SUPABASE_SECRET_KEY`,
+  `TEST_SUPABASE_DB_URL` (the TEST project), `PRODUCTION_SUPABASE_URL` (so the guard of F-097 can refuse
+  production; it fails closed without it) and `PARITY_MOCKUPS_URL` (a `.tar.gz` whose single top folder
+  holds `design/design`, because `design/` is not in the repository). Pull requests from forks get no
+  secrets, so the job cannot run there.
+

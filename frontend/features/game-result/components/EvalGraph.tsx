@@ -10,6 +10,7 @@ interface EvalGraphProps {
     onSeek: (p: number) => void;
 }
 
+/** White's evaluation per move; a click seeks to the nearest ply. */
 export function EvalGraph({ moves, ply, onSeek }: EvalGraphProps) {
     if (!moves.length) return null;
     const W = GRAPH_WIDTH,
@@ -25,18 +26,27 @@ export function EvalGraph({ moves, ply, onSeek }: EvalGraphProps) {
     return (
         <svg
             viewBox={`0 0 ${W} ${H}`}
-            className="w-full mt-3 rounded bg-elevated cursor-pointer"
+            aria-label="Evaluation graph"
+            className="box-border w-full cursor-pointer rounded-12 border-1 border-line-subtle bg-bg-base"
             onClick={(e) => {
                 const rect = (e.target as SVGElement).closest('svg')!.getBoundingClientRect();
                 const frac = (e.clientX - rect.left) / rect.width;
                 onSeek(Math.round(frac * moves.length));
             }}
         >
-            <rect x="0" y="0" width={W} height={mid} fill="#ffffff08" />
-            <line x1="0" y1={mid} x2={W} y2={mid} stroke="#ffffff22" strokeWidth="1" />
-            <polyline points={pts.join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+            <rect x="0" y="0" width={W} height={mid} fill="var(--color-ink)" fillOpacity="0.04" />
+            <line x1="0" y1={mid} x2={W} y2={mid} stroke="var(--color-line)" strokeWidth="1" />
+            <polyline points={pts.join(' ')} fill="none" stroke="var(--color-accent)" strokeWidth="1.5" />
             {ply > 0 && (
-                <line x1={cursorX} y1="0" x2={cursorX} y2={H} stroke="var(--accent)" strokeWidth="1" opacity="0.6" />
+                <line
+                    x1={cursorX}
+                    y1="0"
+                    x2={cursorX}
+                    y2={H}
+                    stroke="var(--color-accent)"
+                    strokeWidth="1"
+                    opacity="0.6"
+                />
             )}
         </svg>
     );

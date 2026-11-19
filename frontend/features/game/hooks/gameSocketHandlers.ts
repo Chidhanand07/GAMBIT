@@ -104,7 +104,10 @@ function onMoveMade(ctx: SocketHandlerContext) {
 function onChatMessage(ctx: SocketHandlerContext) {
     return (data: ChatMessagePayload) => {
         if (data.game_id !== ctx.gameId) return;
-        ctx.dispatch({ type: 'chatReceived', line: { from: data.from, text: data.text } });
+        ctx.dispatch({
+            type: 'chatReceived',
+            line: { from: data.from, text: data.text, fromUserId: data.from_user_id },
+        });
     };
 }
 

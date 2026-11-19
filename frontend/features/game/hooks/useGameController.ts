@@ -7,13 +7,14 @@ import { Chess } from 'chess.js';
 import { useSocket } from '@/components/SocketProvider';
 import { useProfile } from '@/components/ProfileProvider';
 import { useToast } from '@/components/Toast';
+import { useBoardPrefs, useUserSettings } from '@/features/settings/SettingsProvider';
 import type { GameWithPlayers } from '@/types/game';
 import { createInitialGameState, gameReducer } from '../state/gameReducer';
 import { bindGameCommands } from './gameCommands';
 import { useChessBoard } from './useChessBoard';
 import { useGameClock } from './useGameClock';
 import { useGameData } from './useGameData';
-import { useGameOverModalDelay, useMoveListAutoScroll } from './useGameEffects';
+import { useMoveListAutoScroll } from './useGameEffects';
 import { useGameSocket } from './useGameSocket';
 import { useMoveHistory } from './useMoveHistory';
 import { useOpponentDisconnect } from './useOpponentDisconnect';
@@ -33,19 +34,21 @@ export function useGameController(gameId: string) {
     const socket = useSocket();
     const { profile: myProfile } = useProfile();
     const { toast } = useToast();
+    const { autoQueen, confirmResignDraw } = useUserSettings().settings;
+    // Settings → "Move sounds" (F-102): the game page has no sound control of its own.
+    const soundOn = useBoardPrefs().sound;
     const notify = (message: string) => toast(message, 'error');
     const [state, dispatch] = useReducer(gameReducer, undefined, createInitialGameState);
     const { moveListRef, ...refs } = useGameRefs();
     const { chessRef, clockSyncedRef, lastProcessedFenRef } = refs;
     const disconnect = useOpponentDisconnect();
-    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify });
-    const { myColor, soundOn, gameOver, gameData } = state;
+    const board = useChessBoard({ gameId, socket, state, dispatch, chessRef, notify, autoQueen, soundOn });
+    const { myColor, gameOver, gameData } = state;
     const { markDisconnected, markReconnected, opponentDisconnected } = disconnect;
 
     useMoveHistory({ gameId, state, chessRef, dispatch });
     useGameData({ gameId, myProfile, gameData, soundOn, router, refs, dispatch });
     useMoveListAutoScroll(moveListRef, state.moveList, board.isLive);
-    useGameOverModalDelay(gameOver, dispatch);
     useGameSocket({
         ...{ socket, myProfile, gameId, myColor, soundOn, router, dispatch },
         ...{ chessRef, clockSyncedRef, lastProcessedFenRef, markDisconnected, markReconnected },
@@ -65,7 +68,7 @@ export function useGameController(gameId: string) {
         disconnect,
         liveChess: chessRef.current,
         moveListRef,
-        ...bindGameCommands({ socket, myProfile, gameId, state, dispatch, board, router, notify }),
+        ...bindGameCommands({ socket, myProfile, gameId, state, dispatch, board, router, notify, confirmResignDraw }),
     };
 }
 

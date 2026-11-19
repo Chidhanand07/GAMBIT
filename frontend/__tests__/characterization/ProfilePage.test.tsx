@@ -7,6 +7,7 @@
  * @/lib/supabase/client and global.fetch. "LEGACY:" marks behaviour that looks
  * wrong but is asserted as-is.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { jsonResponse } from './fakeSocket'
 
@@ -114,10 +115,12 @@ describe('initial load', () => {
         expect(fetchMock.mock.calls[1]).toEqual(['/api/profile/me', { cache: 'no-store' }])
     })
 
-    test('other profile: then fetches recent games (limit 5) and friend status, nothing else', async () => {
+    // Redesign: the Overview's Friends card (Profile.dc.html) also loads the profile's friends.
+    test('other profile: then fetches recent games (limit 5), friend status and friends, nothing else', async () => {
         await renderProfile()
         expect(urls().slice().sort()).toEqual([
             '/api/friends/status/bob',
+            '/api/friends?userId=u-bob',
             '/api/profile/bob',
             '/api/profile/bob/games?limit=5&offset=0',
             '/api/profile/me',
@@ -190,9 +193,10 @@ describe('header and overview tab', () => {
         expect(screen.getByRole('heading', { level: 1, name: 'Bobby' })).toBeInTheDocument()
         expect(screen.getByText('@bob')).toBeInTheDocument()
         expect(screen.getByText('Hello there')).toBeInTheDocument()
-        expect(screen.getByText('India')).toBeInTheDocument()
-        expect(screen.getByText('Joined 2023')).toBeInTheDocument()
-        expect(screen.getAllByText('10 games')).toHaveLength(2) // header + Record card
+        expect(screen.getAllByText('India')).toHaveLength(2) // hero chip + About "Country"
+        // Redesign: "Joined 2023 · 10 games" in the hero; the count is also the About "Games played"
+        expect(screen.getByText('Joined 2023 · 10 games')).toBeInTheDocument()
+        expect(screen.getByText('Games played').nextSibling).toHaveTextContent('10')
         expect(screen.getByText('B')).toBeInTheDocument()
     })
 
@@ -209,16 +213,29 @@ describe('header and overview tab', () => {
         expect(screen.queryByText('Win rate')).not.toBeInTheDocument()
     })
 
-    // F12 (was: 'Peak = CURRENT rating (peak_* ignored)', asserting 'Peak 1100/1251/1400/—'):
+    // Redesign: the per-mode ratings moved from Overview cards to the Stats tab's "Rating over time"
+    // card (one mode at a time, Blitz first). F12 (was: 'Peak = CURRENT rating (peak_* ignored)'):
     // Peak reads peak_<category>, never below the current rating, and is hidden when unknown.
-    test('rating cards show rounded ratings, "—" for missing, and Peak from peak_*', async () => {
+    const showMode = (name: string) => click(screen.getByRole('button', { name }))
+    async function openStats() {
+        routes['/api/profile/bob/stats'] = {}
         await renderProfile()
-        expect(screen.getByText('1100')).toBeInTheDocument()
+        click(screen.getByRole('button', { name: 'Stats' }))
+        await settle()
+    }
+
+    test('rating card shows rounded ratings, "—" for missing, and Peak from peak_*', async () => {
+        await openStats()
         expect(screen.getByText('1251')).toBeInTheDocument()
-        expect(screen.getByText('1400')).toBeInTheDocument()
-        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
         expect(screen.getByText('Peak 1350')).toBeInTheDocument()
+        showMode('Bullet')
+        expect(screen.getByText('1100')).toBeInTheDocument()
+        expect(screen.getByText('Peak 1300')).toBeInTheDocument()
+        showMode('Rapid')
+        expect(screen.getByText('1400')).toBeInTheDocument()
         expect(screen.getByText('Peak 1500')).toBeInTheDocument()
+        showMode('Classical')
+        expect(screen.getByText('—')).toBeInTheDocument()
         expect(screen.getByText('Peak 1600')).toBeInTheDocument()
         expect(screen.queryByText('Peak 1100')).not.toBeInTheDocument()
     })
@@ -227,17 +244,21 @@ describe('header and overview tab', () => {
         routes['/api/profile/bob'] = {
             ...BOB, peak_bullet: 900, peak_blitz: null, peak_rapid: undefined, peak_classical: undefined,
         }
-        await renderProfile()
+        await openStats()
+        expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
+        showMode('Bullet')
         expect(screen.getByText('Peak 1100')).toBeInTheDocument()
-        expect(screen.getAllByText(/^Peak/)).toHaveLength(1)
+        for (const mode of ['Rapid', 'Classical']) {
+            showMode(mode)
+            expect(screen.queryAllByText(/^Peak/)).toHaveLength(0)
+        }
     })
 
+    // Redesign: the Record card became About facts ("Record", "Win rate").
     test('record shows wins / losses / draws and rounded win rate', async () => {
         await renderProfile()
-        expect(screen.getByText('6')).toBeInTheDocument()
-        expect(screen.getByText('3')).toBeInTheDocument()
-        expect(screen.getByText('1')).toBeInTheDocument()
-        expect(screen.getByText('60%')).toBeInTheDocument()
+        expect(screen.getByText('6 W · 3 L · 1 D')).toBeInTheDocument()
+        expect(screen.getByText('Win rate').nextSibling).toHaveTextContent('60%')
     })
 
     test('recent games list: result from winner_id/result, opponent link, time control and date', async () => {
@@ -274,21 +295,21 @@ describe('header and overview tab', () => {
         click(screen.getByRole('button', { name: 'View all' }))
         await settle()
         expect(urls()).toContain('/api/profile/bob/games?limit=15&offset=0')
-        expect(screen.queryByText('Record')).not.toBeInTheDocument()
+        expect(screen.queryByText('About')).not.toBeInTheDocument()
     })
 })
 
 // ── Own vs other / friend status ────────────────────────────────────────────
 
 describe('friend status and actions', () => {
-    test('own profile shows an "Edit Profile" link to /settings and no Add Friend / Challenge', async () => {
+    test('own profile shows an "Edit profile" link to /settings and no Add friend / Challenge', async () => {
         routes['/api/profile/me'] = { id: 'u-bob', username: 'bob' }
         await renderProfile()
-        expect(screen.getByRole('link', { name: /Edit Profile/ })).toHaveAttribute('href', '/settings')
-        expect(screen.queryByRole('button', { name: /Add Friend/ })).not.toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /Edit profile/ })).toHaveAttribute('href', '/settings')
+        expect(screen.queryByRole('button', { name: /Add friend/ })).not.toBeInTheDocument()
         expect(screen.queryByRole('link', { name: /Challenge/ })).not.toBeInTheDocument()
         // LEGACY: the edit-profile modal (PATCH /api/profile/me) has no opener; it never renders
-        click(screen.getByRole('link', { name: /Edit Profile/ }))
+        click(screen.getByRole('link', { name: /Edit profile/ }))
         expect(screen.queryByText('Public Profile')).not.toBeInTheDocument()
     })
 
@@ -298,9 +319,9 @@ describe('friend status and actions', () => {
     })
 
     test.each([
-        ['none', 'Add Friend', false],
-        ['pending_received', 'Add Friend', false],
-        ['pending_sent', 'Request Sent', true],
+        ['none', 'Add friend', false],
+        ['pending_received', 'Add friend', false],
+        ['pending_sent', 'Request sent', true],
     ])('status "%s" shows %s (disabled=%s)', async (status, label, disabled) => {
         routes['/api/friends/status/bob'] = { status }
         await renderProfile()
@@ -315,44 +336,44 @@ describe('friend status and actions', () => {
         const friendsButtons = screen.getAllByRole('button', { name: 'Friends' })
         expect(friendsButtons).toHaveLength(2) // badge + tab
         expect(friendsButtons.filter(b => b.hasAttribute('disabled'))).toHaveLength(1)
-        expect(screen.queryByRole('button', { name: /Add Friend/ })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Add friend/ })).not.toBeInTheDocument()
     })
 
-    test('a failed status request falls back to "Add Friend"', async () => {
+    test('a failed status request falls back to "Add friend"', async () => {
         routes['/api/friends/status/bob'] = FAIL()
         await renderProfile()
-        expect(screen.getByRole('button', { name: /Add Friend/ })).toBeEnabled()
+        expect(screen.getByRole('button', { name: /Add friend/ })).toBeEnabled()
     })
 
-    test('Add Friend POSTs {addressee_username} and switches to "Request Sent"', async () => {
+    test('Add friend POSTs {addressee_username} and switches to "Request sent"', async () => {
         routes['/api/friends/request'] = { ok: true }
         await renderProfile()
-        click(screen.getByRole('button', { name: /Add Friend/ }))
+        click(screen.getByRole('button', { name: /Add friend/ }))
         await settle()
         expect(callFor('/api/friends/request')).toEqual(['/api/friends/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ addressee_username: 'bob' }),
         }])
-        expect(screen.getByRole('button', { name: /Request Sent/ })).toBeDisabled()
+        expect(screen.getByRole('button', { name: /Request sent/ })).toBeDisabled()
     })
 
-    test('a rejected friend request reverts to "Add Friend"', async () => {
+    test('a rejected friend request reverts to "Add friend"', async () => {
         routes['/api/friends/request'] = FAIL({ error: 'dup' })
         await renderProfile()
-        click(screen.getByRole('button', { name: /Add Friend/ }))
+        click(screen.getByRole('button', { name: /Add friend/ }))
         await settle()
-        expect(screen.getByRole('button', { name: /Add Friend/ })).toBeEnabled()
+        expect(screen.getByRole('button', { name: /Add friend/ })).toBeEnabled()
     })
 
-    test('signed-out viewer: no status request; Add Friend is shown but does nothing', async () => {
+    test('signed-out viewer: no status request; Add friend is shown but does nothing', async () => {
         routes['/api/profile/me'] = FAIL()
         await renderProfile()
         expect(urls()).not.toContain('/api/friends/status/bob')
-        click(screen.getByRole('button', { name: /Add Friend/ }))
+        click(screen.getByRole('button', { name: /Add friend/ }))
         await settle()
         expect(urls()).not.toContain('/api/friends/request')
-        expect(screen.getByRole('button', { name: /Add Friend/ })).toBeEnabled()
+        expect(screen.getByRole('button', { name: /Add friend/ })).toBeEnabled()
     })
 })
 
@@ -392,12 +413,13 @@ describe('games tab', () => {
         await settle()
         expect(screen.getByText('W')).toBeInTheDocument()
         expect(screen.getByText('1-0')).toBeInTheDocument()
-        expect(screen.getByText('(1400)')).toBeInTheDocument()
+        // Redesign (Profile.dc.html row): the opponent's rating and the player's own accuracy only
         expect(screen.getByText('(1333)')).toBeInTheDocument()
+        expect(screen.queryByText('(1400)')).not.toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Alice' })).toHaveAttribute('href', '/profile/alice')
         expect(screen.getByText('91%')).toBeInTheDocument()
-        expect(screen.getByText('64%')).toBeInTheDocument()
-        expect(screen.getByTitle('rapid')).toHaveTextContent('⏱')
+        expect(screen.queryByText('64%')).not.toBeInTheDocument()
+        expect(screen.getByText('Rapid · 10 min')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/game/g-row')
     })
 
@@ -417,15 +439,15 @@ describe('games tab', () => {
         expect(screen.getByText('0-1')).toBeInTheDocument()
         expect(screen.getByText('D')).toBeInTheDocument()
         expect(screen.getByText('½-½')).toBeInTheDocument()
-        expect(screen.getByTitle('bullet')).toHaveTextContent('⚡')
-        expect(screen.getByTitle('blitz')).toHaveTextContent('🔥')
-        expect(screen.getByTitle('classical')).toHaveTextContent('📖')
-        expect(screen.getByTitle('rapid')).toHaveTextContent('⏱')
+        // Redesign: the speed icons became "<Bucket> · <clock>" text
+        expect(screen.getByText('Bullet · 2+1')).toBeInTheDocument()
+        expect(screen.getByText('Blitz · 5 min')).toBeInTheDocument()
+        expect(screen.getByText('Classical · 30 min')).toBeInTheDocument()
+        expect(screen.getByText('Rapid · 10 min')).toBeInTheDocument() // row d: 'weird' reads as 10+0, rapid
         expect(screen.getByText('Unknown')).toBeInTheDocument()
-        // F12 (was: one '(1200)', the missing black player): ratings follow the game's category, and the
-        // fixture players only carry rating_rapid, so rows a-c (bullet/blitz/classical) default to 1200 too.
-        expect(screen.getAllByText('(1200)')).toHaveLength(7)
-        expect(screen.getByText('(1400)')).toBeInTheDocument() // row d: 'weird' reads as 10+0, rapid
+        // F12: ratings follow the game's category; the fixture opponents only carry rating_rapid, so
+        // rows a-c (bullet/blitz/classical) default to 1200, as does row d's missing opponent.
+        expect(screen.getAllByText('(1200)')).toHaveLength(4)
         expect(screen.getByText('—')).toBeInTheDocument()
     })
 
@@ -442,9 +464,8 @@ describe('games tab', () => {
         await renderProfile()
         click(tab(/^Games/))
         await settle()
-        expect(screen.getByText('(1555)')).toBeInTheDocument()
         expect(screen.getByText('(1444)')).toBeInTheDocument()
-        expect(screen.queryByText('(1400)')).not.toBeInTheDocument()
+        expect(screen.queryByText('(1333)')).not.toBeInTheDocument()
     })
 
     test('empty / failed games request shows "No completed games yet."', async () => {
@@ -477,7 +498,7 @@ describe('stats tab', () => {
         click(screen.getByRole('button', { name: 'Stats' }))
         await settle()
         expect(callFor('/api/profile/bob/stats')).toEqual(['/api/profile/bob/stats', { cache: 'no-store' }])
-        expect(screen.getByText('Total Games')).toBeInTheDocument()
+        expect(screen.getByText('Total games')).toBeInTheDocument()
         expect(screen.getByText('12')).toBeInTheDocument()
         expect(screen.getByText('7')).toBeInTheDocument()
         expect(screen.getByText('1112')).toBeInTheDocument()
@@ -503,7 +524,7 @@ describe('stats tab', () => {
         expect(screen.getByText('Could not load stats.')).toBeInTheDocument()
         click(screen.getByRole('button', { name: 'Retry' }))
         await settle()
-        expect(screen.getByText('Total Games')).toBeInTheDocument()
+        expect(screen.getByText('Total games')).toBeInTheDocument()
         expect(screen.getByText('3')).toBeInTheDocument()
     })
 
@@ -532,12 +553,13 @@ describe('friends tab', () => {
         click(tab('Friends'))
         await settle()
         const friendCalls = fetchMock.mock.calls.filter(c => String(c[0]).startsWith('/api/friends'))
-        expect(friendCalls).toEqual([['/api/friends?userId=u-bob'], ['/api/friends/pending']])
-        expect(screen.getByText('Pending Requests')).toBeInTheDocument()
+        // Redesign: the Overview's Friends card loaded the list once already
+        expect(friendCalls).toEqual([['/api/friends?userId=u-bob'], ['/api/friends?userId=u-bob'], ['/api/friends/pending']])
+        expect(screen.getByText('Pending requests')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Carol' })).toHaveAttribute('href', '/profile/carol')
-        expect(screen.getByText('1502 Rapid')).toBeInTheDocument()
+        expect(screen.getByText('1502 rapid')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'dave' })).toBeInTheDocument()
-        expect(screen.getByText('My Friends')).toBeInTheDocument()
+        expect(screen.getByText('My friends')).toBeInTheDocument()
         expect(screen.getByText('(1)')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: /Challenge/ })).toHaveAttribute('href', '/challenge/erin')
     })
@@ -609,15 +631,15 @@ describe('friends tab', () => {
         expect(screen.getByRole('link', { name: 'Zed' })).toBeInTheDocument()
     })
 
-    test("other profile: only friends?userId=<their id>, \"<Name>'s Friends\", no pending, no challenge buttons", async () => {
+    test("other profile: only friends?userId=<their id>, \"<Name>'s friends\", no pending, no challenge buttons", async () => {
         routes['/api/friends?userId=u-bob'] = [{ username: 'erin', display_name: 'Erin', friendship_id: 'f-9' }]
         await renderProfile()
         click(tab('Friends'))
         await settle()
         expect(urls()).toContain('/api/friends?userId=u-bob')
         expect(urls()).not.toContain('/api/friends/pending')
-        expect(screen.getByText("Bobby's Friends")).toBeInTheDocument()
-        expect(screen.queryByText('Pending Requests')).not.toBeInTheDocument()
+        expect(screen.getByText("Bobby's friends")).toBeInTheDocument()
+        expect(screen.queryByText('Pending requests')).not.toBeInTheDocument()
         // only the header Challenge link remains
         expect(screen.getAllByRole('link', { name: /Challenge/ })).toHaveLength(1)
     })
@@ -651,4 +673,11 @@ describe('presence', () => {
         await settle()
         expect(removeChannel).not.toHaveBeenCalled()
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('the profile page (overview) has no axe violations', async () => {
+        const { container } = await renderProfile()
+        await expectAccessible(container)
+    }, AXE_TIMEOUT_MS)
 })

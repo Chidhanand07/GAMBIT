@@ -2,10 +2,16 @@
 jest.mock('next/headers', () => require('../helpers/routeHarness').nextHeadersMock)
 jest.mock('@supabase/supabase-js', () => require('../helpers/routeHarness').supabaseJsMock)
 jest.mock('@supabase/ssr', () => require('../helpers/routeHarness').supabaseSsrMock)
+// The failure floor (F-101) is tested in loginIdentity.test.ts; here it only has to be awaited.
+jest.mock('@/lib/server/loginIdentity', () => ({
+    ...jest.requireActual('@/lib/server/loginIdentity'),
+    waitForFailureFloor: jest.fn(async () => {}),
+}))
 
 import { POST as login } from '@/app/api/auth/login/route'
 import { POST as signup } from '@/app/api/auth/signup/route'
-import { db, req, json, resetHarness, supabaseSsrMock } from '../helpers/routeHarness'
+import { waitForFailureFloor } from '@/lib/server/loginIdentity'
+import { db, req, json, resetHarness, supabaseSsrMock, uid } from '../helpers/routeHarness'
 
 beforeEach(() => {
     resetHarness()
@@ -28,7 +34,8 @@ describe('POST /api/auth/login', () => {
     test('wrong credentials → 401 with a generic message (no account enumeration)', async () => {
         db.auth.signInWithPassword.mockResolvedValue({ data: { session: null }, error: { message: 'Invalid login credentials' } } as any)
         const res = await json(await login(req('/api/auth/login', { method: 'POST', body: { email: 'a@b.c', password: 'x' } })))
-        expect(res).toEqual({ status: 401, body: { error: 'Invalid email or password' } })
+        // was: 'Invalid email or password' — [F-101] the field also takes a username
+        expect(res).toEqual({ status: 401, body: { error: 'Invalid email, username or password' } })
     })
 
     test('unconfirmed email → 401 asking the user to confirm', async () => {
@@ -58,6 +65,116 @@ describe('POST /api/auth/login', () => {
         // A response that sets session cookies must not be cached (NX-11).
         expect(res.headers.get('cache-control')).toBe('private, no-store')
         expect(db.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'pw' })
+    })
+})
+
+describe('POST /api/auth/login with an e-mail or a username [F-101]', () => {
+    const EMAIL = 'magnus@example.com'
+    const send = (body: unknown) => login(req('/api/auth/login', { method: 'POST', body }))
+    const wrongPassword = { data: { session: null }, error: { message: 'Invalid login credentials' } } as any
+    const knownUser = () => {
+        db.queue('profiles', { data: [{ id: uid('magnus'), username: 'Magnus_C' }], error: null })
+        db.auth.admin.getUserById.mockResolvedValue({ data: { user: { id: uid('magnus'), email: EMAIL } }, error: null } as any)
+    }
+    const signedInWith = () => (db.auth.signInWithPassword.mock.calls.at(-1) as any)[0]
+    let logs: jest.SpyInstance[]
+    beforeEach(() => {
+        jest.mocked(waitForFailureFloor).mockClear()
+        logs = (['log', 'info', 'warn', 'error'] as const).map(level => jest.spyOn(console, level).mockImplementation(() => {}))
+    })
+    afterEach(() => {
+        // The account's e-mail is never logged, whatever happened.
+        for (const spy of logs) expect(JSON.stringify(spy.mock.calls)).not.toContain(EMAIL)
+    })
+
+    test('an e-mail goes straight to Supabase Auth: no profile lookup, no admin call', async () => {
+        db.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' } }, error: null } as any)
+        const res = await send({ identifier: EMAIL, password: 'pw' })
+        expect(res.status).toBe(200)
+        expect(signedInWith()).toEqual({ email: EMAIL, password: 'pw' })
+        expect(db.callsFor('profiles')).toHaveLength(0)
+        expect(db.auth.admin.getUserById).not.toHaveBeenCalled()
+    })
+
+    test('the older { email } body is still accepted', async () => {
+        db.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' } }, error: null } as any)
+        expect((await send({ email: EMAIL, password: 'pw' })).status).toBe(200)
+        expect(signedInWith()).toEqual({ email: EMAIL, password: 'pw' })
+    })
+
+    test('a username is matched case-insensitively and exactly, then signs in with its e-mail', async () => {
+        knownUser()
+        db.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' } }, error: null } as any)
+        const res = await send({ identifier: 'magnus_c', password: 'pw' })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true })
+        const [call] = db.callsFor('profiles')
+        // `_` is escaped: ilike must not treat it as "any one character"
+        expect(db.op(call, 'ilike')).toEqual(['username', 'magnus\\_c'])
+        expect(db.auth.admin.getUserById).toHaveBeenCalledWith(uid('magnus'))
+        expect(signedInWith()).toEqual({ email: EMAIL, password: 'pw' })
+    })
+
+    test('two names that differ only in case: the exact spelling wins; otherwise nobody matches', async () => {
+        const rows = [{ id: uid('lower'), username: 'bob' }, { id: uid('upper'), username: 'Bob' }]
+        db.queue('profiles', { data: rows, error: null }, { data: rows, error: null })
+        await send({ identifier: 'Bob', password: 'pw' })
+        expect(db.auth.admin.getUserById).toHaveBeenLastCalledWith(uid('upper'))
+        const res = await json(await send({ identifier: 'BOB', password: 'pw' }))
+        expect(res).toEqual({ status: 401, body: { error: 'Invalid email, username or password' } })
+    })
+
+    test('unknown username and wrong password: identical status and body, the same work and the same floor', async () => {
+        knownUser()
+        db.auth.signInWithPassword.mockResolvedValue(wrongPassword)
+        const wrong = await json(await send({ identifier: 'Magnus_C', password: 'bad' }))
+        const wrongCalls = { admin: db.auth.admin.getUserById.mock.calls.length, auth: db.auth.signInWithPassword.mock.calls.length }
+
+        db.reset()
+        db.auth.signInWithPassword.mockResolvedValue(wrongPassword)
+        db.queue('profiles', { data: [], error: null })
+        const unknown = await json(await send({ identifier: 'nobody_here', password: 'bad' }))
+
+        expect(unknown).toEqual(wrong)
+        expect(unknown).toEqual({ status: 401, body: { error: 'Invalid email, username or password' } })
+        // Same calls on both paths: one admin lookup, one password check (against a .invalid address)
+        expect(db.auth.admin.getUserById).toHaveBeenCalledTimes(wrongCalls.admin)
+        expect(db.auth.signInWithPassword).toHaveBeenCalledTimes(wrongCalls.auth)
+        expect(signedInWith().email).toMatch(/@login\.invalid$/)
+        expect(waitForFailureFloor).toHaveBeenCalledTimes(2)
+    })
+
+    test('an unknown user is refused even if the dummy password check were to pass', async () => {
+        db.queue('profiles', { data: [], error: null })
+        db.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' } }, error: null } as any)
+        const res = await json(await send({ identifier: 'nobody_here', password: 'pw' }))
+        expect(res).toEqual({ status: 401, body: { error: 'Invalid email, username or password' } })
+    })
+
+    test('a failed profile lookup or a user without an e-mail reads as unknown', async () => {
+        db.queue('profiles', { data: null, error: { message: 'boom' } })
+        expect((await send({ identifier: 'Magnus_C', password: 'pw' })).status).toBe(401)
+        db.queue('profiles', { data: [{ id: uid('magnus'), username: 'Magnus_C' }], error: null })
+        db.auth.admin.getUserById.mockResolvedValue({ data: { user: null }, error: { message: 'gone' } } as any)
+        expect((await send({ identifier: 'Magnus_C', password: 'pw' })).status).toBe(401)
+    })
+
+    test('a username the schema could never hold is unknown without a database query', async () => {
+        const res = await json(await send({ identifier: 'no spaces%', password: 'pw' }))
+        expect(res).toEqual({ status: 401, body: { error: 'Invalid email, username or password' } })
+        expect(db.callsFor('profiles')).toHaveLength(0)
+    })
+
+    test('success is not padded by the failure floor', async () => {
+        knownUser()
+        db.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' } }, error: null } as any)
+        await send({ identifier: 'Magnus_C', password: 'pw' })
+        expect(waitForFailureFloor).not.toHaveBeenCalled()
+    })
+
+    test('an empty identifier is a 400', async () => {
+        const res = await json(await send({ identifier: '   ', password: 'pw' }))
+        expect(res).toEqual({ status: 400, body: { error: 'Email and password are required' } })
     })
 })
 

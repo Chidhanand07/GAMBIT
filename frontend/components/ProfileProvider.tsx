@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { loadBrowserClient } from '@/lib/supabase/lazyClient'
 
 interface Profile {
     id: string
@@ -38,6 +38,13 @@ export function useProfile() {
     return useContext(ProfileContext)
 }
 
+/** True when this browser holds a Supabase session (read locally; refreshed if it has expired). */
+async function hasBrowserSession(): Promise<boolean> {
+    const supabase = await loadBrowserClient()
+    const { data } = await supabase.auth.getSession()
+    return Boolean(data.session)
+}
+
 export default function ProfileProvider({ children }: { children: React.ReactNode }) {
     const [profile, setProfile] = useState<Profile | null>(null)
     const [loading, setLoading] = useState(true)
@@ -50,6 +57,12 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
         const requestedIn = generation.current
         const isCurrent = () => requestedIn === generation.current
         try {
+            // No session in this browser: nothing to ask the server for (a guest would get a 401,
+            // which browsers log as a console error on every public page; F-111).
+            if (!(await hasBrowserSession())) {
+                if (isCurrent()) setProfile(null)
+                return
+            }
             const res = await fetch('/api/profile/me')
             const next = res.ok ? await res.json() : null
             if (isCurrent()) setProfile(next)
@@ -68,17 +81,27 @@ export default function ProfileProvider({ children }: { children: React.ReactNod
     // SIGNED_OUT after failing to refresh. Catch that and clear profile so the
     // stale token doesn't keep hammering Supabase with 400/429 errors.
     useEffect(() => {
-        const supabase = createClient()
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-            if (event === 'SIGNED_OUT') {
-                generation.current += 1
-                setProfile(null)
-                setLoading(false)
-            } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                void fetchProfile()
-            }
-        })
-        return () => subscription.unsubscribe()
+        let unsubscribe: (() => void) | null = null
+        let active = true
+        loadBrowserClient()
+            .then((supabase) => {
+                if (!active) return
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+                    if (event === 'SIGNED_OUT') {
+                        generation.current += 1
+                        setProfile(null)
+                        setLoading(false)
+                    } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                        void fetchProfile()
+                    }
+                })
+                unsubscribe = () => subscription.unsubscribe()
+            })
+            .catch(() => {})
+        return () => {
+            active = false
+            unsubscribe?.()
+        }
     }, [fetchProfile])
 
     return (

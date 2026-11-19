@@ -7,8 +7,11 @@ import { jsonResponse } from './fakeSocket'
 // ── Supabase client double: auth state listener ──
 let authListener: ((event: string) => void) | null = null
 const unsubscribe = jest.fn()
+// F-111: the provider asks for /api/profile/me only when the browser holds a session.
+const getSession = jest.fn(async () => ({ data: { session: { access_token: 't' } as object | null } }))
 const supabase = {
     auth: {
+        getSession,
         onAuthStateChange: jest.fn((cb: any) => {
             authListener = cb
             return { data: { subscription: { unsubscribe } } }
@@ -98,6 +101,15 @@ describe('ProfileProvider', () => {
         await act(async () => { resolveLate(jsonResponse({ id: 'u1', username: 'alice' })) })
         await flush()
         expect(screen.getByTestId('probe')).toHaveTextContent('none')
+    })
+
+    test('[F-111] a guest (no session in this browser) never requests /api/profile/me, so no 401 is logged', async () => {
+        getSession.mockResolvedValue({ data: { session: null } })
+        render(<ProfileProvider><Probe /></ProfileProvider>)
+        await flush()
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(screen.getByTestId('probe')).toHaveTextContent('none')
+        getSession.mockResolvedValue({ data: { session: { access_token: 't' } } })
     })
 
     test('refetch from context re-requests the profile', async () => {

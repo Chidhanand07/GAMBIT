@@ -1,0 +1,43 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "npx next start -p 3203",
+      "startServerReadyPattern": "Ready in",
+      "url": [
+        "http://localhost:3203/"
+      ],
+      "numberOfRuns": 3,
+      "settings": {
+        "chromeFlags": "--headless=new --no-sandbox",
+        "throttlingMethod": "devtools"
+      }
+    },
+    "assert": {
+      "aggregationMethod": "median-run",
+      "assertions": {
+        "largest-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 2000
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0
+          }
+        ],
+        "total-blocking-time": [
+          "error",
+          {
+            "maxNumericValue": 200
+          }
+        ]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": ".lighthouseci/applied"
+    }
+  }
+}

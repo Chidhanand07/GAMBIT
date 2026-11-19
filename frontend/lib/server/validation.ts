@@ -12,6 +12,8 @@ const DEFAULT_ERROR = 'Invalid request';
 const DEFAULT_PAGE_SIZE = 15;
 const MAX_PAGE_SIZE = 50;
 const MAX_OFFSET = 100_000;
+const DEFAULT_LIVE_GAMES = 10;
+const MAX_LIVE_GAMES = 20;
 const MAX_USERNAME_PARAM_LENGTH = 40;
 const MIN_NEW_USERNAME_LENGTH = 3;
 const MAX_NEW_USERNAME_LENGTH = 20;
@@ -75,10 +77,24 @@ export const schemas = {
             .transform((n) => Math.min(n, MAX_PAGE_SIZE)),
         offset: queryInt(0).pipe(z.number().int().min(0).max(MAX_OFFSET)),
     }),
-    login: z.object({
-        email: z.string().min(1).max(MAX_EMAIL_LENGTH),
-        password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+    /** GET /api/games/live?limit=: how many games, bounded. */
+    liveGames: z.object({
+        limit: queryInt(DEFAULT_LIVE_GAMES)
+            .pipe(z.number().int().min(1))
+            .transform((n) => Math.min(n, MAX_LIVE_GAMES)),
     }),
+    /**
+     * POST /api/auth/login: `identifier` is an e-mail or a username (Signin.dc.html "Email or
+     * username"). `email` is the older body's name for it and is still accepted (F-101).
+     */
+    login: z
+        .object({
+            identifier: z.string().trim().min(1).max(MAX_EMAIL_LENGTH).optional(),
+            email: z.string().trim().min(1).max(MAX_EMAIL_LENGTH).optional(),
+            password: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+        })
+        .transform(({ identifier, email, password }) => ({ identifier: identifier ?? email ?? '', password }))
+        .refine((body) => body.identifier !== ''),
     signup: z.object({
         email: z.string().min(1).max(MAX_EMAIL_LENGTH),
         password: z.string().min(1).max(MAX_PASSWORD_LENGTH),

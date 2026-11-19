@@ -11,3 +11,8 @@ export function useProfilePresence(profileId: string | undefined): boolean {
     const { onlineUserIds } = usePresence();
     return profileId !== undefined && onlineUserIds.has(profileId);
 }
+
+/** The shared presence set (profile ids), for the Overview's friends list. */
+export function useOnlineIds(): ReadonlySet<string> {
+    return usePresence().onlineUserIds;
+}

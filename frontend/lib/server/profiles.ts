@@ -35,6 +35,20 @@ export function findProfileIdByUsername(admin: SupabaseClient, username: string)
     return admin.from('profiles').select('id').eq('username', username).maybeSingle();
 }
 
+/** `_` is a LIKE wildcard and may appear in a username; `%`, `*` and `\\` cannot (schemas.usernameParam). */
+const escapeLike = (text: string) => text.replace(/_/g, '\\_');
+/** Two rows are enough to tell "one match" from "several names that differ only in case". */
+const CASE_INSENSITIVE_MATCH_LIMIT = 2;
+
+/** `{ id, username }` of the profiles whose username equals `username` ignoring case (at most two). */
+export function findProfilesByUsernameIgnoringCase(admin: SupabaseClient, username: string) {
+    return admin
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', escapeLike(username))
+        .limit(CASE_INSENSITIVE_MATCH_LIMIT);
+}
+
 /** Full profile row by id. */
 export function getProfileById(admin: SupabaseClient, id: string) {
     return admin.from('profiles').select('*').eq('id', id).maybeSingle();
@@ -99,6 +113,14 @@ export function listLeaderboard(admin: SupabaseClient, field: RatingField) {
         .select(`username, display_name, ${field}, games_played, wins, losses, draws`)
         .order(field, { ascending: false })
         .limit(LEADERBOARD_SIZE);
+}
+
+/**
+ * How many players the leaderboard ranks: every profile (the board orders all of them by rating).
+ * A HEAD count, so no rows are read.
+ */
+export function countLeaderboardPlayers(admin: SupabaseClient) {
+    return admin.from('profiles').select('id', { count: 'exact', head: true });
 }
 
 /** Email local part with non-word characters replaced by `_`, max 15 chars, else "player". */

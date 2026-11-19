@@ -13,7 +13,7 @@ export interface EngineAnalysis {
     pv?: string;
 }
 
-/** Search depth the analysis page always requests (shown as "d18"). */
+/** Search depth the analysis page always requests (shown in the readout's "Depth" row). */
 export const ANALYSIS_DEPTH = 18;
 
 const CENTIPAWNS_PER_PAWN = 100;

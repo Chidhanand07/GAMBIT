@@ -13,7 +13,9 @@ describe('lib/sounds', () => {
         })
         let sounds: any
         jest.isolateModules(() => { sounds = require('@/lib/sounds') })
-        ;(global as any).Audio = OriginalAudio
+        // F-111: importing the module loads nothing; the first sound creates and preloads every clip.
+        expect(created).toEqual([])
+        sounds.playMoveSound()
         expect(created.map(a => [a.src, a.preload])).toEqual([
             ['/audio/move-self.mp3', 'auto'], ['/audio/capture.mp3', 'auto'], ['/audio/castle.mp3', 'auto'],
             ['/audio/check.mp3', 'auto'], ['/audio/checkmate.mp3', 'auto'], ['/audio/matchstart.mp3', 'auto'],
@@ -37,6 +39,8 @@ describe('lib/sounds', () => {
             expect(created.filter(a => a.play.mock.calls.length).map(a => a.src)).toEqual([src])
             expect(bySrc(src).currentTime).toBe(0)
         }
+        expect(created).toHaveLength(7) // created once, reused
+        ;(global as any).Audio = OriginalAudio
     })
 
     test('rejected play() and throwing play() are swallowed', async () => {
@@ -48,10 +52,32 @@ describe('lib/sounds', () => {
         }))
         let sounds: any
         jest.isolateModules(() => { sounds = require('@/lib/sounds') })
-        ;(global as any).Audio = OriginalAudio
         expect(() => sounds.playMoveSound()).not.toThrow()
         await Promise.resolve()
         mode = 'throw'
         expect(() => sounds.playMoveSound()).not.toThrow()
+        ;(global as any).Audio = OriginalAudio
+    })
+    test('setSoundsEnabled(false) silences every helper except the settings preview click', () => {
+        const created: { src: string; currentTime: number; play: jest.Mock }[] = []
+        const OriginalAudio = (global as any).Audio
+        ;(global as any).Audio = jest.fn((src: string) => {
+            const a = { src, preload: '', currentTime: 0, play: jest.fn(() => Promise.resolve()) }
+            created.push(a)
+            return a
+        })
+        let sounds: any
+        jest.isolateModules(() => { sounds = require('@/lib/sounds') })
+        const played = () => created.filter(a => a.play.mock.calls.length).map(a => a.src)
+        sounds.setSoundsEnabled(false)
+        sounds.playMoveSound()
+        sounds.playGameEndSound(true)
+        expect(played()).toEqual([])
+        sounds.playPreviewMoveSound()
+        expect(played()).toEqual(['/audio/move-self.mp3'])
+        sounds.setSoundsEnabled(true)
+        sounds.playCaptureSound()
+        expect(played()).toEqual(['/audio/move-self.mp3', '/audio/capture.mp3'])
+        ;(global as any).Audio = OriginalAudio
     })
 })

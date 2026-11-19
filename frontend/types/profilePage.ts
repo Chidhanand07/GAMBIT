@@ -13,6 +13,12 @@ export interface ProfileGameRow extends Pick<Game, 'id' | 'time_control' | 'stat
     black_id: string;
     white: ProfileSummary | null;
     black: ProfileSummary | null;
+    /**
+     * Opening name and number of moves (Profile.dc.html "Italian Game · 5 min · 34 moves").
+     * Optional: the games API does not send them yet (data-profile track).
+     */
+    opening?: string | null;
+    move_count?: number | null;
 }
 
 /** GET /api/profile/[username]/games body. */
@@ -28,6 +34,15 @@ export interface CategoryRecord {
     draws: number;
 }
 
+/** Derived facts of GET /api/profile/[username]/stats. */
+export interface ProfileFacts {
+    /** Mean analysed accuracy (%), null when no game was analysed. */
+    averageAccuracy: number | null;
+    longestWinStreak: number;
+    /** English weekday name (UTC), null without games. */
+    mostActiveDay: string | null;
+}
+
 /** GET /api/profile/[username]/stats. Every field is read defensively by the page. */
 export interface ProfileStats {
     total?: number;
@@ -36,4 +51,6 @@ export interface ProfileStats {
     draws?: number;
     ratings?: Partial<Record<SpeedBucket, number | null>>;
     byCategory?: Partial<Record<SpeedBucket, CategoryRecord>>;
+    byColour?: Partial<Record<'white' | 'black', CategoryRecord>>;
+    facts?: ProfileFacts;
 }

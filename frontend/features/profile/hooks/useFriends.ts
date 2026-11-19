@@ -35,8 +35,8 @@ async function loadList<T>(
 }
 
 /**
- * Friends tab data: the profile's friends (loaded on every visit to the tab)
- * and, on the viewer's own profile, incoming requests with accept/decline.
+ * Friends data for the Overview card and the Friends tab: the profile's friends and, on the
+ * viewer's own profile, incoming requests with accept/decline.
  * The search text lives here so it survives tab switches.
  */
 export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
@@ -49,16 +49,21 @@ export function useFriends({ activeTab, profile, isOwnProfile }: FriendsArgs) {
 
     const profileId = profile?.id;
 
+    const listShown = activeTab === 'friends' || activeTab === 'overview';
+    const pendingShown = activeTab === 'friends' && isOwnProfile;
+
     // Keyed on the profile id rather than the profile object, so a refetch does not reload.
+    // Friends load on each visit to the Overview (its Friends card) and to the Friends tab;
+    // incoming requests on each visit to your own Friends tab, after the friends list.
     useEffect(() => {
-        if (activeTab !== 'friends' || !profileId) return;
+        if (!listShown || !profileId) return;
         const loadFriends = async () => {
             // Pass userId so public profiles can also show friends
             await loadList(() => fetchFriendsOf(profileId), setFriends, setFriendsLoading);
-            if (isOwnProfile) await loadList(fetchPendingFriendRequests, setPendingRequests, setPendingLoading);
+            if (pendingShown) await loadList(fetchPendingFriendRequests, setPendingRequests, setPendingLoading);
         };
         void loadFriends();
-    }, [activeTab, profileId, isOwnProfile]);
+    }, [listShown, pendingShown, profileId]);
 
     const respondToRequest = async (friendshipId: string, action: FriendRequestAction) => {
         setRespondError(null);

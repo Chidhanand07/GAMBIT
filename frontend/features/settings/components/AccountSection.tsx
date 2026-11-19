@@ -1,48 +1,43 @@
 import type { SettingsProfile } from '../types';
+import { FIELD, HINT, READONLY_INPUT } from './styles';
 
 const DEFAULT_RATING = 1200;
 
-export function AccountSection({ profile }: { profile: SettingsProfile }) {
-    const ratings = [
-        { label: 'Bullet', val: profile.rating_bullet },
-        { label: 'Blitz', val: profile.rating_blitz },
-        { label: 'Rapid', val: profile.rating_rapid },
-        { label: 'Classical', val: profile.rating_classical },
-    ];
+const RATINGS = [
+    { label: 'Bullet', field: 'rating_bullet' },
+    { label: 'Blitz', field: 'rating_blitz' },
+    { label: 'Rapid', field: 'rating_rapid' },
+    { label: 'Classical', field: 'rating_classical' },
+] as const;
+
+/** Read-only sign-in details and the four ratings (rounded, 1200 when missing). */
+export function AccountSection({ profile, email }: { profile: SettingsProfile; email: string | null }) {
     return (
-        <div className="bg-surface border border-border rounded-xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-border bg-elevated">
-                <h2 className="text-lg font-medium text-text-primary">Account</h2>
-            </div>
-            <div className="p-6 space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">Username</label>
-                    <div className="flex gap-2 items-center">
-                        <input
-                            type="text"
-                            value={profile.username}
-                            disabled
-                            className="flex-1 h-11 bg-elevated border border-border rounded-lg px-4 text-text-tertiary cursor-not-allowed"
-                        />
-                        <span className="text-text-tertiary text-xs px-3">Read-only</span>
+        <div className="pb-[10px]">
+            <label className={`${FIELD} pt-2`}>
+                <span className="font-semibold">Username</span>
+                <input type="text" value={profile.username} readOnly className={READONLY_INPUT} />
+            </label>
+            {email && (
+                <label className={FIELD}>
+                    <span className="font-semibold">Email</span>
+                    <input type="email" value={email} readOnly className={READONLY_INPUT} />
+                    <span className={HINT}>Used for sign-in and account recovery.</span>
+                </label>
+            )}
+            <div className="flex flex-col gap-[10px] px-7 pb-[18px]">
+                <span className="font-semibold">Ratings</span>
+                {RATINGS.map((r) => (
+                    <div
+                        key={r.label}
+                        className="flex min-h-[48px] items-center justify-between rounded-14 border-1 border-line bg-bg-base px-[18px]"
+                    >
+                        <span className="text-ink-muted">{r.label}</span>
+                        <span className="font-mono font-bold text-accent">
+                            {Math.round(profile[r.field] ?? DEFAULT_RATING)}
+                        </span>
                     </div>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-2">Ratings</label>
-                    <div className="grid grid-cols-2 gap-3">
-                        {ratings.map((r) => (
-                            <div
-                                key={r.label}
-                                className="flex justify-between items-center bg-elevated border border-border rounded-lg px-4 py-2.5"
-                            >
-                                <span className="text-text-secondary text-sm">{r.label}</span>
-                                <span className="text-accent font-medium tabular-nums">
-                                    {Math.round(r.val ?? DEFAULT_RATING)}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
+                ))}
             </div>
         </div>
     );

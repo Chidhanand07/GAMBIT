@@ -1,128 +1,71 @@
-import { Cpu, Flag, RotateCcw, Undo2 } from 'lucide-react';
-import type { Difficulty, Side } from '../types';
+// The MAVERICK game screen's panels, drawn with the live game's pieces (Game.dc.html): player
+// bars, the status / actions card, and the engine error notice. No mockup exists for /offline.
+import type { Chess } from 'chess.js';
+import { PlayerBar } from '@/components/chess/PlayerBar';
+import { ActionButton } from '@/features/game/components/ActionButton';
+import { ControlsCard } from '@/features/game/components/ControlsCard';
+import { GAME_ICONS } from '@/features/game/components/gameIcons';
+import { GameNotice } from '@/features/game/components/StatusBanners';
+import type { GameStatus } from '@/features/game/utils/gameStatus';
+import { capturesText, materialBalance } from '@/features/game/utils/material';
+import type { Side } from '../types';
 
-export function MaverickHeader({ difficulty, thinking }: { difficulty: Difficulty; thinking: boolean }) {
-    return (
-        <div className="flex items-center justify-between bg-surface p-3 rounded-t-xl border border-border-strong px-4">
-            <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-accent/15 rounded-full flex items-center justify-center">
-                    <Cpu size={20} className="text-accent" />
-                </div>
-                <div>
-                    <span className="font-medium">MAVERICK</span>
-                    <span className="ml-2 text-xs uppercase tracking-wide text-text-tertiary">{difficulty}</span>
-                </div>
-            </div>
-            {thinking && (
-                <span className="flex items-center gap-2 text-sm text-text-secondary">
-                    <span
-                        className="w-3.5 h-3.5 border-2 rounded-full animate-spin"
-                        style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }}
-                    />
-                    Thinking…
-                </span>
-            )}
-        </div>
-    );
-}
+const TAKEBACK_ICON = 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-1';
+const NEW_GAME_ICON = 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5';
 
-interface GameOverProps {
-    resultText: string;
-    onRematch: () => void;
-    onNewSetup: () => void;
-}
-
-export function GameOverOverlay({ resultText, onRematch, onNewSetup }: GameOverProps) {
-    return (
-        <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-50">
-            <div className="bg-surface border border-border p-6 rounded-xl text-center space-y-4">
-                <h2 className="text-2xl font-bold text-accent">Game Over</h2>
-                <p className="text-text-primary">{resultText}</p>
-                <div className="flex gap-2">
-                    <button
-                        onClick={onRematch}
-                        className="bg-accent text-surface px-5 py-2 rounded-lg font-medium hover:bg-accent-hover transition-colors"
-                    >
-                        Rematch
-                    </button>
-                    <button
-                        onClick={onNewSetup}
-                        className="bg-elevated border border-border-strong px-5 py-2 rounded-lg font-medium hover:bg-hover transition-colors"
-                    >
-                        New Setup
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-export function PlayerFooter({ playerColor, yourMove }: { playerColor: Side; yourMove: boolean }) {
-    const isWhite = playerColor === 'w';
-    return (
-        <div className="flex items-center justify-between bg-surface p-3 rounded-b-xl border border-border-strong px-4">
-            <div className="flex items-center gap-3">
-                <div
-                    className="w-10 h-10 bg-elevated rounded-full flex items-center justify-center border border-border-strong text-lg font-bold"
-                    style={{ color: isWhite ? '#fff' : '#111', WebkitTextStroke: isWhite ? '1px #000' : undefined }}
-                >
-                    {isWhite ? '♔' : '♚'}
-                </div>
-                <span className="font-medium">You</span>
-            </div>
-            <span className="text-xs text-text-tertiary">{yourMove ? 'Your move' : ''}</span>
-        </div>
-    );
-}
-
-const ACTION_CLASS =
-    'flex-1 flex items-center justify-center gap-2 bg-surface hover:bg-hover border border-border-strong text-text-secondary hover:text-text-primary disabled:opacity-50 py-3 rounded-lg transition-colors font-medium';
-const NEW_GAME_CLASS =
-    'flex-1 flex items-center justify-center gap-2 bg-surface hover:bg-hover border border-border-strong text-text-secondary hover:text-text-primary py-3 rounded-lg transition-colors font-medium';
-
-interface ActionsProps {
-    undoDisabled: boolean;
+interface BarsProps {
+    game: Chess;
+    playerColor: Side;
+    difficulty: string;
+    /** Which bar is on top. */
+    position: 'top' | 'bottom';
     gameOver: boolean;
+}
+
+/** MAVERICK's bar (top) or the player's (bottom): captures and lead, gold ring on the side to move. */
+export function OfflineBar({ game, playerColor, difficulty, position, gameOver }: BarsProps) {
+    const side: Side = position === 'bottom' ? playerColor : playerColor === 'w' ? 'b' : 'w';
+    const { capturedBy, advantage } = materialBalance(game.fen());
+    const lead = side === 'w' ? advantage : -advantage;
+    const isPlayer = position === 'bottom';
+    return (
+        <PlayerBar
+            name={isPlayer ? 'You' : 'MAVERICK'}
+            rating={isPlayer ? null : difficulty}
+            side={side === 'w' ? 'white' : 'black'}
+            active={!gameOver && game.turn() === side}
+            captures={capturesText(capturedBy[side], lead)}
+        />
+    );
+}
+
+interface ControlsProps {
+    status: GameStatus;
+    gameOver: boolean;
+    undoDisabled: boolean;
     onUndo: () => void;
     onResign: () => void;
     onNewGame: () => void;
+    onRematch: () => void;
 }
 
-export function GameActions({ undoDisabled, gameOver, onUndo, onResign, onNewGame }: ActionsProps) {
+/** Status line, Takeback / Resign / New game, and Rematch after the result. */
+export function OfflineControls({ status, gameOver, undoDisabled, ...on }: ControlsProps) {
+    const end = gameOver ? { rematchState: 'idle' as const, onRematch: on.onRematch } : null;
     return (
-        <div className="flex gap-3 mt-6">
-            <button onClick={onUndo} disabled={undoDisabled} className={ACTION_CLASS}>
-                <Undo2 size={18} strokeWidth={1.5} /> Takeback
-            </button>
-            <button onClick={onResign} disabled={gameOver} className={ACTION_CLASS}>
-                <Flag size={18} strokeWidth={1.5} /> Resign
-            </button>
-            <button onClick={onNewGame} className={NEW_GAME_CLASS}>
-                <RotateCcw size={18} strokeWidth={1.5} /> New Game
-            </button>
-        </div>
-    );
-}
-
-export function MoveLog({ moveHistory }: { moveHistory: string[] }) {
-    return (
-        <div className="w-full lg:w-[300px]">
-            <div className="bg-surface border border-border rounded-xl flex flex-col overflow-hidden max-h-[500px]">
-                <div className="p-4 border-b border-border bg-elevated font-medium">Moves</div>
-                <div className="p-4 overflow-y-auto space-y-1">
-                    {moveHistory.length === 0 ? (
-                        <p className="text-text-tertiary text-sm italic">No moves yet.</p>
-                    ) : null}
-                    {Array.from({ length: Math.ceil(moveHistory.length / 2) }).map((_, i) => (
-                        <div key={i} className="flex gap-4 text-sm font-mono">
-                            <span className="w-6 text-text-tertiary text-right">{i + 1}.</span>
-                            <span className="w-16 text-text-primary">{moveHistory[i * 2]}</span>
-                            <span className="w-16 text-text-secondary">{moveHistory[i * 2 + 1] || ''}</span>
-                        </div>
-                    ))}
-                </div>
+        <ControlsCard status={status} end={end}>
+            <div className="grid grid-cols-3 gap-2">
+                <ActionButton label="Takeback" iconPath={TAKEBACK_ICON} onClick={on.onUndo} disabled={undoDisabled} />
+                <ActionButton
+                    label="Resign"
+                    iconPath={GAME_ICONS.resign}
+                    onClick={on.onResign}
+                    tone="danger"
+                    disabled={gameOver}
+                />
+                <ActionButton label="New game" iconPath={NEW_GAME_ICON} onClick={on.onNewGame} />
             </div>
-        </div>
+        </ControlsCard>
     );
 }
 
@@ -135,18 +78,19 @@ interface EngineErrorProps {
 /** MAVERICK's request failed: the reason, and Retry while the retry policy allows it (F13). */
 export function EngineErrorBanner({ error, canRetry, onRetry }: EngineErrorProps) {
     return (
-        <div
-            role="alert"
-            className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center justify-between gap-3"
-        >
+        <GameNotice tone="danger" role="alert">
             <span>{error}</span>
             {canRetry ? (
-                <button onClick={onRetry} className="shrink-0 underline hover:text-red-300">
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    className="border-0 bg-transparent p-0 font-semibold text-accent underline"
+                >
                     Retry
                 </button>
             ) : (
-                <span className="shrink-0 text-text-secondary">Start a new game to try again.</span>
+                <span className="text-ink-muted">Start a new game to try again.</span>
             )}
-        </div>
+        </GameNotice>
     );
 }

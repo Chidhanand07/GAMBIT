@@ -2,18 +2,18 @@
 import { Chess } from 'chess.js';
 import type { GameWithPlayers, MoveClassification } from '@/types/game';
 
-/** chess.com-style classification metadata: badge symbol + colour. */
+/** Classification metadata: badge symbol + colour (the `--color-review-*` tokens in app/globals.css). */
 export const CLASS_META: Record<string, { sym: string; color: string; label: string }> = {
-    Brilliant: { sym: '!!', color: '#26C2A3', label: 'Brilliant' },
-    'Great move': { sym: '!', color: '#5B8BB0', label: 'Great' },
-    Best: { sym: '★', color: '#749B4F', label: 'Best' },
-    Excellent: { sym: '✓', color: '#81B64C', label: 'Excellent' },
-    Good: { sym: '·', color: '#A0A0A0', label: 'Good' },
-    Book: { sym: '❉', color: '#A88865', label: 'Book' },
-    Inaccuracy: { sym: '?!', color: '#F0C15C', label: 'Inaccuracy' },
-    Mistake: { sym: '?', color: '#E58F2A', label: 'Mistake' },
-    Miss: { sym: '×', color: '#D96BA0', label: 'Miss' },
-    Blunder: { sym: '??', color: '#CA3431', label: 'Blunder' },
+    Brilliant: { sym: '!!', color: 'var(--color-review-brilliant)', label: 'Brilliant' },
+    'Great move': { sym: '!', color: 'var(--color-review-great)', label: 'Great' },
+    Best: { sym: '★', color: 'var(--color-review-best)', label: 'Best' },
+    Excellent: { sym: '✓', color: 'var(--color-review-excellent)', label: 'Excellent' },
+    Good: { sym: '·', color: 'var(--color-review-good)', label: 'Good' },
+    Book: { sym: '❉', color: 'var(--color-review-book)', label: 'Book' },
+    Inaccuracy: { sym: '?!', color: 'var(--color-review-inaccuracy)', label: 'Inaccuracy' },
+    Mistake: { sym: '?', color: 'var(--color-review-mistake)', label: 'Mistake' },
+    Miss: { sym: '×', color: 'var(--color-review-miss)', label: 'Miss' },
+    Blunder: { sym: '??', color: 'var(--color-review-blunder)', label: 'Blunder' },
 };
 
 export const CLASS_ORDER = [

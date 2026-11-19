@@ -12,6 +12,11 @@ jest.mock('@/lib/server/rateLimitStore', () => ({
     ...jest.requireActual('@/lib/server/rateLimitStore'),
     rateLimitStore: jest.fn(),
 }))
+// Failed sign-ins are padded to one timing class (F-101); not what these tests measure.
+jest.mock('@/lib/server/loginIdentity', () => ({
+    ...jest.requireActual('@/lib/server/loginIdentity'),
+    waitForFailureFloor: jest.fn(async () => {}),
+}))
 
 import { NextRequest } from 'next/server'
 import { POST as login } from '@/app/api/auth/login/route'
@@ -108,6 +113,22 @@ describe('POST /api/auth/login (per client IP and per e-mail)', () => {
     ])('store %s → requests go through', async (_label, store) => {
         storeFactory.mockReturnValue(store)
         for (let i = 0; i <= RATE_LIMITS.loginIp.limit; i++) expect((await send()).status).toBe(401)
+    })
+    test('[F-101] per username: limited across IPs and case, before any profile lookup', async () => {
+        const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
+        const byName = (name: string, ip: string) =>
+            login(post('/api/auth/login', { identifier: name, password: 'pw' }, ip))
+        for (let i = 0; i < RATE_LIMITS.loginEmail.limit; i++) await byName('Magnus_C', i % 2 ? IP_A : IP_B)
+        const lookups = db.callsFor('profiles').length
+        expect(lookups).toBe(RATE_LIMITS.loginEmail.limit)
+        await expectLimited(await byName('magnus_c', '192.0.2.99'))
+        expect(db.callsFor('profiles')).toHaveLength(lookups)
+        // an unknown name is limited exactly like a known one: the 429 says nothing about the account
+        for (let i = 0; i < RATE_LIMITS.loginEmail.limit; i++) await byName('nobody_at_all', '192.0.2.50')
+        await expectLimited(await byName('nobody_at_all', '192.0.2.51'))
+        if (savedKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY
+        else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey
     })
 })
 

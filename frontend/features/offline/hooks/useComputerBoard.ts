@@ -1,16 +1,12 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { Move } from 'chess.js';
 import { playGameEndSound } from '@/lib/sounds';
-import { playerMoveCount, playSoundForMove, undoToPlayerTurn } from '../game';
-import { handleSquareClick } from '../squareClick';
+import { playerMoveCount, undoToPlayerTurn } from '../game';
 import type { Difficulty, Side } from '../types';
 import { useChessPosition } from './useChessPosition';
 import { useMaverickMove } from './useMaverickMove';
-import { usePieceSelection } from './usePieceSelection';
-
-const REPLY_DELAY_MS = 250;
+import { usePlayerInput } from './usePlayerInput';
 
 /** Board state, player input, takeback and resign for one game against MAVERICK. */
 export function useComputerBoard(difficulty: Difficulty) {
@@ -18,29 +14,26 @@ export function useComputerBoard(difficulty: Difficulty) {
     const [playerColor, setPlayerColor] = useState<Side>('w');
     const [resigned, setResigned] = useState(false);
 
-    const selection = usePieceSelection(game, playerColor);
     const engine = useMaverickMove({ game, difficulty, refresh, setLastMove });
     const { thinking, engineError, clearEngineError, maverickMove } = engine;
     const gameOver = game.isGameOver() || resigned;
     /** Takeback needs a move of the player's to undo (F13). */
     const canTakeBack = playerMoveCount(game, playerColor) > 0 && !thinking;
 
-    const onPlayerMove = (result: Move) => {
-        selection.clearSelection();
-        setLastMove({ from: result.from, to: result.to });
-        playSoundForMove(game, result);
-        refresh();
-        if (!game.isGameOver()) setTimeout(() => maverickMove(), REPLY_DELAY_MS);
-        else playGameEndSound(true);
-    };
-    const onSquareClick = (square: string) =>
-        handleSquareClick({ game, playerColor, blocked: gameOver || thinking, selection, onPlayerMove }, square);
+    const input = usePlayerInput({
+        game,
+        playerColor,
+        blocked: gameOver || thinking,
+        setLastMove,
+        refresh,
+        maverickMove,
+    });
 
     const undoMove = () => {
         if (!canTakeBack) return;
         // Undo both MAVERICK's reply and your move so it's your turn again.
         const last = undoToPlayerTurn(game, playerColor);
-        selection.clearSelection();
+        input.clearInput();
         clearEngineError();
         setResigned(false);
         setLastMove(last);
@@ -55,29 +48,30 @@ export function useComputerBoard(difficulty: Difficulty) {
     };
 
     /** Reset to the start position with the player on `color`. */
-    const { clearSelection } = selection;
+    const { clearInput } = input;
     const resetBoard = useCallback(
         (color: Side) => {
             game.reset();
             setPlayerColor(color);
-            clearSelection();
+            clearInput();
             setLastMove(null);
             setResigned(false);
             clearEngineError();
             refresh();
         },
-        [game, clearSelection, setLastMove, clearEngineError, refresh],
+        [game, clearInput, setLastMove, clearEngineError, refresh],
     );
 
     const state = { game, playerColor, moveHistory, lastMove, resigned, thinking, engineError, gameOver, canTakeBack };
-    const actions = { maverickMove, handleSquareClick: onSquareClick, undoMove, resign, resetBoard };
-    const { selectedSquare, legalMoves } = selection;
+    const actions = { maverickMove, handleSquareClick: input.onSquareClick, undoMove, resign, resetBoard };
     return {
         ...state,
         ...actions,
         canRetryEngine: engine.canRetry,
         retryEngine: engine.retry,
-        selectedSquare,
-        legalMoves,
+        selectedSquare: input.selectedSquare,
+        legalMoves: input.legalMoves,
+        pendingPromotion: input.pendingPromotion,
+        promote: input.promote,
     };
 }

@@ -2,6 +2,7 @@
  * Characterization tests (fe-misc, PR 16 track) for
  * app/challenge/[username]/page.tsx, app/join/[token]/page.tsx and app/leaderboard/page.tsx.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { createFakeSocket, jsonResponse } from './fakeSocket'
 
@@ -61,9 +62,10 @@ describe('challenge/[username]', () => {
     }
 
     test('fetches the opponent by encoded username; spinner until it loads', async () => {
-        const { container } = await renderChallenge(null)
+        await renderChallenge(null)
         expect(fetchMock.mock.calls).toEqual([['/api/profile/bob%20b']])
-        expect(container.querySelector('.animate-spin')).not.toBeNull()
+        // [A3] was: a `.animate-spin` div — now the design's Spinner, announced as a status
+        expect(screen.getByRole('status', { name: 'Loading player' })).toBeInTheDocument()
         expect(screen.queryByText('Challenge a Player')).not.toBeInTheDocument()
     })
 
@@ -74,8 +76,10 @@ describe('challenge/[username]', () => {
         expect(screen.getByText('@bob · 1333 Rapid')).toBeInTheDocument()
         expect(screen.getByText('B')).toBeInTheDocument()
         expect(screen.getByText('Bobby').closest('a')).toHaveAttribute('href', '/profile/bob')
-        expect(screen.getByRole('button', { name: '10 min' }).className).toContain('border-accent bg-accent/10')
-        expect(screen.getByRole('button', { name: '⊕ Random' }).className).toContain('border-accent bg-accent/10')
+        // [A3] was: legacy `border-accent bg-accent/10` classes — now the design's segmented Tabs
+        expect(screen.getByRole('button', { name: '10 min' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('button', { name: '⊕ Random' })).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByRole('switch', { name: 'Rated Game' })).toHaveAttribute('aria-checked', 'true')
         expect(socket.listenedEvents()).toEqual(['challenge_declined', 'challenge_ready'])
     })
 
@@ -88,9 +92,9 @@ describe('challenge/[username]', () => {
 
     test('send emits the exact challenge_request payload, shows the spinner until the ack, then waits for bob [ACKS] [F17]', async () => {
         profile = { id: 'me', username: 'me1', display_name: null }
-        const { container } = await renderChallenge()
+        await renderChallenge()
         fireEvent.click(screen.getByRole('button', { name: '5 min' }))
-        fireEvent.click(container.querySelector('button.relative.w-11')!)
+        fireEvent.click(screen.getByRole('switch', { name: 'Rated Game' }))
         fireEvent.click(screen.getByRole('button', { name: '♚ Black' }))
         fireEvent.click(screen.getByRole('button', { name: /Send Challenge/ }))
         expect(socket.emitted('challenge_request')).toEqual([
@@ -101,7 +105,7 @@ describe('challenge/[username]', () => {
         // in the same tick). Now the spinner shows while the server has not acknowledged.
         const sendButton = screen.getByRole('button', { name: /Send Challenge/ })
         expect(sendButton).toBeDisabled()
-        expect(sendButton.querySelector('.animate-spin')).not.toBeNull()
+        expect(sendButton.querySelector('[class*="animate-spin"]')).not.toBeNull()
         expect(screen.queryByText('Challenge sent! Waiting for bob to accept…')).not.toBeInTheDocument()
 
         ackChallenge({ ok: true })
@@ -154,7 +158,7 @@ describe('challenge/[username]', () => {
         expect(screen.getByText('@bob · 1200 Rapid')).toBeInTheDocument()
         expect(document.querySelector('img')).toHaveAttribute('src', 'http://img/a.png')
         expect(screen.getByRole('button', { name: /Send Challenge/ })).toBeDisabled()
-        fireEvent.click(screen.getAllByRole('button')[0])
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
         expect(back).toHaveBeenCalledTimes(1)
     })
 })
@@ -259,12 +263,16 @@ describe('leaderboard', () => {
         username, display_name: null, avatar_url: null, rating_rapid: rating, rating_bullet: rating - 100,
         games_played: 10, wins: 4, ...extra,
     })
+    // Redesign (Leaderboard.dc.html): the table is an ARIA grid of role="row" divs; the podium a "Top three" group.
+    const dataRows = () => screen.getAllByRole('row').slice(1)
+    const podium = () => screen.queryByRole('group', { name: 'Top three' })
 
     test('skeleton while loading, then empty state', async () => {
         let resolve!: (v: any) => void
         fetchMock.mockImplementation(() => new Promise(r => { resolve = r }))
-        const { container } = render(<LeaderboardPage />)
-        expect(container.querySelectorAll('.skeleton')).toHaveLength(8)
+        render(<LeaderboardPage />)
+        // was: 8 `.skeleton` blocks
+        expect(screen.getByRole('status', { name: 'Loading rankings' }).children).toHaveLength(8)
         await act(async () => resolve(jsonResponse([])))
         await flush()
         expect(fetchMock.mock.calls).toEqual([['/api/leaderboard?field=rating_rapid']])
@@ -274,32 +282,127 @@ describe('leaderboard', () => {
     test('podium order, table rows, stats; switching filter refetches', async () => {
         const players = [P('a', 1800, { display_name: 'Ace' }), P('b', 1700), P('c', 1600, { games_played: 0 }), P('d', 1500)]
         fetchMock.mockImplementation(async () => jsonResponse(players))
-        const { container } = render(<LeaderboardPage />)
+        render(<LeaderboardPage />)
         await flush()
-        const podium = container.querySelector('.grid.grid-cols-3.gap-3.mb-6')!
-        expect([...podium.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/profile/b', '/profile/a', '/profile/c'])
-        expect(within(podium as HTMLElement).getByText('#1')).toBeInTheDocument()
-        const rows = container.querySelectorAll('tbody tr')
+        expect([...podium()!.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/profile/b', '/profile/a', '/profile/c'])
+        expect(within(podium()!).getByText('#1')).toBeInTheDocument()
+        const rows = dataRows()
         expect(rows).toHaveLength(4)
         expect(rows[0].textContent).toBe('1AAce@a1800rapid1040%')
         expect(rows[2].textContent).toBe('3Cc@c1600rapid00%')
-        expect(screen.getByText('Total Players').previousSibling!.textContent).toBe('4')
-        expect(screen.getByText('Avg Rating').previousSibling!.textContent).toBe('1650')
+        expect(within(rows[0]).getByRole('link', { name: 'Ace' })).toHaveAttribute('href', '/profile/a')
+        expect(screen.getByText('Total players').previousSibling!.textContent).toBe('4')
+        expect(screen.getByText('Avg rating').previousSibling!.textContent).toBe('1650')
+        // was: '1' — [F-104] outside a PresenceProvider nobody is known to be online (no invented viewer)
+        expect(screen.getByText('Online now').previousSibling!.textContent).toBe('0')
+        expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
         fireEvent.click(screen.getByRole('button', { name: 'Bullet' }))
         await flush()
         expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_bullet'])
-        expect(container.querySelectorAll('tbody tr')[0].textContent).toBe('1AAce@a1700bullet1040%')
+        expect(screen.getByRole('button', { name: 'Bullet' })).toHaveAttribute('aria-pressed', 'true')
+        expect(dataRows()[0].textContent).toBe('1AAce@a1700bullet1040%')
     })
 
     test('fewer than three players: no podium; non-ok response shows the empty state', async () => {
         fetchMock.mockImplementationOnce(async () => jsonResponse([P('solo', 1234.6, { avatar_url: 'http://img/s.png' })]))
-        const { container } = render(<LeaderboardPage />)
+        render(<LeaderboardPage />)
         await flush()
-        expect(container.querySelector('.grid.grid-cols-3.gap-3.mb-6')).toBeNull()
-        expect(container.querySelector('tbody img')).toHaveAttribute('src', 'http://img/s.png')
+        expect(podium()).toBeNull()
+        expect(dataRows()[0].querySelector('img')).toHaveAttribute('src', 'http://img/s.png')
         fetchMock.mockImplementationOnce(async () => jsonResponse(null, false))
         fireEvent.click(screen.getByRole('button', { name: 'Blitz' }))
         await flush()
         expect(screen.getByText('No ranked players yet')).toBeInTheDocument()
     })
+
+    test('a capped board (50 rows) shows the server count of ranked players and labels the mean as the top 50', async () => {
+        const fifty = Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))
+        fetchMock.mockImplementation(async () => jsonResponse(fifty, true, { 'X-Total-Count': '1234' }))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.getByText('Total players').previousSibling!.textContent).toBe('1234')
+        expect(screen.getByText('Avg rating, top 50').previousSibling!.textContent).toBe('1500')
+        expect(screen.queryByText('Avg rating')).toBeNull()
+    })
+
+    test('a capped board without a server count leaves "Total players" out instead of showing 50', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse(Array.from({ length: 50 }, (_, i) => P(`p${i}`, 1500))))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.queryByText('Total players')).toBeNull()
+        expect(screen.getByText('Avg rating, top 50')).toBeInTheDocument()
+    })
+
+    test('the open board re-reads the rankings every 30 s ("Updated live")', async () => {
+        jest.useFakeTimers()
+        try {
+            fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+            const { unmount } = render(<LeaderboardPage />)
+            await act(async () => {})
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            await act(async () => { jest.advanceTimersByTime(30_000) })
+            expect(fetchMock.mock.calls.map(c => c[0])).toEqual(['/api/leaderboard?field=rating_rapid', '/api/leaderboard?field=rating_rapid'])
+            unmount()
+            await act(async () => { jest.advanceTimersByTime(60_000) })
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        } finally {
+            jest.useRealTimers()
+        }
+    })
+
+    test('signed in: own row is marked "You" and the standing card shows rank, rating and record', async () => {
+        profile = { id: 'me', username: 'b', display_name: 'Bee', rating_rapid: 1700.2, games_played: 20, wins: 15 }
+        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800), P('b', 1700), P('c', 1600)]))
+        render(<LeaderboardPage />)
+        await flush()
+        expect(within(dataRows()[1]).getByText('You')).toBeInTheDocument()
+        expect(within(dataRows()[0]).queryByText('You')).toBeNull()
+        expect(screen.getByText('Your standing')).toBeInTheDocument()
+        expect(screen.getByText('#2', { selector: 'span.font-display' })).toBeInTheDocument()
+        expect(screen.getByText('Bee · Rapid · 20 games · 75% wins')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Play a game' })).toHaveAttribute('href', '/lobby')
+    })
+
+    test('signed in but outside the returned board: rank shows a dash; guests get no standing card', async () => {
+        profile = { id: 'me', username: 'zed', display_name: null, rating_rapid: 900, games_played: 0, wins: 0 }
+        fetchMock.mockImplementation(async () => jsonResponse([P('a', 1800)]))
+        const { unmount } = render(<LeaderboardPage />)
+        await flush()
+        expect(screen.getByText('—')).toBeInTheDocument()
+        expect(screen.getByText('zed · Rapid · 0 games · 0% wins')).toBeInTheDocument()
+        unmount()
+        profile = null
+        render(<LeaderboardPage />)
+        await flush()
+        expect(screen.queryByText('Your standing')).toBeNull()
+    })
+})
+
+describe('accessibility [A4]', () => {
+    test('challenge, invite and leaderboard pages have no axe violations', async () => {
+        profile = { id: 'me', username: 'me1', display_name: null }
+        fetchMock.mockImplementation(async () => jsonResponse({ id: 'bob-id', username: 'bob', display_name: 'Bobby', avatar_url: null, rating_rapid: 1333 }))
+        const challenge = render(<ChallengePage params={routeParams({ username: 'bob' })} />)
+        await flush()
+        await expectAccessible(challenge.container)
+        challenge.unmount()
+
+        fetchMock.mockImplementation(async (url: string) =>
+            url.includes('/api/games/join/')
+                ? jsonResponse({ id: 'g-1', white_id: 'creator', black_id: null, time_control: '5', is_rated: true, white: { username: 'alice' }, black: null })
+                : jsonResponse({ id: 'guest' }))
+        const join = render(<JoinPage params={routeParams({ token: 'tok_FAKE_0001' })} />)
+        await flush()
+        await expectAccessible(join.container)
+        join.unmount()
+
+        fetchMock.mockImplementation(async () => jsonResponse([
+            { username: 'a', display_name: 'Ace', rating_rapid: 1800, games_played: 10, wins: 4 },
+            { username: 'b', display_name: null, rating_rapid: 1700, games_played: 5, wins: 1 },
+            { username: 'c', display_name: null, rating_rapid: 1600, games_played: 0, wins: 0 },
+        ]))
+        const board = render(<LeaderboardPage />)
+        await flush()
+        await expectAccessible(board.container)
+    }, AXE_TIMEOUT_MS)
 })

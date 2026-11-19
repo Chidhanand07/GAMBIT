@@ -8,8 +8,3 @@ export function formatEvaluation({ score, mate }: Evaluation): string {
     if (mate !== null) return `${mate < 0 ? '-' : ''}M${Math.abs(mate)}`;
     return `${score > 0 ? '+' : ''}${score.toFixed(1)}`;
 }
-
-/** Unsigned eval-bar label: "1.3", or "M3" for a forced mate. */
-export function barLabel({ score, mate }: Evaluation): string {
-    return mate !== null ? `M${Math.abs(mate)}` : Math.abs(score).toFixed(1);
-}

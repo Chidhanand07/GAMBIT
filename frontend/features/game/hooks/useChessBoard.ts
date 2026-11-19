@@ -18,6 +18,10 @@ interface Options {
     chessRef: MutableRefObject<Chess>;
     /** Shows the player why the server refused a move (the board itself is resynced by the server). */
     notify?: (message: string) => void;
+    /** Promote straight to a queen instead of asking (the auto-queen setting). */
+    autoQueen?: boolean;
+    /** Play move sounds (Settings → "Move sounds"). */
+    soundOn: boolean;
 }
 
 export interface ChessBoardControls {
@@ -48,7 +52,7 @@ function useDisplayChess(state: GameState): Chess {
  * `game_end`: the page never declares or reports a result.
  */
 function commitMoveWith(opts: Options, from: Square, to: Square, promotion: string): void {
-    const { gameId, socket, dispatch, state } = opts;
+    const { gameId, socket, dispatch } = opts;
     const chess = opts.chessRef.current;
     const moveObj = chess.move({ from, to, promotion });
     if (!moveObj) return;
@@ -64,7 +68,7 @@ function commitMoveWith(opts: Options, from: Square, to: Square, promotion: stri
             },
         );
     }
-    if (state.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
+    if (opts.soundOn) playMoveSoundFor(chess, moveObj.flags, moveObj.captured);
 }
 
 export function useChessBoard(opts: Options): ChessBoardControls {
@@ -82,7 +86,7 @@ export function useChessBoard(opts: Options): ChessBoardControls {
     const commitMove = (from: Square, to: Square, promotion: string) => commitMoveWith(opts, from, to, promotion);
 
     const tryMoveTo = (from: Square, sq: Square) => {
-        if (isPromotionMove(chessRef.current.get(from), sq)) {
+        if (!opts.autoQueen && isPromotionMove(chessRef.current.get(from), sq)) {
             dispatch({ type: 'promotionPending', move: { from, to: sq } });
             return;
         }

@@ -1,29 +1,27 @@
 import Link from 'next/link';
-import { Loader2, Users } from 'lucide-react';
-
-const SCREEN_CLASS = 'min-h-[calc(100vh-56px)]';
+import { CenteredCard } from '@/components/layout/CenteredCard';
+import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
+import { Spinner } from '@/components/ui/Spinner';
 
 export function InviteLoading() {
     return (
-        <div className={`${SCREEN_CLASS} flex items-center justify-center`}>
-            <div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin" />
+        <div className="flex min-h-[60vh] items-center justify-center">
+            <Spinner label="Loading invite" />
         </div>
     );
 }
 
 export function InviteExpired() {
     return (
-        <div className={`${SCREEN_CLASS} flex flex-col items-center justify-center gap-4 text-center px-4`}>
-            <div className="text-6xl">♟</div>
-            <h1 className="text-2xl font-medium text-text-primary">Invite expired or not found</h1>
-            <p className="text-text-secondary text-sm">This invite link is invalid or has expired (48h limit).</p>
-            <Link
-                href="/lobby"
-                className="mt-4 px-6 py-3 bg-accent hover:bg-accent-hover text-surface rounded-lg font-medium transition-colors"
-            >
+        <CenteredCard
+            title="Invite expired or not found"
+            subtitle="This invite link is invalid or has expired (48h limit)."
+        >
+            <Button href="/lobby" size="xl" className="font-bold">
                 Go to Lobby
-            </Link>
-        </div>
+            </Button>
+        </CenteredCard>
     );
 }
 
@@ -37,33 +35,33 @@ interface InviteActionsProps {
 /** Error line, accept button (or creator's waiting note) and the decline link. */
 export function InviteActions({ error, isCreator, joining, onJoin }: InviteActionsProps) {
     return (
-        <div className="px-6 pb-6 space-y-3">
-            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+        <div className="flex flex-col gap-3">
+            {error && (
+                <p role="alert" className="m-0 text-center text-[14px] font-medium text-danger">
+                    {error}
+                </p>
+            )}
             {isCreator ? (
-                <div className="text-center py-3 text-text-secondary text-sm flex items-center justify-center gap-2">
-                    <div className="w-4 h-4 border-2 border-border border-t-accent rounded-full animate-spin" />
+                <div role="status" className="flex items-center justify-center gap-2 py-3 text-[14px] text-ink-muted">
+                    <Spinner size="sm" />
                     Waiting for opponent to join...
                 </div>
             ) : (
-                <button
-                    onClick={onJoin}
-                    disabled={joining}
-                    className="w-full py-3.5 bg-accent hover:bg-accent-hover disabled:opacity-60 text-surface rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                >
+                <Button size="2xl" className="w-full font-bold disabled:opacity-50" onClick={onJoin} disabled={joining}>
                     {joining ? (
                         <>
-                            <Loader2 size={18} className="animate-spin" /> Joining...
+                            <Spinner size="sm" className="border-transparent border-t-on-accent" /> Joining...
                         </>
                     ) : (
                         <>
-                            <Users size={18} strokeWidth={1.5} /> Accept & Play
+                            <Icon name="users" /> Accept & Play
                         </>
                     )}
-                </button>
+                </Button>
             )}
             <Link
                 href="/lobby"
-                className="block text-center text-text-tertiary text-sm hover:text-text-secondary transition-colors py-1"
+                className="flex min-h-[44px] items-center justify-center text-[14px] font-semibold text-ink-muted"
             >
                 Decline
             </Link>

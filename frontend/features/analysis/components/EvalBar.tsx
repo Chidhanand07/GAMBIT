@@ -1,67 +1,34 @@
-import { barLabel } from '../evaluation';
+import { formatEvaluation } from '../evaluation';
 import type { EngineAnalysis } from '../types';
 
 /** Evaluations beyond ±6 pawns fill the bar. */
 const EVAL_CLAMP = 6;
-/** Below this magnitude no number is shown. */
-const EVAL_LABEL_MIN = 0.15;
+const HALF = 50;
 
-/** Vertical evaluation bar (desktop only). */
-export function EvalBar({ engineData }: { engineData: EngineAnalysis | null }) {
-    const evalScore = engineData?.score ?? 0;
-    const clampedEval = Math.max(-EVAL_CLAMP, Math.min(EVAL_CLAMP, evalScore));
-    const whitePct = 50 + (clampedEval / EVAL_CLAMP) * 50;
+/** White's share of the bar in percent (50 with no evaluation). Pure. */
+export function whiteShare(data: EngineAnalysis | null): number {
+    const score = Math.max(-EVAL_CLAMP, Math.min(EVAL_CLAMP, data?.score ?? 0));
+    return HALF + (score / EVAL_CLAMP) * HALF;
+}
+
+/** The 14px vertical evaluation bar beside the board (Analysis.dc.html), White at the bottom. */
+export function EvalBar({ data }: { data: EngineAnalysis | null }) {
+    const white = whiteShare(data);
+    const label = data ? `Evaluation bar: ${formatEvaluation(data)}` : 'Evaluation bar: no evaluation';
     return (
         <div
-            className="w-8 shrink-0 mx-3 my-4 flex flex-col rounded-xl overflow-hidden relative hidden lg:flex"
-            style={{ background: 'var(--bg-elevated)', border: '0.5px solid var(--border)' }}
+            role="img"
+            aria-label={label}
+            className="box-content flex w-[14px] shrink-0 flex-col overflow-hidden rounded-pill border-1 border-line"
         >
-            {/* Black section */}
-            <div
-                className="transition-all duration-500 shrink-0 flex items-center justify-center"
-                style={{ height: `${100 - whitePct}%`, background: '#1C1C1C', minHeight: 12 }}
-            >
-                {engineData && evalScore < -EVAL_LABEL_MIN && (
-                    <span
-                        className="text-[9px] font-mono tabular-nums writing-mode-vertical"
-                        style={{
-                            color: '#E8DDD0',
-                            writingMode: 'vertical-rl',
-                            transform: 'rotate(180deg)',
-                            padding: '4px 0',
-                        }}
-                    >
-                        {barLabel(engineData)}
-                    </span>
-                )}
-            </div>
-            {/* White section */}
-            <div
-                className="transition-all duration-500 shrink-0 flex items-end justify-center"
-                style={{ height: `${whitePct}%`, background: '#EDE0CC', minHeight: 12 }}
-            >
-                {engineData && evalScore > EVAL_LABEL_MIN && (
-                    <span
-                        className="text-[9px] font-mono tabular-nums"
-                        style={{ color: '#1C1C1C', writingMode: 'vertical-rl', padding: '4px 0' }}
-                    >
-                        +{barLabel(engineData)}
-                    </span>
-                )}
-            </div>
-            {/* Labels */}
-            <div
-                className="absolute top-2 left-0 right-0 text-center text-[8px] font-semibold pointer-events-none"
-                style={{ color: 'rgba(232,221,204,0.5)' }}
-            >
-                B
-            </div>
-            <div
-                className="absolute bottom-2 left-0 right-0 text-center text-[8px] font-semibold pointer-events-none"
-                style={{ color: 'rgba(28,28,28,0.5)' }}
-            >
-                W
-            </div>
+            <span
+                className="basis-0 bg-piece-glyph-black motion-safe:transition-[flex-grow] motion-safe:duration-500"
+                style={{ flexGrow: 100 - white }}
+            />
+            <span
+                className="basis-0 bg-ink motion-safe:transition-[flex-grow] motion-safe:duration-500"
+                style={{ flexGrow: white }}
+            />
         </div>
     );
 }

@@ -15,6 +15,11 @@ frontend/.next/
 frontend/out/
 frontend/build/
 
+# Playwright and Lighthouse CI output (F-115)
+frontend/test-results/
+frontend/playwright-report/
+frontend/.lighthouseci/
+
 # Env files (contain secrets)
 frontend/.env.local
 server/.env
@@ -31,3 +36,10 @@ chess-engine/.venv/
 
 # Test coverage output
 server/coverage/
+
+# Visual parity harness / TEST Supabase project (ADR F-096..F-098): never commit credentials
+frontend/.env.test.local
+server/.env.test
+frontend/e2e/.auth/
+frontend/test-results/
+frontend/playwright-report/

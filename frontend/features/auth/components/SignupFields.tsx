@@ -1,13 +1,7 @@
-import { Check, X, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Check, Loader2, X } from 'lucide-react';
 import type { UsernameStatus } from '../hooks/useUsernameAvailability';
-
-const INPUT_CLASS =
-    'w-full h-[44px] bg-elevated border border-border-strong rounded-lg px-4 text-text-primary focus:outline-none focus:border-accent focus:ring-[1.5px] focus:ring-accent/20 disabled:opacity-50 transition-colors';
-const CONFIRM_BASE_CLASS =
-    'w-full h-[44px] bg-elevated border rounded-lg px-4 text-text-primary focus:outline-none focus:ring-[1.5px] disabled:opacity-50 transition-colors';
-const CONFIRM_ERROR_CLASS = 'border-[#C0392B] focus:border-[#C0392B] focus:ring-[#C0392B]/20';
-const CONFIRM_OK_CLASS = 'border-border-strong focus:border-accent focus:ring-accent/20';
-const LABEL_CLASS = 'block text-text-secondary text-sm mb-1.5';
+import { AuthField, ShowPasswordToggle } from './AuthField';
 
 export interface SignupFieldValues {
     email: string;
@@ -24,93 +18,94 @@ interface SignupFieldsProps {
     confirmMismatch: boolean;
 }
 
+const STATUS_LABEL: Record<UsernameStatus, string> = {
+    idle: '',
+    checking: 'Checking username',
+    available: 'Username available',
+    taken: 'Username taken',
+};
+
+/** Live availability of the username, inside the field on the right. */
 function UsernameStatusIcon({ status }: { status: UsernameStatus }) {
+    if (status === 'idle') return null;
     return (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            {status === 'checking' && <Loader2 size={15} className="text-text-tertiary animate-spin" />}
-            {status === 'available' && <Check size={15} className="text-indicator-green" strokeWidth={2.5} />}
-            {status === 'taken' && <X size={15} className="text-[#C0392B]" strokeWidth={2.5} />}
-        </div>
+        <span
+            role="status"
+            aria-label={STATUS_LABEL[status]}
+            data-username-status={status}
+            className="absolute right-4 top-1/2 flex -translate-y-1/2"
+        >
+            {status === 'checking' && (
+                <Loader2 aria-hidden="true" size={16} className="text-ink-muted motion-safe:animate-spin" />
+            )}
+            {status === 'available' && (
+                <Check aria-hidden="true" size={16} strokeWidth={2.5} className="text-success" />
+            )}
+            {status === 'taken' && <X aria-hidden="true" size={16} strokeWidth={2.5} className="text-danger" />}
+        </span>
     );
 }
 
-/** Email, username (with live availability), password and confirm inputs of the signup form. */
+/** Email, username (with live availability), password and confirm fields (Signup.dc.html). */
 export function SignupFields({ values, onChange, disabled, usernameStatus, confirmMismatch }: SignupFieldsProps) {
+    // One Show/Hide state for both password fields, as in the mockup.
+    const [shown, setShown] = useState(false);
+    const toggle = <ShowPasswordToggle shown={shown} onToggle={() => setShown((s) => !s)} />;
+    const common = { required: true, disabled };
     return (
         <>
-            <div>
-                <label htmlFor="email" className={LABEL_CLASS}>
-                    Email
-                </label>
-                <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    value={values.email}
-                    onChange={(e) => onChange('email', e.target.value)}
-                    required
-                    disabled={disabled}
-                    className={INPUT_CLASS}
-                />
-            </div>
-
-            <div>
-                <label htmlFor="username" className={LABEL_CLASS}>
-                    Username
-                    <span className="text-text-tertiary text-xs ml-2">letters, numbers, underscores</span>
-                </label>
-                <div className="relative">
-                    <input
-                        id="username"
-                        name="username"
-                        type="text"
-                        autoComplete="username"
-                        value={values.username}
-                        onChange={(e) => onChange('username', e.target.value)}
-                        required
-                        disabled={disabled}
-                        maxLength={20}
-                        className="w-full h-[44px] bg-elevated border border-border-strong rounded-lg px-4 pr-10 text-text-primary focus:outline-none focus:border-accent focus:ring-[1.5px] focus:ring-accent/20 disabled:opacity-50 transition-colors"
-                    />
-                    <UsernameStatusIcon status={usernameStatus} />
-                </div>
-            </div>
-
-            <div>
-                <label htmlFor="password" className={LABEL_CLASS}>
-                    Password
-                </label>
-                <input
-                    id="password"
-                    name="password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={values.password}
-                    onChange={(e) => onChange('password', e.target.value)}
-                    required
-                    disabled={disabled}
-                    minLength={8}
-                    className={INPUT_CLASS}
-                />
-            </div>
-
-            <div>
-                <label htmlFor="confirm" className={LABEL_CLASS}>
-                    Confirm Password
-                </label>
-                <input
-                    id="confirm"
-                    name="confirm"
-                    type="password"
-                    autoComplete="new-password"
-                    value={values.confirm}
-                    onChange={(e) => onChange('confirm', e.target.value)}
-                    required
-                    disabled={disabled}
-                    className={`${CONFIRM_BASE_CLASS} ${confirmMismatch ? CONFIRM_ERROR_CLASS : CONFIRM_OK_CLASS}`}
-                />
-            </div>
+            <AuthField
+                id="email"
+                name="email"
+                label="Email"
+                type="email"
+                placeholder="you@example.com"
+                autoComplete="email"
+                value={values.email}
+                onChange={(e) => onChange('email', e.target.value)}
+                {...common}
+            />
+            <AuthField
+                id="username"
+                name="username"
+                label="Username"
+                hint="Letters, numbers, underscores"
+                type="text"
+                placeholder="maverick_1"
+                autoComplete="username"
+                maxLength={20}
+                value={values.username}
+                onChange={(e) => onChange('username', e.target.value)}
+                trailing={<UsernameStatusIcon status={usernameStatus} />}
+                invalid={usernameStatus === 'taken'}
+                {...common}
+            />
+            <AuthField
+                id="password"
+                name="password"
+                label="Password"
+                type={shown ? 'text' : 'password'}
+                placeholder="At least 8 characters"
+                autoComplete="new-password"
+                minLength={8}
+                value={values.password}
+                onChange={(e) => onChange('password', e.target.value)}
+                trailing={toggle}
+                {...common}
+            />
+            <AuthField
+                id="confirm"
+                name="confirm"
+                label="Confirm password"
+                type={shown ? 'text' : 'password'}
+                placeholder="At least 8 characters"
+                autoComplete="new-password"
+                value={values.confirm}
+                onChange={(e) => onChange('confirm', e.target.value)}
+                trailing={toggle}
+                invalid={confirmMismatch}
+                {...common}
+            />
         </>
     );
 }

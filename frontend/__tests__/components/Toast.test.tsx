@@ -49,3 +49,16 @@ test('useToast outside a provider is a safe no-op', async () => {
     await user().click(screen.getByText('show'))
     expect(screen.queryByText('nobody listens')).not.toBeInTheDocument()
 })
+
+test('[A3] design tokens: popover surface, a coloured rule per type; errors are alerts', async () => {
+    render(<ToastProvider><Trigger message="Oops" type="error" /><Trigger message="Done" type="success" /></ToastProvider>)
+    const u = user()
+    const [showError, showSuccess] = screen.getAllByText('show')
+    await u.click(showError)
+    await u.click(showSuccess)
+    const error = screen.getByRole('alert')
+    expect(error).toHaveTextContent('Oops')
+    expect(error).toHaveClass('bg-surface-header', 'border-line', 'border-l-danger', 'g-toast-in')
+    expect(screen.getByRole('status')).toHaveClass('border-l-success')
+    expect(screen.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(2)
+})

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listLeaderboard } from '@/lib/server/profiles';
+import { countLeaderboardPlayers, listLeaderboard } from '@/lib/server/profiles';
 import { createAdminClient } from '@/lib/server/supabase';
 import { parseInput, schemas } from '@/lib/server/validation';
 
-// GET /api/leaderboard?field=rating_<bucket> — top 50 (default rapid)
+// GET /api/leaderboard?field=rating_<bucket> — top 50 (default rapid). The number of ranked
+// players (all of them, not just the 50 returned) is sent as `X-Total-Count` when it is known.
 // PUBLIC on purpose: usernames, ratings and totals only, the same for every caller
 // (docs/fixes/DECISIONS.md F-012).
 export async function GET(request: NextRequest) {
@@ -15,12 +16,19 @@ export async function GET(request: NextRequest) {
     );
     if (!field.ok) return field.response;
 
-    const { data, error } = await listLeaderboard(createAdminClient(), field.data);
+    const admin = createAdminClient();
+    const [{ data, error }, total] = await Promise.all([
+        listLeaderboard(admin, field.data),
+        countLeaderboardPlayers(admin),
+    ]);
 
     if (error) {
         console.error('[api/leaderboard] error:', error.message);
         return NextResponse.json([], { status: 200 });
     }
 
-    return NextResponse.json(data ?? []);
+    // Without a count the page only shows the total when the list is not capped.
+    const headers: Record<string, string> =
+        !total.error && typeof total.count === 'number' ? { 'X-Total-Count': String(total.count) } : {};
+    return NextResponse.json(data ?? [], { headers });
 }

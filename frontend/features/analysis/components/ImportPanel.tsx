@@ -1,100 +1,99 @@
-import { focusBorder, panelSurface, textHover } from '../styles';
+import { cn } from '@/lib/design/cn';
+import { QUICK_POSITIONS, isShowing, type QuickPosition } from '../quickPositions';
 
-const QUICK_POSITIONS = [
-    { label: 'Starting Position', fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' },
-    { label: "King's Gambit", fen: 'rnbqkbnr/pppp1ppp/8/4p3/4PP2/8/PPPP2PP/RNBQKBNR b KQkq f3 0 2' },
-    { label: 'Sicilian Defense', fen: 'rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2' },
-    { label: 'Ruy Lopez', fen: 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3' },
-];
+const HEADING = 'font-display text-[18px] font-semibold';
+const FIELD =
+    'box-border w-full resize-y rounded-12 border-1 border-line-field bg-bg-base px-[14px] py-3 font-mono text-[14px] leading-[1.6] text-ink placeholder:text-ink-placeholder focus:border-accent focus:shadow-focus-ring focus:outline-none';
+const STATUS = 'min-h-[20px] text-[14px] text-success-ink';
 
-const labelClass = 'text-[10px] uppercase tracking-wider mb-2 block font-medium';
-const tertiary = { color: 'var(--text-tertiary)' };
-const textareaStyle = { ...panelSurface, color: 'var(--text-primary)' };
+function QuickButton({ q, on, onPick }: { q: QuickPosition; on: boolean; onPick: (q: QuickPosition) => void }) {
+    return (
+        <button
+            type="button"
+            aria-pressed={on}
+            onClick={() => onPick(q)}
+            className={cn(
+                'min-h-[48px] rounded-14 border-1.5 px-[14px] text-left text-[15px] font-semibold',
+                on ? 'border-accent bg-accent text-on-accent' : 'border-line-field bg-surface-header text-ink',
+            )}
+        >
+            {q.name}
+        </button>
+    );
+}
 
-interface ImportPanelProps {
+export interface ImportPanelProps {
+    /** The board's FEN, to mark the preset it shows. */
+    currentFen: string;
     customFen: string;
     onCustomFen: (v: string) => void;
     customPgn: string;
     onCustomPgn: (v: string) => void;
-    onQuickPosition: (fen: string) => void;
+    fenMessage: string;
+    pgnMessage: string;
+    onQuickPosition: (q: QuickPosition) => void;
     onLoadFen: () => void;
     onLoadPgn: () => void;
 }
 
-/** Quick positions, "Load from FEN" and "Import Game (PGN)". */
-export function ImportPanel(props: ImportPanelProps) {
-    const { customFen, onCustomFen, customPgn, onCustomPgn, onQuickPosition, onLoadFen, onLoadPgn } = props;
+/** Quick positions, "Load from FEN" and "Import game (PGN)" (Analysis.dc.html Import tab). */
+export function ImportPanel(p: ImportPanelProps) {
     return (
-        <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {/* Quick positions */}
-            <div>
-                <div className="text-[10px] uppercase tracking-wider mb-2 font-medium" style={tertiary}>
-                    Quick Positions
-                </div>
-                <div className="flex flex-col gap-1.5">
-                    {QUICK_POSITIONS.map((pos) => (
-                        <button
-                            key={pos.label}
-                            onClick={() => onQuickPosition(pos.fen)}
-                            className="text-left px-3 py-2 rounded-lg text-sm transition-colors"
-                            style={{ ...panelSurface, color: 'var(--text-secondary)' }}
-                            {...textHover}
-                        >
-                            {pos.label}
-                        </button>
+        <div className="flex flex-col gap-6 p-5">
+            <section className="flex flex-col gap-3">
+                <h2 className={cn('m-0', HEADING)}>Quick positions</h2>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+                    {QUICK_POSITIONS.map((q) => (
+                        <QuickButton key={q.name} q={q} on={isShowing(q, p.currentFen)} onPick={p.onQuickPosition} />
                     ))}
                 </div>
-            </div>
-
-            {/* FEN input */}
-            <div>
-                <label className={labelClass} style={tertiary}>
+            </section>
+            <section className="flex flex-col gap-3">
+                <label htmlFor="fen" className={HEADING}>
                     Load from FEN
                 </label>
                 <textarea
-                    value={customFen}
-                    onChange={(e) => onCustomFen(e.target.value)}
+                    id="fen"
                     rows={3}
                     placeholder="Paste FEN string…"
-                    className="w-full rounded-lg px-3 py-2 font-mono text-xs resize-none focus:outline-none transition-colors"
-                    style={textareaStyle}
-                    {...focusBorder}
+                    value={p.customFen}
+                    onChange={(e) => p.onCustomFen(e.target.value)}
+                    className={FIELD}
                 />
                 <button
-                    onClick={onLoadFen}
-                    className="w-full mt-2 py-2 rounded-lg text-sm font-medium transition-colors btn-press"
-                    style={{ background: 'var(--accent)', color: '#0F0D0B' }}
+                    type="button"
+                    onClick={p.onLoadFen}
+                    className="min-h-[52px] rounded-pill border-0 bg-accent text-[16px] font-semibold text-on-accent"
                 >
-                    Load Position
+                    Load position
                 </button>
-            </div>
-
-            {/* PGN input */}
-            <div>
-                <label className={labelClass} style={tertiary}>
-                    Import Game (PGN)
+                <span role="status" className={STATUS}>
+                    {p.fenMessage}
+                </span>
+            </section>
+            <section className="flex flex-col gap-3">
+                <label htmlFor="pgn" className={HEADING}>
+                    Import game (PGN)
                 </label>
                 <textarea
-                    value={customPgn}
-                    onChange={(e) => onCustomPgn(e.target.value)}
+                    id="pgn"
                     rows={7}
-                    placeholder="Paste PGN…"
-                    className="w-full rounded-lg px-3 py-2 text-xs resize-none focus:outline-none transition-colors font-mono"
-                    style={textareaStyle}
-                    {...focusBorder}
+                    placeholder="Paste PGN… 1. e4 e5 2. Nf3 Nc6"
+                    value={p.customPgn}
+                    onChange={(e) => p.onCustomPgn(e.target.value)}
+                    className={FIELD}
                 />
                 <button
-                    onClick={onLoadPgn}
-                    className="w-full mt-2 py-2 rounded-lg text-sm font-medium btn-press transition-colors"
-                    style={{
-                        background: 'var(--bg-elevated)',
-                        border: '0.5px solid var(--border-strong)',
-                        color: 'var(--text-primary)',
-                    }}
+                    type="button"
+                    onClick={p.onLoadPgn}
+                    className="min-h-[52px] rounded-pill border-1.5 border-line-muted bg-transparent text-[16px] font-semibold text-ink"
                 >
-                    Import Game
+                    Import game
                 </button>
-            </div>
+                <span role="status" className={STATUS}>
+                    {p.pgnMessage}
+                </span>
+            </section>
         </div>
     );
 }

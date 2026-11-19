@@ -1,5 +1,5 @@
 // Pure helpers for the MAVERICK computer game (app/offline).
-import type { Chess, Move } from 'chess.js';
+import type { Chess, Move, Square } from 'chess.js';
 import { playCaptureSound, playCheckSound, playGameEndSound, playMoveSound } from '@/lib/sounds';
 import type { LastMove, Side } from './types';
 
@@ -20,13 +20,18 @@ export function playSoundForMove(game: Chess, result: Move | null) {
     playMoveSound();
 }
 
-/** Try a player move (always promoting to a queen); null when illegal. */
-export function tryMove(game: Chess, from: string, to: string): Move | null {
+/** Try a player move (a promoting pawn becomes `promotion`, a queen by default); null when illegal. */
+export function tryMove(game: Chess, from: string, to: string, promotion = 'q'): Move | null {
     try {
-        return game.move({ from, to, promotion: 'q' });
+        return game.move({ from, to, promotion });
     } catch {
         return null;
     }
+}
+
+/** True when moving the piece on `from` to `to` is a legal pawn promotion. */
+export function isPromotion(game: Chess, from: string, to: string): boolean {
+    return game.moves({ square: from as Square, verbose: true }).some((m) => m.to === to && !!m.promotion);
 }
 
 /** Game-over overlay text. */
@@ -67,4 +72,15 @@ export function undoToPlayerTurn(game: Chess, playerColor: Side): LastMove | nul
     game.undo();
     if (game.turn() !== playerColor) game.undo();
     return lastMoveOf(game);
+}
+
+/** The status line: the result once over, else whose move it is. */
+export function statusOf(
+    game: Chess,
+    playerColor: Side,
+    opts: { resigned: boolean; gameOver: boolean; thinking: boolean },
+) {
+    if (opts.gameOver) return { text: resultText(game, playerColor, opts.resigned), tone: 'over' as const };
+    if (game.turn() === playerColor && !opts.thinking) return { text: 'Your move', tone: 'move' as const };
+    return { text: opts.thinking ? 'MAVERICK is thinking...' : 'MAVERICK to move', tone: 'wait' as const };
 }

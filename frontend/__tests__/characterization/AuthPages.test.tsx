@@ -3,6 +3,7 @@
  * app/auth/exchange/page.tsx, app/login/page.tsx, app/signup/page.tsx.
  * Black-box: render the default export, mock only next/* and the Supabase client.
  */
+import { AXE_TIMEOUT_MS, expectAccessible } from '../helpers/axe'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const replace = jest.fn()
@@ -154,38 +155,82 @@ describe('auth/exchange', () => {
 })
 
 describe('login', () => {
-    const fill = (container: HTMLElement, email: string, password: string) => {
-        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: email } })
-        fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: password } })
+    // [F-101] was: the form called the browser Supabase client with { email, password }; it now
+    // posts { identifier, password } to /api/auth/login, which also accepts a username.
+    const fill = (identifier: string, password: string) => {
+        fireEvent.change(screen.getByLabelText('Email or username'), { target: { value: identifier } })
+        fireEvent.change(screen.getByLabelText('Password'), { target: { value: password } })
     }
+    const answer = (status: number, body: unknown = {}) =>
+        fetchMock.mockResolvedValue({ ok: status === 200, status, json: async () => body })
+    const loginCall = (identifier: string, password: string) => ['/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+    }]
 
-    test('bad credentials show an error that clears when the user types again', async () => {
-        auth.signInWithPassword.mockResolvedValue({ error: { message: 'x' } })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
-        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+    test('[F-101] the field is "Email or username": a text input with username autocomplete', () => {
+        render(<LoginPage />)
+        const field = screen.getByLabelText('Email or username')
+        expect(field).toHaveAttribute('type', 'text')
+        expect(field).toHaveAttribute('autocomplete', 'username')
+        expect(field).toHaveAttribute('placeholder', 'you@example.com')
+        expect(field).toBeRequired()
+    })
+
+    test('[F-101] a username is sent to the server as typed (trimmed); the browser client is not used', async () => {
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('  Magnus_C ', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
-        expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'pw' })
-        expect(screen.getByText('Invalid email or password')).toBeInTheDocument()
-        fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'pw2' } })
-        expect(screen.queryByText('Invalid email or password')).not.toBeInTheDocument()
+        expect(fetchMock.mock.calls).toEqual([loginCall('Magnus_C', 'pw')])
+        expect(auth.signInWithPassword).not.toHaveBeenCalled()
+        expect(push.mock.calls).toEqual([['/lobby']])
+    })
+
+    test('bad credentials show the server\'s message, which clears when the user types again', async () => {
+        // was: 'Invalid email or password' from the browser client
+        answer(401, { error: 'Invalid email, username or password' })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(fetchMock.mock.calls).toEqual([loginCall('a@b.c', 'pw')])
+        expect(screen.getByText('Invalid email, username or password')).toBeInTheDocument()
+        fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw2' } })
+        expect(screen.queryByText('Invalid email, username or password')).not.toBeInTheDocument()
+        expect(push).not.toHaveBeenCalled()
+    })
+
+    test('[F-101] 429 says to wait; any other failure is the generic sign-in message', async () => {
+        answer(429, { error: 'rate_limited' })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(screen.getByText('Too many sign-in attempts. Please wait a few minutes and try again.')).toBeInTheDocument()
+        answer(400, { error: 'Email and password are required' })
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+        await flush()
+        expect(screen.getByText('Invalid email, username or password')).toBeInTheDocument()
     })
 
     test('a thrown sign-in shows the generic error', async () => {
-        auth.signInWithPassword.mockRejectedValue(new Error('net'))
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
-        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+        fetchMock.mockRejectedValue(new Error('net'))
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(screen.getByText('Something went wrong. Please try again.')).toBeInTheDocument()
     })
 
     test('success pushes to ?redirect (or /lobby) and refreshes', async () => {
         searchParams = new URLSearchParams('redirect=/join/tok')
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
-        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/join/tok']])
         expect(refresh).toHaveBeenCalledTimes(1)
@@ -199,19 +244,19 @@ describe('login', () => {
         ['javascript:alert(1)'],
     ])('success with redirect=%j goes to /lobby, never off-site [S6]', async (redirect) => {
         searchParams = new URLSearchParams({ redirect })
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
-        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/lobby']])
     })
 
     test('success without redirect goes to /lobby', async () => {
-        auth.signInWithPassword.mockResolvedValue({ error: null })
-        const { container } = render(<LoginPage />)
-        fill(container, 'a@b.c', 'pw')
-        fireEvent.click(screen.getByRole('button', { name: 'Sign In' }))
+        answer(200, { ok: true })
+        render(<LoginPage />)
+        fill('a@b.c', 'pw')
+        fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
         await flush()
         expect(push.mock.calls).toEqual([['/lobby']])
     })
@@ -235,19 +280,31 @@ describe('login', () => {
     ])('F17: ?error=%j from the OAuth callback is shown, not dropped', (code, message) => {
         searchParams = new URLSearchParams({ error: code, redirect: '/game/1' })
         window.history.replaceState(null, '', `/login?${searchParams}`)
-        const { container } = render(<LoginPage />)
+        render(<LoginPage />)
         expect(screen.getByText(message)).toBeInTheDocument()
         expect(window.location.search).toBe('?redirect=%2Fgame%2F1')
-        fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: 'a' } })
+        fireEvent.change(screen.getByLabelText('Email or username'), { target: { value: 'a' } })
         expect(screen.queryByText(message)).not.toBeInTheDocument()
         window.history.replaceState(null, '', '/')
     })
 
     test('static content and links', () => {
         render(<LoginPage />)
-        expect(screen.getByText('Welcome Back')).toBeInTheDocument()
+        // Redesign (Signin.dc.html): "Welcome Back" → "Welcome back", "Sign up" link → "Create an account".
+        expect(screen.getByRole('heading', { level: 1, name: 'Welcome back' })).toBeInTheDocument()
         expect(screen.getByText('Forgot password?').closest('a')).toHaveAttribute('href', '/reset-password')
-        expect(screen.getByText('Sign up').closest('a')).toHaveAttribute('href', '/signup')
+        expect(screen.getByText('Create an account').closest('a')).toHaveAttribute('href', '/signup')
+    })
+
+    test('Show toggles the password between hidden and visible (aria-pressed)', () => {
+        const { container } = render(<LoginPage />)
+        const show = screen.getByRole('button', { name: 'Show' })
+        expect(show).toHaveAttribute('aria-pressed', 'false')
+        fireEvent.click(show)
+        expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text')
+        expect(screen.getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-pressed', 'true')
+        fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+        expect(container.querySelector('input[type="password"]')).toBe(screen.getByLabelText('Password'))
     })
 })
 
@@ -283,10 +340,13 @@ describe('signup', () => {
         type('password', 'longenough')
         type('confirm', 'different')
         submit()
-        expect(document.getElementById('confirm')!.className).toContain('border-[#C0392B]')
+        // Redesign: the red border is the `border-danger` token, flagged with aria-invalid.
+        expect(document.getElementById('confirm')).toHaveAttribute('aria-invalid', 'true')
+        expect(document.getElementById('confirm')!.className).toContain('border-danger')
         type('confirm', 'longenough')
         expect(screen.queryByText('Passwords do not match')).not.toBeInTheDocument()
-        expect(document.getElementById('confirm')!.className).toContain('border-border-strong')
+        expect(document.getElementById('confirm')).not.toHaveAttribute('aria-invalid')
+        expect(document.getElementById('confirm')!.className).not.toContain('border-danger')
     })
 
     test('debounced username check: 500 ms, then taken disables submit', async () => {
@@ -298,8 +358,9 @@ describe('signup', () => {
         await act(async () => { jest.advanceTimersByTime(500) })
         await flush()
         expect(fetchMock.mock.calls).toEqual([['http://127.0.0.1:3001/api/users/check-username?u=taken_name']])
-        expect(screen.getByRole('button', { name: 'Sign Up' })).toBeDisabled()
-        expect(document.querySelector('.text-\\[\\#C0392B\\].lucide-x, svg.text-\\[\\#C0392B\\]')).not.toBeNull()
+        expect(screen.getByRole('button', { name: 'Sign up' })).toBeDisabled()
+        expect(screen.getByRole('status', { name: 'Username taken' })).toHaveAttribute('data-username-status', 'taken')
+        expect(document.querySelector('[data-username-status="taken"] svg.text-danger')).not.toBeNull()
     })
 
     test('available username shows the green check; short usernames do not hit the API', async () => {
@@ -312,8 +373,9 @@ describe('signup', () => {
         type('username', 'free_name')
         await act(async () => { jest.advanceTimersByTime(500) })
         await flush()
-        expect(document.querySelector('svg.text-indicator-green')).not.toBeNull()
-        expect(screen.getByRole('button', { name: 'Sign Up' })).not.toBeDisabled()
+        expect(screen.getByRole('status', { name: 'Username available' })).toBeInTheDocument()
+        expect(document.querySelector('[data-username-status="available"] svg.text-success')).not.toBeNull()
+        expect(screen.getByRole('button', { name: 'Sign up' })).not.toBeDisabled()
     })
 
     async function fillValid() {
@@ -353,7 +415,7 @@ describe('signup', () => {
         await flush()
         expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.c', password: 'longenough' })
         expect(screen.getByText(message)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Sign Up' })).not.toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Sign up' })).not.toBeDisabled()
     })
 
     test('network failure shows the connection error', async () => {
@@ -382,4 +444,15 @@ describe('signup', () => {
         }))
         expect(screen.getByText('Sign in').closest('a')).toHaveAttribute('href', '/login')
     })
+})
+
+describe('accessibility [A4]', () => {
+    test('sign-in and sign-up have no axe violations', async () => {
+        const login = render(<LoginPage />)
+        await expectAccessible(login.container)
+        login.unmount()
+        const signup = render(<SignupPage />)
+        await flush()
+        await expectAccessible(signup.container)
+    }, AXE_TIMEOUT_MS)
 })

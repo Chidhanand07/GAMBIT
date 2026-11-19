@@ -1,0 +1,85 @@
+name: Landing (Lighthouse)
+
+# The landing page's performance, accessibility, SEO and end-to-end checks (ADR F-115).
+# Not a required status check yet: it reports, it does not gate merges.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/landing-lighthouse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Placeholder values only: nothing here is a real key. Signed out, the landing never calls Supabase.
+  NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
+  NEXT_PUBLIC_SOCKET_URL: http://127.0.0.1:3001
+  NEXT_PUBLIC_SITE_URL: http://localhost:3203
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  lighthouse:
+    name: Lighthouse CI (mobile + desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Production build
+        run: npx next build
+      # Mobile (Lighthouse default: Moto G Power, slow 4G, 4x CPU), simulated throttling.
+      - name: Lighthouse mobile
+        run: npx --yes @lhci/cli@0.16.1 autorun --config=lighthouserc.json
+      - name: Lighthouse mobile, applied throttling (LCP < 2.0 s)
+        run: npx --yes @lhci/cli@0.16.1 autorun --config=lighthouserc.applied.json
+      - name: Lighthouse desktop
+        run: >-
+          npx --yes @lhci/cli@0.16.1 autorun --config=lighthouserc.json
+          --collect.settings.preset=desktop --upload.outputDir=.lighthouseci/desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-reports
+          path: frontend/.lighthouseci
+
+  e2e:
+    name: Landing e2e (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.project }}
+      - name: Production build
+        run: npx next build
+      - name: Playwright (landing)
+        run: npx playwright test e2e/landing --project=${{ matrix.project }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-${{ matrix.project }}
+          path: frontend/playwright-report

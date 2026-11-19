@@ -176,6 +176,28 @@ describe('GET /api/profile/[username]/stats', () => {
         expect(body.byCategory.rapid).toEqual({ played: 1, wins: 0, losses: 0, draws: 1 })
     })
 
+    test('results by colour and facts: average accuracy, longest win streak, most active day', async () => {
+        const p = uid('p')
+        db.queue('profiles', { data: { id: p, games_played: 4, wins: 3, losses: 1, draws: 0 }, error: null })
+        db.queue('games', {
+            data: [
+                // 2026-11-10 and 2026-11-17 are Tuesdays (UTC)
+                { time_control: '3', white_id: p, black_id: uid('x'), winner_id: p, white_accuracy: 80, created_at: '2026-11-10T10:00:00Z' },
+                { time_control: '3', white_id: uid('x'), black_id: p, winner_id: p, black_accuracy: 70, created_at: '2026-11-11T10:00:00Z' },
+                { time_control: '3', white_id: p, black_id: uid('x'), winner_id: uid('x'), created_at: '2026-11-12T10:00:00Z' },
+                { time_control: '3', white_id: p, black_id: uid('x'), winner_id: p, white_accuracy: 91, created_at: '2026-11-17T10:00:00Z' },
+                { time_control: '3', white_id: p, black_id: uid('x'), status: 'aborted', result: 'aborted', created_at: '2026-11-18T10:00:00Z' },
+            ],
+            error: null,
+        })
+        const { body } = await json(await getStats(req('/x'), { params: Promise.resolve({ username: 'bob' }) }))
+        expect(body.byColour).toEqual({
+            white: { played: 3, wins: 2, losses: 1, draws: 0 },
+            black: { played: 1, wins: 1, losses: 0, draws: 0 },
+        })
+        expect(body.facts).toEqual({ averageAccuracy: 80, longestWinStreak: 2, mostActiveDay: 'Tuesday' })
+    })
+
     test('404 for an unknown user', async () => {
         expect((await getStats(req('/x'), { params: Promise.resolve({ username: 'ghost' }) })).status).toBe(404)
     })

@@ -1,85 +1,53 @@
-import { BarChart2 } from 'lucide-react';
+import { Icon } from '@/components/ui/Icon';
+import { InfoRow } from '@/components/ui/InfoRow';
 import { ANALYSIS_DEPTH } from '@/lib/api/analysis';
+import { cn } from '@/lib/design/cn';
 import { formatEvaluation } from '../evaluation';
 import type { EngineAnalysis } from '../types';
 
-/** Scores within ±0.2 pawns are shown as neutral. */
-const NEUTRAL_BAND = 0.2;
 const PV_SHOWN = 8;
 
-function scoreColor(score: number, neutral: string) {
-    if (score > NEUTRAL_BAND) return 'var(--green)';
-    return score < -NEUTRAL_BAND ? 'var(--red)' : neutral;
-}
+export const ENGINE_NOTES = {
+    off: 'Enable engine to evaluate the current position.',
+    on: 'Engine on. Evaluating the current position.',
+    failed: 'Engine unavailable. It will try again on the next move.',
+} as const;
 
-function EngineUnavailable() {
+function EngineSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
     return (
-        <p className="text-xs py-1" style={{ color: 'var(--red)' }}>
-            Engine unavailable. It will try again on the next move.
-        </p>
-    );
-}
-
-function EngineResult({ data }: { data: EngineAnalysis }) {
-    return (
-        <div
-            className="rounded-lg p-3"
-            style={{
-                background: 'var(--bg-elevated)',
-                border: `0.5px solid var(--border)`,
-                borderLeft: `2px solid ${scoreColor(data.score, 'var(--text-tertiary)')}`,
-            }}
+        <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label="Engine"
+            onClick={onToggle}
+            className="flex h-11 w-14 shrink-0 items-center border-0 bg-transparent p-0"
         >
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                    <span
-                        className="text-base font-bold tabular-nums"
-                        style={{ color: scoreColor(data.score, 'var(--text-secondary)') }}
-                    >
-                        {formatEvaluation(data)}
-                    </span>
-                    <span className="text-sm font-medium text-accent">{data.best_move}</span>
-                </div>
-            </div>
-            {data.pv && (
-                <div className="flex flex-wrap gap-1">
-                    {data.pv
-                        .split(' ')
-                        .slice(0, PV_SHOWN)
-                        .map((m, mi) => (
-                            <span
-                                key={mi}
-                                className="text-[10px] px-1.5 py-0.5 rounded font-mono"
-                                style={{
-                                    color: 'var(--text-secondary)',
-                                    background: 'var(--bg-surface)',
-                                    border: '0.5px solid var(--border)',
-                                }}
-                            >
-                                {m}
-                            </span>
-                        ))}
-                </div>
-            )}
-        </div>
+            <span
+                className={cn(
+                    'box-border flex h-8 w-14 items-center rounded-pill border-1.5 px-[3px]',
+                    on ? 'justify-end border-accent bg-accent' : 'justify-start border-line-muted bg-bg-base',
+                )}
+            >
+                <span className={cn('h-[22px] w-[22px] rounded-full', on ? 'bg-on-accent' : 'bg-ink')} />
+            </span>
+        </button>
     );
 }
 
-function Analyzing() {
+/**
+ * The current evaluation as "Game info" rows (Game.dc.html, the design's label / value pattern):
+ * score from White's view, best move, search depth and, when the engine sends one, the line.
+ */
+function Readout({ data }: { data: EngineAnalysis }) {
     return (
-        <div className="flex items-center gap-2 text-sm py-1" style={{ color: 'var(--text-tertiary)' }}>
-            <div
-                className="w-3.5 h-3.5 border-2 rounded-full animate-spin shrink-0"
-                style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }}
-            />
-            Analyzing position…
+        <div aria-label="Engine evaluation" role="group" className="flex flex-col">
+            <InfoRow label="Evaluation" value={formatEvaluation(data)} />
+            <InfoRow label="Best move" value={data.best_move} />
+            <InfoRow label="Depth" value={String(ANALYSIS_DEPTH)} />
+            {data.pv && <InfoRow label="Line" value={data.pv.split(' ').slice(0, PV_SHOWN).join(' ')} wrap />}
         </div>
     );
-}
-
-function EngineStatus({ data, failed }: { data: EngineAnalysis | null; failed: boolean }) {
-    if (data) return <EngineResult data={data} />;
-    return failed ? <EngineUnavailable /> : <Analyzing />;
 }
 
 interface EnginePanelProps {
@@ -90,51 +58,29 @@ interface EnginePanelProps {
     failed: boolean;
 }
 
-/** Stockfish header with the on/off switch and the current evaluation. */
+/** Stockfish header with its note and on/off switch, then the evaluation when there is one. */
 export function EnginePanel({ enabled, onToggle, data, failed }: EnginePanelProps) {
+    const showFailure = enabled && failed;
+    let note: string = enabled ? ENGINE_NOTES.on : ENGINE_NOTES.off;
+    if (showFailure) note = ENGINE_NOTES.failed;
     return (
-        <div className="shrink-0 p-3 space-y-3" style={{ borderBottom: '0.5px solid var(--border)' }}>
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <BarChart2 size={14} className="text-accent" strokeWidth={1.5} />
-                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+        <>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex min-w-0 flex-col">
+                    <span className="flex items-center gap-2 font-display text-[18px] font-semibold">
+                        <Icon name="chart" className="text-accent" />
                         Stockfish 16
                     </span>
-                    {enabled && (
-                        <span
-                            className="text-[10px] px-1.5 py-0.5 rounded font-mono"
-                            style={{
-                                color: 'var(--text-tertiary)',
-                                background: 'var(--bg-elevated)',
-                                border: '0.5px solid var(--border)',
-                            }}
-                        >
-                            {`d${ANALYSIS_DEPTH}`}
-                        </span>
-                    )}
-                </div>
-                <button
-                    onClick={onToggle}
-                    className="w-9 h-5 rounded-full relative transition-colors"
-                    style={{
-                        background: enabled ? 'var(--accent)' : 'var(--bg-elevated)',
-                        border: '0.5px solid var(--border-strong)',
-                    }}
-                >
                     <span
-                        className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all"
-                        style={{ left: enabled ? 'calc(100% - 18px)' : '2px' }}
-                    />
-                </button>
+                        role={showFailure ? 'alert' : undefined}
+                        className={cn('text-[14px]', showFailure ? 'text-danger' : 'text-ink-muted')}
+                    >
+                        {note}
+                    </span>
+                </div>
+                <EngineSwitch on={enabled} onToggle={onToggle} />
             </div>
-
-            {enabled && <EngineStatus data={data} failed={failed} />}
-
-            {!enabled && (
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    Enable engine to evaluate the current position.
-                </p>
-            )}
-        </div>
+            {enabled && data && <Readout data={data} />}
+        </>
     );
 }

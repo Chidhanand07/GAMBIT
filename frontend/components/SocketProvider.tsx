@@ -8,8 +8,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import { usePathname } from 'next/navigation';
 import { useProfile } from '@/components/ProfileProvider';
-import { createGameSocket } from '@/lib/socket/connection';
-import { createClient } from '@/lib/supabase/client';
+import { loadBrowserClient } from '@/lib/supabase/lazyClient';
 
 const SocketContext = createContext<Socket | null>(null);
 
@@ -22,7 +21,7 @@ const DEFAULT_SOCKET_URL = 'http://127.0.0.1:3001';
 
 /** The current session's access token; supabase-js refreshes it when it has expired. */
 async function currentAccessToken(): Promise<string | null> {
-    const { data } = await createClient().auth.getSession();
+    const { data } = await (await loadBrowserClient()).auth.getSession();
     return data.session?.access_token ?? null;
 }
 
@@ -39,10 +38,21 @@ function useSocketUserId(profileId: string | undefined): string | null {
     }, [profileId]);
 
     useEffect(() => {
-        const { data } = createClient().auth.onAuthStateChange((event) => {
-            if (event === 'SIGNED_OUT') setUserId(null);
-        });
-        return () => data.subscription.unsubscribe();
+        let unsubscribe: (() => void) | null = null;
+        let active = true;
+        loadBrowserClient()
+            .then((supabase) => {
+                if (!active) return;
+                const { data } = supabase.auth.onAuthStateChange((event) => {
+                    if (event === 'SIGNED_OUT') setUserId(null);
+                });
+                unsubscribe = () => data.subscription.unsubscribe();
+            })
+            .catch(() => {});
+        return () => {
+            active = false;
+            unsubscribe?.();
+        };
     }, []);
 
     return userId;
@@ -58,14 +68,22 @@ export default function SocketProvider({ children }: { children: React.ReactNode
     useEffect(() => {
         if (isAuthPage || !userId) return;
 
-        const connection = createGameSocket({
-            url: process.env.NEXT_PUBLIC_SOCKET_URL || DEFAULT_SOCKET_URL,
-            getToken: currentAccessToken,
+        // socket.io-client loads with the first socket, never on a signed-out page (NX-18, F-111).
+        let closed = false;
+        let close: (() => void) | null = null;
+        void import('@/lib/socket/connection').then(({ createGameSocket }) => {
+            if (closed) return;
+            const connection = createGameSocket({
+                url: process.env.NEXT_PUBLIC_SOCKET_URL || DEFAULT_SOCKET_URL,
+                getToken: currentAccessToken,
+            });
+            close = () => connection.close();
+            setSocket(connection.socket);
         });
-        setSocket(connection.socket);
 
         return () => {
-            connection.close();
+            closed = true;
+            close?.();
             setSocket(null);
         };
     }, [isAuthPage, userId]);

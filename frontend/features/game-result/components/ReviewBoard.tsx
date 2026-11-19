@@ -1,6 +1,8 @@
-import { Chess, type Square } from 'chess.js';
-import Piece from '@/components/ui/Piece';
-import { FILES, RANKS } from '@/lib/chess/board';
+import type { Square } from 'chess.js';
+import { Board } from '@/components/chess/Board';
+import { gridPosition } from '@/components/chess/boardModel';
+import { preferredBoardProps } from '@/features/settings/boardProps';
+import { useBoardPrefs } from '@/features/settings/SettingsProvider';
 import type { MoveClassification } from '@/types/game';
 import { CLASS_META, moveHighlights } from '../review';
 
@@ -10,52 +12,51 @@ interface ReviewBoardProps {
     curMove: MoveClassification | null;
 }
 
-/** Static review board: last-move highlight, best-move ring and the classification badge. */
-export function ReviewBoard({ fen, flipped, curMove }: ReviewBoardProps) {
-    const orderedRanks = flipped ? [...RANKS].reverse() : RANKS;
-    const orderedFiles = flipped ? [...FILES].reverse() : FILES;
-    const chess = new Chess(fen);
+const CELL = 12.5;
 
-    const { lastFrom, lastTo, bestFrom, bestTo } = moveHighlights(curMove);
-    const badge = curMove ? CLASS_META[curMove.classification] : undefined;
-
+/** A ring on the engine's best move squares (not shown where the played move already is). */
+function BestMoveRing({ square, flipped }: { square: Square; flipped: boolean }) {
+    const { col, row } = gridPosition(square, flipped ? 'black' : 'white');
     return (
-        <div className="w-full relative border-[10px] border-[#2E2B25] rounded-sm shadow-[-8px_8px_24px_rgba(0,0,0,0.5)]">
-            <div className="grid grid-cols-8 grid-rows-8 w-full aspect-square">
-                {orderedRanks.map((r) =>
-                    orderedFiles.map((f) => {
-                        const sq = f + r;
-                        const piece = chess.get(sq as Square);
-                        const isLight = (FILES.indexOf(f) + RANKS.indexOf(r)) % 2 === 0;
-                        const isLast = sq === lastFrom || sq === lastTo;
-                        const isBest = sq === bestFrom || sq === bestTo;
-                        return (
-                            <div
-                                key={sq}
-                                className={`relative w-full aspect-square flex items-center justify-center ${isLight ? 'bg-board-light' : 'bg-board-dark'}`}
-                            >
-                                {isLast && <div className="absolute inset-0 bg-yellow-400/35" />}
-                                {isBest && !isLast && (
-                                    <div className="absolute inset-0 ring-4 ring-inset ring-[#749B4F]/70" />
-                                )}
-                                {piece && (
-                                    <div className="w-full h-full flex items-center justify-center z-10">
-                                        <Piece color={piece.color} type={piece.type} />
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    }),
-                )}
-            </div>
-            {/* classification badge for current move */}
-            {curMove && badge && (
-                <div
-                    className="absolute -top-3 -right-3 w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg z-20"
+        <span
+            aria-hidden="true"
+            data-best={square}
+            className="pointer-events-none absolute h-[12.5%] w-[12.5%] shadow-best-move"
+            style={{ left: `${col * CELL}%`, top: `${row * CELL}%` }}
+        />
+    );
+}
+
+/**
+ * The review board: the shared game board (Game.dc.html) with the played move highlighted, a
+ * ring on the engine's best move and the move's classification badge.
+ */
+export function ReviewBoard({ fen, flipped, curMove }: ReviewBoardProps) {
+    const { lastFrom, lastTo, bestFrom, bestTo } = moveHighlights(curMove);
+    const lastMove = lastFrom && lastTo ? { from: lastFrom as Square, to: lastTo as Square } : null;
+    const rings = [bestFrom, bestTo].filter((sq): sq is string => !!sq && sq !== lastFrom && sq !== lastTo);
+    const badge = curMove ? CLASS_META[curMove.classification] : undefined;
+    const prefs = useBoardPrefs();
+    return (
+        <div className="relative">
+            <Board
+                fen={fen}
+                orientation={flipped ? 'black' : 'white'}
+                {...preferredBoardProps(prefs, { lastMove })}
+                label="Review board"
+            >
+                {rings.map((sq) => (
+                    <BestMoveRing key={sq} square={sq as Square} flipped={flipped} />
+                ))}
+            </Board>
+            {badge && (
+                <span
+                    data-classification
+                    className="absolute -right-3 -top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-bold text-ink-bright shadow-popover"
                     style={{ background: badge.color }}
                 >
                     {badge.sym}
-                </div>
+                </span>
             )}
         </div>
     );

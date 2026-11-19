@@ -1,5 +1,5 @@
-import { accColor, avatarInitial, formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
-import { matchesFriendSearch } from '@/features/profile/components/FriendsListCard';
+import { formatDate, gameOutcome, profileRecord } from '@/features/profile/format';
+import { matchesFriendSearch } from '@/features/profile/model';
 
 describe('formatDate', () => {
     test('formats as "Mon D, YYYY" (en-US)', () => {
@@ -7,20 +7,6 @@ describe('formatDate', () => {
     });
     test('empty input → empty string', () => {
         expect(formatDate('')).toBe('');
-    });
-});
-
-describe('accColor', () => {
-    test.each([
-        [null, 'text-text-tertiary'],
-        [100, 'text-indicator-green'],
-        [85, 'text-indicator-green'],
-        [84.9, 'text-yellow-400'],
-        [70, 'text-yellow-400'],
-        [69, 'text-red-400'],
-        [0, 'text-red-400'],
-    ])('%p → %s', (acc, cls) => {
-        expect(accColor(acc)).toBe(cls);
     });
 });
 
@@ -37,17 +23,6 @@ describe('profileRecord', () => {
     test('missing counters read as 0 and win rate is 0 without games', () => {
         const empty = { games_played: undefined, wins: undefined, losses: undefined, draws: undefined };
         expect(profileRecord(empty as never)).toEqual({ gamesPlayed: 0, wins: 0, losses: 0, draws: 0, winRate: 0 });
-    });
-});
-
-describe('avatarInitial', () => {
-    test.each([
-        ['bobby', 'bob', 'B'],
-        [null, 'alice', 'A'],
-        ['', '', '?'],
-        [undefined, undefined, '?'],
-    ])('(%p, %p) → %s', (name, username, initial) => {
-        expect(avatarInitial(name, username)).toBe(initial);
     });
 });
 

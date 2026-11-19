@@ -1,156 +1,134 @@
 import type { ReactNode } from 'react';
-import type { CategoryRecord, ProfileStats } from '@/types/profilePage';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { StatTile } from '@/components/ui/StatTile';
+import { cn } from '@/lib/design/cn';
+import { SPEED_BUCKET_LABELS } from '@/lib/chess/timeControl';
+import type { ProfileStats } from '@/types/profilePage';
 import type { SpeedBucket } from '@/types/timeControl';
-import { RATING_ICONS } from './ratingIcons';
+import { colourRows, statFacts, type ColourRow } from '../model';
+import { EMPTY, PANEL, PANEL_TITLE } from './styles';
 
 const DEFAULT_RATING = 1200;
-const EMPTY_RECORD: CategoryRecord = { played: 0, wins: 0, losses: 0, draws: 0 };
-
-const CATEGORIES: { key: SpeedBucket; label: string }[] = [
-    { key: 'bullet', label: 'Bullet' },
-    { key: 'blitz', label: 'Blitz' },
-    { key: 'rapid', label: 'Rapid' },
-    { key: 'classical', label: 'Classical' },
-];
-
-function TotalCard({ value, label, valueClass }: { value: number; label: string; valueClass: string }) {
-    return (
-        <div className="bg-surface border border-border rounded-xl p-5 text-center">
-            <div className={`text-4xl font-bold ${valueClass} tabular-nums`}>{value}</div>
-            <div className="text-text-tertiary text-sm mt-1">{label}</div>
-        </div>
-    );
-}
+const MODES: readonly SpeedBucket[] = ['bullet', 'blitz', 'rapid', 'classical'];
 
 function Totals({ stats }: { stats: ProfileStats }) {
     return (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <TotalCard value={stats.total ?? 0} label="Total Games" valueClass="text-text-primary" />
-            <TotalCard value={stats.wins ?? 0} label="Wins" valueClass="text-indicator-green" />
-            <TotalCard value={stats.losses ?? 0} label="Losses" valueClass="text-red-400" />
-            <TotalCard value={stats.draws ?? 0} label="Draws" valueClass="text-text-secondary" />
+        <section className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
+            <StatTile value={String(stats.total ?? 0)} label="Total games" />
+            <StatTile value={String(stats.wins ?? 0)} label="Wins" tone="success" />
+            <StatTile value={String(stats.losses ?? 0)} label="Losses" tone="danger" />
+            <StatTile value={String(stats.draws ?? 0)} label="Draws" tone="muted" />
+        </section>
+    );
+}
+
+function ColourBar({ row }: { row: ColourRow }) {
+    return (
+        <div className="flex flex-col gap-[6px]">
+            <div className="flex justify-between text-[14px]">
+                <span className="flex items-center gap-2">
+                    <span
+                        aria-hidden="true"
+                        className={cn(
+                            'box-content h-3 w-3 rounded-4 border-1 border-line-muted',
+                            row.name === 'White' ? 'bg-ink' : 'bg-on-accent',
+                        )}
+                    />
+                    {row.name}
+                </span>
+                <span className="font-mono text-ink-muted">
+                    {row.record} · {row.rate}
+                </span>
+            </div>
+            <div aria-hidden="true" className="flex h-2 overflow-hidden rounded-pill bg-bg-base">
+                <span className="bg-success" style={{ width: row.w }} />
+                <span className="bg-ink-muted" style={{ width: row.d }} />
+                <span className="bg-danger" style={{ width: row.l }} />
+            </div>
         </div>
     );
 }
 
-function CountLine({
-    label,
-    value,
-    labelClass,
-    valueClass,
-}: Record<'label' | 'labelClass' | 'valueClass', string> & { value: number }) {
+function ModeCard({ mode, stats }: { mode: SpeedBucket; stats: ProfileStats }) {
+    const rec = stats.byCategory?.[mode] ?? { played: 0, wins: 0, losses: 0, draws: 0 };
     return (
-        <div className="flex justify-between text-xs">
-            <span className={labelClass}>{label}</span>
-            <span className={valueClass}>{value}</span>
+        <div className="box-border flex flex-col gap-[10px] rounded-20 border-1 border-line bg-surface p-5">
+            <span className="text-[14px] font-semibold text-ink-muted">{SPEED_BUCKET_LABELS[mode]}</span>
+            <span className="font-mono text-[36px] font-bold leading-none tracking-[-0.04em]">
+                {Math.round(stats.ratings?.[mode] ?? DEFAULT_RATING)}
+            </span>
+            <div className="grid grid-cols-[1fr_auto] gap-y-1 text-[14px] text-ink-muted">
+                <span>Played</span>
+                <span className="font-mono text-ink">{rec.played}</span>
+                <span>Wins</span>
+                <span className="font-mono text-success">{rec.wins}</span>
+                <span>Losses</span>
+                <span className="font-mono text-danger">{rec.losses}</span>
+                <span>Draws</span>
+                <span className="font-mono">{rec.draws}</span>
+            </div>
         </div>
     );
 }
 
-interface CategoryCardProps {
-    label: string;
-    icon: ReactNode;
-    rating: number | null | undefined;
-    record: CategoryRecord;
-}
-
-function CategoryCard({ label, icon, rating, record: s }: CategoryCardProps) {
+function StatsBody({ stats, rating }: { stats: ProfileStats; rating: ReactNode }) {
+    const colours = colourRows(stats);
+    const facts = statFacts(stats);
     return (
-        <div className="bg-surface border border-border rounded-xl p-4">
-            <div className="flex items-center gap-1.5 text-text-secondary text-xs uppercase tracking-wider mb-3">
-                <span className="text-accent">{icon}</span>
-                {label}
-            </div>
-            <div className="text-3xl font-bold text-text-primary tabular-nums mb-3">
-                {Math.round(rating ?? DEFAULT_RATING)}
-            </div>
-            <div className="space-y-1">
-                <CountLine
-                    label="Played"
-                    value={s.played}
-                    labelClass="text-text-tertiary"
-                    valueClass="text-text-primary tabular-nums font-medium"
-                />
-                <CountLine
-                    label="Wins"
-                    value={s.wins}
-                    labelClass="text-indicator-green"
-                    valueClass="text-indicator-green tabular-nums font-medium"
-                />
-                <CountLine
-                    label="Losses"
-                    value={s.losses}
-                    labelClass="text-red-400"
-                    valueClass="text-red-400 tabular-nums font-medium"
-                />
-                <CountLine
-                    label="Draws"
-                    value={s.draws}
-                    labelClass="text-text-tertiary"
-                    valueClass="text-text-secondary tabular-nums"
-                />
-            </div>
-            {s.played > 0 && (
-                <div className="flex h-1.5 rounded-full overflow-hidden gap-px mt-3">
-                    {s.wins > 0 && <div style={{ flex: s.wins }} className="bg-indicator-green" />}
-                    {s.losses > 0 && <div style={{ flex: s.losses }} className="bg-red-500" />}
-                    {s.draws > 0 && <div style={{ flex: s.draws }} className="bg-border" />}
-                </div>
+        <>
+            <Totals stats={stats} />
+            {rating}
+            {colours.length > 0 && (
+                <Card className={PANEL}>
+                    <span className={PANEL_TITLE}>Results by colour</span>
+                    {colours.map((row) => (
+                        <ColourBar key={row.name} row={row} />
+                    ))}
+                </Card>
             )}
-        </div>
-    );
-}
-
-function StatsPlaceholder({ failed, onRetry }: { failed: boolean; onRetry: () => void }) {
-    if (!failed) {
-        return (
-            <div className="py-16 flex justify-center">
-                <div className="w-6 h-6 border-2 border-border border-t-accent rounded-full animate-spin" />
-            </div>
-        );
-    }
-    return (
-        <div className="py-16 flex flex-col items-center gap-3">
-            <p className="text-sm text-text-secondary">Could not load stats.</p>
-            <button
-                onClick={onRetry}
-                className="px-4 py-2 bg-elevated hover:bg-hover border border-border rounded-lg text-sm text-text-primary"
-            >
-                Retry
-            </button>
-        </div>
+            {facts.length > 0 && (
+                <section className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+                    {facts.map((f) => (
+                        <div
+                            key={f.k}
+                            className="box-border flex flex-col gap-1 rounded-20 border-1 border-line bg-surface px-5 py-4"
+                        >
+                            <span className="font-mono text-[24px] font-bold">{f.v}</span>
+                            <span className="text-[13px] text-ink-muted">{f.k}</span>
+                        </div>
+                    ))}
+                </section>
+            )}
+            <section className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+                {MODES.map((m) => (
+                    <ModeCard key={m} mode={m} stats={stats} />
+                ))}
+            </section>
+        </>
     );
 }
 
 interface StatsTabProps {
     stats: ProfileStats | null;
-    /** The last request failed; show the error and Retry instead of the spinner. */
     failed: boolean;
     onRetry: () => void;
+    /** The "Rating over time" card (composed by the page). */
+    rating: ReactNode;
 }
 
-/** Stats tab: a spinner (or an error with Retry) until the stats arrive, then totals and per-speed cards. */
-export function StatsTab({ stats, failed, onRetry }: StatsTabProps) {
-    return (
-        <div className="space-y-6">
-            {!stats ? (
-                <StatsPlaceholder failed={failed} onRetry={onRetry} />
-            ) : (
-                <>
-                    <Totals stats={stats} />
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {CATEGORIES.map((cat) => (
-                            <CategoryCard
-                                key={cat.key}
-                                label={cat.label}
-                                icon={RATING_ICONS[cat.key]}
-                                rating={stats.ratings?.[cat.key]}
-                                record={stats.byCategory?.[cat.key] ?? EMPTY_RECORD}
-                            />
-                        ))}
-                    </div>
-                </>
-            )}
-        </div>
-    );
+/** Totals, rating card, results by colour, facts and per-mode cards; an error with Retry on failure (F12). */
+export function StatsTab({ stats, failed, onRetry, rating }: StatsTabProps) {
+    if (failed) {
+        return (
+            <Card className="flex flex-col items-center gap-3 p-7 text-center">
+                <span className="text-ink-muted">Could not load stats.</span>
+                <Button variant="outline" onClick={onRetry}>
+                    Retry
+                </Button>
+            </Card>
+        );
+    }
+    if (!stats) return <div className={EMPTY}>Loading stats…</div>;
+    return <StatsBody stats={stats} rating={rating} />;
 }
