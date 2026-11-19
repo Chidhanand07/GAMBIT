@@ -78,13 +78,19 @@ beforeEach(() => {
     viewer = { id: 'u-me', username: 'me' };
 });
 
+/** PresenceProvider loads the Supabase client lazily (F-111): let that promise settle. */
+const flushLazyClient = async () => {
+    for (let i = 0; i < 6; i++) await act(async () => {});
+};
+
 describe('useProfilePresence (F11)', () => {
-    test('shows Online when the profile owner is in the shared presence set', () => {
+    test('shows Online when the profile owner is in the shared presence set', async () => {
         render(
             <PresenceProvider>
                 <Badge id="u-bob" />
             </PresenceProvider>,
         );
+        await flushLazyClient();
         expect(screen.getByTestId('badge')).toHaveTextContent('Offline');
         syncTopic(ONLINE_TOPIC, { 'u-me': [{}], 'u-bob': [{}] });
         expect(screen.getByTestId('badge')).toHaveTextContent('Online');
@@ -92,12 +98,13 @@ describe('useProfilePresence (F11)', () => {
         expect(screen.getByTestId('badge')).toHaveTextContent('Offline');
     });
 
-    test('opens no extra channel and never removes the shared one', () => {
+    test('opens no extra channel and never removes the shared one', async () => {
         const { unmount } = render(
             <PresenceProvider>
                 <Badge id="u-bob" />
             </PresenceProvider>,
         );
+        await flushLazyClient();
         expect(supabase.channel.mock.calls.map((c) => c[0])).toEqual([ONLINE_TOPIC]);
         unmount();
         expect(supabase.channel).toHaveBeenCalledTimes(1);
@@ -105,13 +112,14 @@ describe('useProfilePresence (F11)', () => {
 
     // was: 'a signed-out viewer has no presence data, so the badge stays hidden' — [F-104] a guest
     // listens to the shared set (without joining it), so the badge is real for guests too.
-    test('a signed-out viewer listens without joining; the badge follows the shared set', () => {
+    test('a signed-out viewer listens without joining; the badge follows the shared set', async () => {
         viewer = null;
         render(
             <PresenceProvider>
                 <Badge id="u-bob" />
             </PresenceProvider>,
         );
+        await flushLazyClient();
         expect(supabase.channel.mock.calls.map((c) => c[0])).toEqual([ONLINE_TOPIC]);
         expect(screen.getByTestId('badge')).toHaveTextContent('Offline');
         syncTopic(ONLINE_TOPIC, { 'u-bob': [{}] });

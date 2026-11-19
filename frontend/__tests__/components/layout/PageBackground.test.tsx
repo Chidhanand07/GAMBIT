@@ -3,7 +3,8 @@ import PageBackground from '@/components/layout/PageBackground'
 
 const setReducedMotion = (reduce: boolean) => {
     window.matchMedia = jest.fn().mockImplementation((query: string) => ({
-        matches: reduce && query === '(prefers-reduced-motion: reduce)',
+        // A mouse device (F-111: the trail is built only for a hovering pointer).
+        matches: (reduce && query === '(prefers-reduced-motion: reduce)') || query === '(hover: hover) and (pointer: fine)',
         media: query,
         addEventListener: jest.fn(),
         removeEventListener: jest.fn(),

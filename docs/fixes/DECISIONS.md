@@ -124,12 +124,13 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-104](#f-104) | Remaining chosen deviations follow the mockups: Mark all read, guest presence, Games row, friend status, preview marks, one Reset | v2 | A2-5 |
 | [F-105](#f-105) | Screens without a mockup are built from the mockups' components; the legacy theme is deleted | v2 | A3 |
 | [F-106](#f-106) | Accessibility at parity: focus ring, reduced motion, AA contrast fixes, notifications panel as a dialog, axe tests | v2 | A4 |
+| [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
+| [F-111](#f-111) | Landing performance: lazy Supabase/socket.io, no guest 401, lazy audio, 2 KB symbol font, no trail on touch | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
 
 | ADR | Title | PR | Items |
 |---|---|---|---|
-| [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
 
 ---
 
@@ -2643,3 +2644,34 @@ the Dependabot part of F-057).**
     "Free always" (nothing in the app is paid).
 - **Why.** A signed-in player offered "Create Account" is a dead end; the closest drawn element is the
   account menu's "My Profile". Everything else follows the mockups as drawn.
+
+## F-111
+
+**Landing performance: no avoidable bytes or work before the first paint.**
+
+- **Context.** Lighthouse (mobile) on the old landing: performance 44, LCP 6.0 s, a console error
+  (`401` from `/api/profile/me` for every guest), 235 KB of symbol font, 77 KB of game audio, the
+  Supabase client (69 KB gz) and socket.io-client (14 KB gz) in every page's first-load JavaScript,
+  and a client `Board` for a static picture.
+- **Decision.**
+  - The hero board is a Server Component with the mockup's own DOM (grid of 64 cells, pieces at 86%).
+  - Root providers load `@supabase/supabase-js` lazily (`lib/supabase/lazyClient.ts`) and
+    `SocketProvider` imports socket.io-client only when it opens a socket (NX-18).
+  - `ProfileProvider` asks `/api/profile/me` only when the browser holds a session: guests no longer
+    get a 401 (which browsers log as a console error).
+  - `lib/sounds.ts` creates and preloads the clips on the first sound, not at import.
+  - The trail font is Noto Sans Symbols 2 cut to U+265A–265F (2 KB, `next/font/local`, not preloaded;
+    OFL text in `frontend/assets/fonts`). The other fonts stay on `next/font/google`, preloaded, with
+    the metric-matched fallbacks (`size-adjust`, ascent/descent overrides) that keep CLS at 0.
+  - `HoverTrail` builds no cells on touch-only devices (`(hover: hover) and (pointer: fine)`).
+  - On `/` a guest does not listen to the presence channel (F-104's guest presence): the guest
+    header shows no count, and the realtime socket otherwise logs browser errors when the page is
+    left mid-handshake (WebKit) or its CDN cookie is refused (Firefox). Signed-in viewers still join.
+- **Measured.** First-load JS of `/`: framework + 21 KB of app code (+1 KB page); the bundle analyzer
+  (F-116) shows no Supabase, socket.io or audio. Lighthouse results are in the landing report.
+- **Limit.** Lighthouse's default *simulated* throttling (Lantern) counts every async script that
+  starts before the observed LCP; with Next.js's own runtime alone (all app code removed) it estimates
+  LCP 2.8 s on `next start` (HTTP/1.1, gzip). Under applied throttling of the same mobile profile the
+  real LCP is 1.7–1.8 s. CI asserts LCP < 2.0 s under applied throttling and warns under simulation.
+- **Rejected.** `experimental.inlineCss` (no measurable gain, and it changes every route);
+  re-subsetting the Google fonts (16 KB saved app-wide, glyph coverage at risk).

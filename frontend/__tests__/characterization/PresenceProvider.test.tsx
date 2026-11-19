@@ -25,6 +25,9 @@ const supabase = {
 }
 jest.mock('@/lib/supabase/client', () => ({ createClient: () => supabase }))
 
+let pathname = '/lobby'
+jest.mock('next/navigation', () => ({ usePathname: () => pathname }))
+
 let profile: any = null
 let loading = false
 jest.mock('@/components/ProfileProvider', () => ({ useProfile: () => ({ profile, loading }) }))
@@ -54,6 +57,7 @@ describe('PresenceProvider', () => {
         profile = null
         render(<PresenceProvider><Count /></PresenceProvider>)
         expect(screen.getByTestId('count')).toHaveTextContent('0')
+        await flush() // the Supabase client loads lazily (F-111)
         await act(async () => { await subscribeCb!('SUBSCRIBED') })
         expect(channelOps).toEqual([
             ['channel', 'gambit-online-users', undefined],
@@ -73,8 +77,11 @@ describe('PresenceProvider', () => {
         loading = true
         const { rerender, unmount } = render(<PresenceProvider><Count /></PresenceProvider>)
         expect(supabase.channel).not.toHaveBeenCalled()
+        await flush()
+        expect(supabase.channel).not.toHaveBeenCalled()
         loading = false
         rerender(<PresenceProvider><Count /></PresenceProvider>)
+        await flush()
         expect(supabase.channel).toHaveBeenCalledTimes(1)
         unmount()
         await flush()
@@ -85,6 +92,7 @@ describe('PresenceProvider', () => {
     test('joins the presence channel, tracks on SUBSCRIBED and counts keys (min 1)', async () => {
         profile = { id: 'u1', username: '' }
         render(<PresenceProvider><Count /></PresenceProvider>)
+        await flush() // the Supabase client loads lazily (F-111)
         await act(async () => { await subscribeCb!('CHANNEL_ERROR') })
         await act(async () => { await subscribeCb!('SUBSCRIBED') })
         expect(channelOps).toEqual([
@@ -106,6 +114,7 @@ describe('PresenceProvider', () => {
     test('re-subscribes only when the profile id changes; cleanup untracks then removes', async () => {
         profile = { id: 'u1', username: 'alice' }
         const { rerender, unmount } = render(<PresenceProvider><Count /></PresenceProvider>)
+        await flush()
         profile = { id: 'u1', username: 'renamed' }
         rerender(<PresenceProvider><Count /></PresenceProvider>)
         expect(supabase.channel).toHaveBeenCalledTimes(1)
@@ -122,11 +131,34 @@ describe('PresenceProvider', () => {
     test('updates after unmount are ignored', async () => {
         profile = { id: 'u1', username: 'alice' }
         const { unmount } = render(<PresenceProvider><Count /></PresenceProvider>)
+        await flush()
         unmount()
         await act(async () => { await subscribeCb!('SUBSCRIBED') })
         expect(channel.track).not.toHaveBeenCalled()
         presence = { a: [], b: [] }
         expect(() => presenceHandlers.sync()).not.toThrow()
     })
-})
 
+    test('[F-111] unmounted before the lazily loaded client arrives: no channel is ever opened', async () => {
+        profile = { id: 'u1', username: 'alice' }
+        const { unmount } = render(<PresenceProvider><Count /></PresenceProvider>)
+        unmount()
+        await flush()
+        expect(supabase.channel).not.toHaveBeenCalled()
+    })
+
+    test('[F-111] on the landing a guest opens no realtime socket; a signed-in viewer still joins', async () => {
+        pathname = '/'
+        profile = null
+        loading = false
+        const view = render(<PresenceProvider><Count /></PresenceProvider>)
+        await flush()
+        expect(supabase.channel).not.toHaveBeenCalled()
+        profile = { id: 'u1', username: 'alice' }
+        view.rerender(<PresenceProvider><Count /></PresenceProvider>)
+        await flush()
+        expect(supabase.channel).toHaveBeenCalledTimes(1)
+        expect(supabase.channel.mock.calls[0][1]).toEqual({ config: { presence: { key: 'u1' } } })
+        pathname = '/lobby'
+    })
+})

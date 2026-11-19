@@ -30,6 +30,11 @@ jest.mock('@/lib/socket/connection', () => ({
 
 import SocketProvider, { useSocket } from '@/components/SocketProvider'
 
+/** socket.io-client and the Supabase client load lazily (F-111): let those imports settle. */
+const settle = async () => {
+    for (let i = 0; i < 6; i++) await act(async () => {})
+}
+
 function Probe() {
     const socket = useSocket() as { id: string } | null
     return <div data-testid="probe">{socket ? socket.id : 'none'}</div>
@@ -50,8 +55,9 @@ beforeEach(() => {
     unsubscribe.mockClear()
 })
 
-test('signed out: no socket is created', () => {
+test('signed out: no socket is created', async () => {
     render(tree())
+    await settle()
     expect(created).toEqual([])
     expect(screen.getByTestId('probe')).toHaveTextContent('none')
 })
@@ -60,6 +66,7 @@ test('signed in: one socket whose token comes from the current Supabase session'
     profile = { id: 'me' }
     getSession.mockResolvedValue({ data: { session: { access_token: 'session-token' } } })
     render(tree())
+    await settle()
     expect(created).toHaveLength(1)
     expect(screen.getByTestId('probe')).toHaveTextContent('socket-1')
     expect(await created[0].getToken()).toBe('session-token')
@@ -69,63 +76,82 @@ test('no session → the token getter yields null', async () => {
     profile = { id: 'me' }
     getSession.mockResolvedValue({ data: { session: null } })
     render(tree())
+    await settle()
     expect(await created[0].getToken()).toBeNull()
 })
 
-test('a profile that briefly goes missing mid-session does NOT drop the socket (review finding 8)', () => {
+test('a profile that briefly goes missing mid-session does NOT drop the socket (review finding 8)', async () => {
     // ProfileProvider sets profile to null whenever GET /api/profile/me fails, and it refetches on
     // every token refresh. Closing the socket then would start the opponent's 20 s abandonment
     // countdown against a player who is still signed in.
     profile = { id: 'me' }
     const view = render(tree())
+    await settle()
     profile = null
     act(() => view.rerender(tree()))
+    await settle()
     expect(created).toHaveLength(1)
     expect(created[0].close).not.toHaveBeenCalled()
     expect(screen.getByTestId('probe')).toHaveTextContent('socket-1')
 
     profile = { id: 'me' }
     act(() => view.rerender(tree()))
+    await settle()
     expect(created).toHaveLength(1)
 })
 
-test('sign-out closes the socket; signing in as someone else opens a new one', () => {
+test('sign-out closes the socket; signing in as someone else opens a new one', async () => {
     profile = { id: 'me' }
     const view = render(tree())
+    await settle()
     act(() => authListener?.('SIGNED_OUT'))
     profile = null
     act(() => view.rerender(tree()))
+    await settle()
     expect(created[0].close).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('probe')).toHaveTextContent('none')
 
     profile = { id: 'other' }
     act(() => view.rerender(tree()))
+    await settle()
     expect(created).toHaveLength(2)
     expect(screen.getByTestId('probe')).toHaveTextContent('socket-2')
 })
 
-test.each(['/login', '/signup', '/reset-password'])('no socket on %s even when signed in', (path) => {
+test.each(['/login', '/signup', '/reset-password'])('no socket on %s even when signed in', async (path) => {
     pathname = path
     profile = { id: 'me' }
     render(tree())
+    await settle()
     expect(created).toEqual([])
 })
 
-test('switching account without an explicit sign-out replaces the socket', () => {
+test('switching account without an explicit sign-out replaces the socket', async () => {
     profile = { id: 'me' }
     const view = render(tree())
+    await settle()
     profile = { id: 'other' }
     act(() => view.rerender(tree()))
+    await settle()
     expect(created[0].close).toHaveBeenCalledTimes(1)
     expect(created).toHaveLength(2)
 })
 
-test('other auth events (token refresh) leave the socket alone; the listener is removed on unmount', () => {
+test('other auth events (token refresh) leave the socket alone; the listener is removed on unmount', async () => {
     profile = { id: 'me' }
     const view = render(tree())
+    await settle()
     act(() => authListener?.('TOKEN_REFRESHED'))
     expect(created[0].close).not.toHaveBeenCalled()
     view.unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
     expect(created[0].close).toHaveBeenCalledTimes(1)
+})
+
+test('[F-111] a provider unmounted before socket.io-client has loaded never opens a socket', async () => {
+    profile = { id: 'me' }
+    const view = render(tree())
+    view.unmount()
+    await settle()
+    expect(created).toEqual([])
 })

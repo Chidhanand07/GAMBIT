@@ -1,6 +1,7 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono, Noto_Sans_Symbols_2, Space_Grotesk } from 'next/font/google'
+import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google'
+import localFont from 'next/font/local'
 import SocketProvider from '@/components/SocketProvider'
 import ProfileProvider from '@/components/ProfileProvider'
 import PresenceProvider from '@/components/PresenceProvider'
@@ -33,11 +34,16 @@ const jetbrainsMono = JetBrains_Mono({
     variable: '--font-jetbrains-mono',
 })
 
-/** Unicode chess glyphs (hover trail, splash): U+265A–265F live in the `symbols` subset. */
-const notoSymbols2 = Noto_Sans_Symbols_2({
-    subsets: ['symbols'],
+/**
+ * Unicode chess glyphs of the hover trail: Noto Sans Symbols 2 cut down to U+265A–265F (2 KB
+ * instead of Google's 235 KB `symbols` subset; assets/fonts, OFL). Shown only under a pointer, so
+ * it is not preloaded and never competes with the landing's first paint (F-111).
+ */
+const notoSymbols2 = localFont({
+    src: '../assets/fonts/NotoSansSymbols2-chess.woff2',
     weight: '400',
     display: 'swap',
+    preload: false,
     variable: '--font-noto-symbols-2',
 })
 
