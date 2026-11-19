@@ -126,6 +126,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-106](#f-106) | Accessibility at parity: focus ring, reduced motion, AA contrast fixes, notifications panel as a dialog, axe tests | v2 | A4 |
 | [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
 | [F-111](#f-111) | Landing performance: lazy Supabase/socket.io, no guest 401, lazy audio, 2 KB symbol font, no trail on touch | v2 | C |
+| [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
 
@@ -2675,3 +2676,24 @@ the Dependabot part of F-057).**
   real LCP is 1.7–1.8 s. CI asserts LCP < 2.0 s under applied throttling and warns under simulation.
 - **Rejected.** `experimental.inlineCss` (no measurable gain, and it changes every route);
   re-subsetting the Google fonts (16 KB saved app-wide, glyph coverage at risk).
+
+## F-112
+
+**The landing resolves its viewer on the server and renders its own seeded header.**
+
+- **Context.** The header lives in the root layout and learns the session on the client: the first
+  paint shows a placeholder, then the guest buttons or the account cluster. On a phone the signed-in
+  cluster wraps to a second row, so the whole page moved down by 54 px after hydration (CLS), and the
+  hero could not know which buttons to show.
+- **Decision.** `app/page.tsx` calls `getViewer()` (`lib/server/viewer.ts`): verified claims
+  (`getVerifiedUserId`, NX-07/NX-10), then the viewer's own profile read as that user (RLS and the
+  column grants apply, NX-08), mapped to an allow-listed `ViewerProfile` DTO (NX-04). The result is
+  `guest`, `signed-in` or `unknown` (verified but unreadable). `hidesAppHeader('/')` is true; the page
+  renders `SeededAppHeader`, the same connected header seeded with that viewer until
+  `ProfileProvider` has loaded (`unknown` keeps the placeholder). `/` is therefore rendered per
+  request (it reads cookies) and is never cached (NX-11).
+- **Cost.** A guest request does no network work (no cookie, no claims); a signed-in one adds one
+  profile query to the TTFB.
+- **Trade-off.** The landing's header is rendered inside the layout's `<main>`, so it is not a
+  `banner` landmark there (and the footer is not `contentinfo`); the navigation keeps its "Main"
+  label. Rejected: reading cookies in the root layout (would make every route dynamic).

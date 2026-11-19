@@ -1,6 +1,7 @@
 // Copy and links of the landing page (design/Home.dc.html).
 import type { IconName } from '@/components/ui/Icon';
 import { TIME_CONTROL_PRESETS } from '@/lib/chess/timeControl';
+import type { Viewer } from '@/types/viewer';
 
 export interface LandingFeature {
     icon: IconName;
@@ -49,14 +50,38 @@ export interface HeroStat {
     label: string;
 }
 
-/** Hero claims: only the time-control count is a number, and it is read from the real presets. */
+/**
+ * Hero claims (F-110): each is literally true. No game cap exists, the count is read from the real
+ * presets, and nothing in the app is paid.
+ */
 export const HERO_STATS: readonly HeroStat[] = [
     { value: '∞', label: 'games available' },
     { value: String(TIME_CONTROL_COUNT), label: 'time controls' },
     { value: 'Free', label: 'always' },
 ];
 
+export interface HeroCta {
+    label: string;
+    href: string;
+}
+
 export const LANDING_ROUTES = { play: '/lobby', signUp: '/signup' } as const;
+
+/**
+ * The hero buttons for this viewer (F-110). Play always goes to the lobby (the proxy sends a guest
+ * to sign in first). The second button signs a guest up; a signed-in player gets "My Profile"
+ * instead, and a viewer whose profile could not be read gets no second button.
+ */
+export function heroCtas(viewer: Viewer): { primary: HeroCta; secondary: HeroCta | null } {
+    const primary = { label: 'Play Now', href: LANDING_ROUTES.play };
+    if (viewer.status === 'guest')
+        return { primary, secondary: { label: 'Create Account', href: LANDING_ROUTES.signUp } };
+    if (viewer.status === 'unknown') return { primary, secondary: null };
+    return {
+        primary,
+        secondary: { label: 'My Profile', href: `/profile/${encodeURIComponent(viewer.profile.username)}` },
+    };
+}
 
 export const FOOTER_LINKS: readonly { label: string; href: string }[] = [
     { label: 'Play', href: '/lobby' },

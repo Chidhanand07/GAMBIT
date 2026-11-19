@@ -5,11 +5,12 @@ import { AppHeader } from '@/components/layout/AppHeader';
 import type { HeaderNotifications, HeaderSession } from '@/components/layout/headerTypes';
 import { useProfile } from '@/components/ProfileProvider';
 import { usePresence } from '@/components/PresenceProvider';
-import { createClient } from '@/lib/supabase/client';
+import { loadBrowserClient } from '@/lib/supabase/lazyClient';
 import { useNotifications, type NotificationError } from '../hooks/useNotifications';
 import { HEADER_ROUTES, hidesAppHeader, navStateFor } from '../navLinks';
 import { toHeaderNotification } from '../notificationView';
 import type { NavProfile } from '../types';
+import type { Viewer } from '@/types/viewer';
 
 const DEFAULT_RAPID_RATING = 1200;
 
@@ -46,21 +47,39 @@ const userView = (profile: NavProfile) => {
 /**
  * Wires the presentational AppHeader to the real data: profile/session (ProfileProvider),
  * online count (PresenceProvider), notifications (API) and sign out. Incoming challenges are
- * ChallengeListener's. Not shown on the live game screen (Game.dc.html has no header).
+ * ChallengeListener's. Not shown on the live game screen (Game.dc.html has no header), nor on
+ * the landing page, which renders a SeededAppHeader itself.
  */
 export default function AppHeaderContainer() {
     const pathname = usePathname();
     return hidesAppHeader(pathname) ? null : <ConnectedAppHeader pathname={pathname} />;
 }
 
-function ConnectedAppHeader({ pathname }: { pathname: string }) {
-    const router = useRouter();
+/**
+ * The header of a page that resolved its viewer on the server (the landing): until
+ * ProfileProvider has loaded, it shows that viewer instead of the loading placeholder, so the
+ * first paint already has the right right-hand cluster and nothing shifts when the client catches up.
+ */
+export function SeededAppHeader({ viewer }: { viewer: Viewer }) {
+    const pathname = usePathname();
+    return <ConnectedAppHeader pathname={pathname} seed={viewer} />;
+}
+
+/** The profile to show: the provider's once it has loaded, else the server's view of the viewer. */
+function useHeaderProfile(seed: Viewer | undefined): { profile: NavProfile | null; loading: boolean } {
     const { profile, loading } = useProfile();
+    if (!loading || !seed || seed.status === 'unknown') return { profile, loading };
+    return { profile: seed.status === 'signed-in' ? seed.profile : null, loading: false };
+}
+
+function ConnectedAppHeader({ pathname, seed }: { pathname: string; seed?: Viewer }) {
+    const router = useRouter();
+    const { profile, loading } = useHeaderProfile(seed);
     const { onlineCount } = usePresence();
     const notifications = useHeaderNotifications(profile?.id);
 
     const signOut = async () => {
-        await createClient().auth.signOut();
+        await (await loadBrowserClient()).auth.signOut();
         router.push('/');
         router.refresh();
     };

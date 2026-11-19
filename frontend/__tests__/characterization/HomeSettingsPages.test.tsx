@@ -28,7 +28,13 @@ jest.mock('@/lib/supabase/client', () => ({
     createClient: () => ({ storage: { from: (bucket: string) => ({ upload: (...a: any[]) => storage.upload(bucket, ...a), getPublicUrl: storage.getPublicUrl }) } }),
 }))
 
-import Home from '@/app/page'
+// F-112: app/page.tsx is an async Server Component that resolves the viewer; the page itself is
+// LandingPage, rendered here for a guest. The seeded header has its own tests (AppHeader.test.tsx).
+jest.mock('@/features/navigation/components/AppHeaderContainer', () => ({
+    SeededAppHeader: ({ viewer }: any) => <header data-testid="seeded-header" data-viewer={viewer.status} />,
+}))
+import { LandingPage } from '@/features/landing/components/LandingPage'
+const Home = () => <LandingPage viewer={{ status: 'guest' }} />
 import SettingsPage from '@/app/settings/page'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
 
@@ -54,6 +60,7 @@ describe('landing page', () => {
         expect(screen.getAllByRole('heading', { level: 3 }).map(h => h.textContent)).toEqual([
             'Bullet Games', 'Accuracy Rating', 'Play Friends', 'Leaderboards', 'Full Rules', 'Play Anywhere',
         ])
+        expect(screen.getByTestId('seeded-header')).toHaveAttribute('data-viewer', 'guest')
         const footerLinks = [...document.querySelectorAll('footer a')].map(a => [a.textContent, a.getAttribute('href')])
         expect(footerLinks).toEqual([['Play', '/lobby'], ['Leaderboard', '/leaderboard'], ['Analysis', '/analysis'], ['Offline', '/offline']])
         expect(screen.getByText('© 2026 Gambit')).toBeInTheDocument()
@@ -62,7 +69,8 @@ describe('landing page', () => {
     test('hover styling of the CTAs and feature cards comes from the mockup classes', () => {
         render(<Home />)
         expect(screen.getByText(/Play Now/).closest('a')).toHaveClass('gb-flat', 'bg-accent')
-        expect(screen.getByText('Create Account').closest('a')).toHaveClass('hover:bg-surface-raised', 'border-line-field')
+        // content-box like the mockup's link: 56px + 1px border each side = 58px
+        expect(screen.getByText('Create Account').closest('a')).toHaveClass('hover:bg-surface-raised', 'border-line-field', 'box-content', 'min-h-[56px]')
         expect(screen.getByText('Bullet Games').parentElement).toHaveClass('fc')
     })
 
@@ -70,6 +78,8 @@ describe('landing page', () => {
         render(<Home />)
         expect(screen.getByText('time controls').previousSibling).toHaveTextContent('6')
         expect(screen.getByText('games available').previousSibling).toHaveTextContent('∞')
+        // ∞ is not in the JetBrains Mono subsets: drawn with the mockup's next fallback (ui-monospace)
+        expect(screen.getByText('∞')).toHaveClass('font-[ui-monospace,monospace]')
         expect(screen.getByText('always').previousSibling).toHaveTextContent('Free')
     })
 
@@ -81,8 +91,17 @@ describe('landing page', () => {
         expect(squareAt(container, 'g4')).toHaveClass('bg-board-light')
         expect(squareAt(container, 'h3')).toHaveClass('bg-board-light')
         expect(squareAt(container, 'h1')).toHaveClass('bg-board-light')
-        expect(container.querySelectorAll('.g-piece-slot')).toHaveLength(31) // white's f-pawn was taken (2... exf4)
+        // F-111: a static Server Component board (no client Board): 31 SVG pieces in the squares.
+        expect(container.querySelectorAll('[data-square] [data-piece]')).toHaveLength(31) // white's f-pawn was taken (2... exf4)
         expect(screen.getByText("King's Gambit · 1. e4 e5 2. f4 exf4 3. Nf3 g5 4. h4")).toBeInTheDocument()
+    })
+
+    test('[F-110] signed in: Play Now goes straight to the lobby and My Profile replaces Create Account', () => {
+        render(<LandingPage viewer={{ status: 'signed-in', profile: { id: 'u1', username: 'alice', display_name: 'Alice', avatar_url: null, rating_rapid: 1500 } }} />)
+        expect(screen.getByText(/Play Now/).closest('a')).toHaveAttribute('href', '/lobby')
+        expect(screen.getByText('My Profile').closest('a')).toHaveAttribute('href', '/profile/alice')
+        expect(screen.queryByText('Create Account')).toBeNull()
+        expect(screen.getByTestId('seeded-header')).toHaveAttribute('data-viewer', 'signed-in')
     })
 })
 

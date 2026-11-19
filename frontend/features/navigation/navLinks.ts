@@ -34,4 +34,9 @@ export function navStateFor(pathname: string): HeaderNav {
 /** The live game screen (`/game/<id>`, not its result page): Game.dc.html has no app header. */
 const HEADERLESS_PATH = /^\/game\/[^/]+\/?$/;
 
-export const hidesAppHeader = (pathname: string) => HEADERLESS_PATH.test(pathname);
+/** The landing renders its own header, seeded with the viewer it resolved on the server (F-112). */
+const OWN_HEADER_PATHS = ['/'];
+
+/** True where the root layout must not render the app header. */
+export const hidesAppHeader = (pathname: string) =>
+    HEADERLESS_PATH.test(pathname) || OWN_HEADER_PATHS.includes(pathname);

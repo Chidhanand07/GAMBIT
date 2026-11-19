@@ -34,7 +34,7 @@ jest.mock('@/components/PresenceProvider', () => ({ usePresence: () => ({ online
 const toast = jest.fn()
 jest.mock('@/components/Toast', () => ({ useToast: () => ({ toast }) }))
 
-import AppHeaderContainer from '@/features/navigation/components/AppHeaderContainer'
+import AppHeaderContainer, { SeededAppHeader } from '@/features/navigation/components/AppHeaderContainer'
 import ChallengeListener from '@/features/navigation/components/ChallengeListener'
 
 /** What the root layout mounts: the header and, beside it, the challenge listener [REDESIGN-GAME]. */
@@ -115,9 +115,42 @@ describe('layout and auth states', () => {
         expect(mainNav()).toHaveClass('gidle')
         expect(within(mainNav()).queryByRole('link', { current: 'page' })).toBeNull()
         unmount()
+        // F-112: on the landing the layout header steps aside and the page renders a seeded one.
         pathname = '/'
-        render(<AppHeader />)
+        render(<SeededAppHeader viewer={{ status: 'guest' }} />)
         expect(mainNav()).toHaveClass('gnone')
+    })
+
+    test('[F-112] the layout header renders nothing on the landing page', () => {
+        pathname = '/'
+        const { container } = render(<AppHeaderContainer />)
+        expect(container).toBeEmptyDOMElement()
+    })
+
+    test('[F-112] seeded header: while the profile loads it shows the server-resolved viewer, never the placeholder', () => {
+        pathname = '/'
+        loading = true
+        profile = null
+        const { unmount } = render(<SeededAppHeader viewer={{ status: 'guest' }} />)
+        expect(screen.queryByRole('status', { name: 'Loading account' })).toBeNull()
+        expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login')
+        unmount()
+        render(<SeededAppHeader viewer={{ status: 'signed-in', profile: ME }} />)
+        expect(screen.getByRole('button', { name: 'Account menu, Me Display' })).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
+    })
+
+    test('[F-112] seeded header: an unknown viewer falls back to the placeholder; a loaded profile wins over the seed', () => {
+        pathname = '/'
+        loading = true
+        profile = null
+        const { unmount } = render(<SeededAppHeader viewer={{ status: 'unknown' }} />)
+        expect(screen.getByRole('status', { name: 'Loading account' })).toBeInTheDocument()
+        unmount()
+        loading = false
+        profile = ME
+        render(<SeededAppHeader viewer={{ status: 'guest' }} />)
+        expect(screen.getByRole('button', { name: 'Account menu, Me Display' })).toBeInTheDocument()
     })
 
     test('loading shows a placeholder and no auth controls', () => {

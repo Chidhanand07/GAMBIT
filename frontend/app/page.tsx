@@ -1,22 +1,7 @@
-import IntroSplash from '@/components/effects/IntroSplash';
-import { FeatureGrid } from '@/features/landing/components/FeatureGrid';
-import { HeroBoard } from '@/features/landing/components/HeroBoard';
-import { HomeFooter } from '@/features/landing/components/HomeFooter';
-import { HomeHero } from '@/features/landing/components/HomeHero';
+import { LandingPage } from '@/features/landing/components/LandingPage';
+import { getViewer } from '@/lib/server/viewer';
 
-/** The landing page (design/Home.dc.html); the header comes from the root layout. */
-export default function Home() {
-    return (
-        <>
-            <IntroSplash />
-            <div
-                id="top"
-                className="mx-auto box-border flex max-w-[1280px] flex-col gap-24 px-8 pb-8 pt-16"
-            >
-                <HomeHero board={<HeroBoard />} />
-                <FeatureGrid />
-            </div>
-            <HomeFooter />
-        </>
-    );
+/** The landing page (design/Home.dc.html, F-110). Rendered per request: it depends on the viewer (F-112). */
+export default async function Home() {
+    return <LandingPage viewer={await getViewer()} />;
 }
