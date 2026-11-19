@@ -28,6 +28,7 @@ import * as sounds from '@/lib/sounds'
 import ComputerPage from '@/app/offline/page'
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
+import { settingsStore } from '../helpers/settingsStore'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'
@@ -77,7 +78,7 @@ function start(opts: { difficulty?: string; color?: string } = {}) {
 function startWithSettings(changes: Partial<UserSettings>) {
     const stored = { ...DEFAULT_SETTINGS, ...changes }
     const utils = render(
-        <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+        <SettingsProvider store={settingsStore(stored)}>
             <ComputerPage />
         </SettingsProvider>,
     )

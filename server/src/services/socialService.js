@@ -78,9 +78,16 @@ const STRATEGIES = {
 };
 
 /**
+ * @typedef {object} PreferencesPort what the target allows (ADR F-140)
+ * @property {(fromId: string, toId: string) => Promise<string | null>} challengeRefusal
+ * @property {(n: { userId: string, column: 'notify_challenges', type: string, payload: object }) => Promise<boolean>} notify
+ */
+
+/**
  * @typedef {object} SocialDeps
  * @property {PrivateGamesPort} privateGames
  * @property {{ insert: (row: object) => PromiseLike<unknown> }} notificationsRepo
+ * @property {PreferencesPort} preferences
  * @property {PendingRequestsPort} pendingRequests
  * @property {Emitter} emitter
  * @property {() => number} random
@@ -156,16 +163,22 @@ async function decline({ pendingRequests, emitter }, kind, answer) {
 }
 
 /**
- * Relay a challenge and persist it as a notification (C6).
+ * Relay a challenge and persist it as a notification (C6). The target's "Who can challenge me"
+ * is checked first; a refused challenge is neither stored nor relayed (fail closed when the
+ * preference cannot be read). The bell notification honours their "Challenges" switch (F-140).
  * @param {SocialDeps} deps
  * @param {RequestPayload} data
  * @returns {Promise<Outcome>}
  */
 async function requestChallenge(deps, data) {
+    if (data.from_user_id === data.to_user_id) return INVALID_TARGET;
+    const refusal = await deps.preferences.challengeRefusal(data.from_user_id, data.to_user_id);
+    if (refusal) return { ok: false, error: refusal };
     const outcome = await request(deps, 'challenge', data);
     if (!outcome.ok) return outcome;
-    await insertNotification(deps, {
+    await deps.preferences.notify({
         userId: data.to_user_id,
+        column: 'notify_challenges',
         type: 'challenge',
         payload: {
             from_user_id: data.from_user_id,

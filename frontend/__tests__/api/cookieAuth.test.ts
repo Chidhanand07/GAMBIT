@@ -169,7 +169,8 @@ describe('verified caller', () => {
         const denied = await requireUser()
         expect(denied.ok === false && denied.response.status).toBe(401)
         signInWithCookie(ME)
-        expect(await requireUser()).toEqual({ ok: true, userId: ME })
+        // F-144 (was toEqual({ ok: true, userId: ME })): the verified session rides along.
+        expect(await requireUser()).toMatchObject({ ok: true, userId: ME, session: { userId: ME } })
     })
 })
 

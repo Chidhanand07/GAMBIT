@@ -41,6 +41,7 @@ const PERSIST_BACKOFF_MS = Object.freeze([200, 800]);
  *   where a row that cannot be written goes (without it, the failure is only logged)
  * @property {() => number} [now]
  * @property {(ms: number) => Promise<unknown>} [sleep] waits between database retries (injected in tests)
+ * @property {import('./gameResultEffects').EffectDeps['preferences']} [preferences] result notifications (F-140)
  */
 
 /**
@@ -156,6 +157,7 @@ function createGameFinalizer({
     sessions,
     emitter,
     resultOutbox,
+    preferences,
     now = () => Date.now(),
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
@@ -173,7 +175,7 @@ function createGameFinalizer({
         if (!write.written) return queueForRedrive({ resultOutbox, now }, job, row, write.error);
         // Already finalized by someone else: they reviewed and rated it.
         if (!write.updated) return;
-        await applyResultEffects({ ratingService, reviewService, emitter }, job, { review: true });
+        await applyResultEffects({ ratingService, reviewService, emitter, preferences }, job, { review: true });
     }
 
     /**

@@ -76,3 +76,39 @@ describe('getVerifiedUserId({ fresh: true }) [IDENTITY-PERF]', () => {
         expect(db.auth.getUser).not.toHaveBeenCalled()
     })
 })
+
+describe('requireFreshUser and two-factor (ADR F-144)', () => {
+    const { requireFreshUser, requireUser } = identity
+    const factor = { id: 'f1', factor_type: 'totp', status: 'verified' }
+
+    function session(aal: string, factors: object[]) {
+        db.auth.getClaims.mockResolvedValue({ data: { claims: { sub: 'u1', aal, amr: [{ method: 'password', timestamp: 1 }] } }, error: null })
+        db.auth.getUser.mockResolvedValue({ data: { user: { id: 'u1', factors } }, error: null } as never)
+    }
+
+    test('two-factor on and an AAL1 session (password only) → 403 mfa_required', async () => {
+        session('aal1', [factor])
+        const res = await requireFreshUser()
+        expect(res.ok).toBe(false)
+        if (!res.ok) {
+            expect(res.response.status).toBe(403)
+            expect(await res.response.json()).toEqual({ error: 'mfa_required' })
+        }
+    })
+
+    test('two-factor on and an AAL2 session → allowed, with the session details', async () => {
+        session('aal2', [factor])
+        expect(await requireFreshUser()).toMatchObject({ ok: true, userId: 'u1', session: { aal: 'aal2', amr: [{ method: 'password', timestamp: 1 }] } })
+    })
+
+    test('two-factor off (no or unverified factors) → AAL1 is enough', async () => {
+        session('aal1', [{ ...factor, status: 'unverified' }])
+        expect((await requireFreshUser()).ok).toBe(true)
+    })
+
+    test('requireUser (claims only) is unchanged: it does not look at factors', async () => {
+        session('aal1', [factor])
+        expect((await requireUser()).ok).toBe(true)
+        expect(db.auth.getUser).not.toHaveBeenCalled()
+    })
+})

@@ -13,6 +13,7 @@ const { activeRemainingMs, clocksAfterMove } = require('../domain/clock');
 const { playMove } = require('../domain/chessRules');
 const { moveRejection, sideToMove, REJECTION } = require('../domain/moveAuthorization');
 const { sideToColor } = require('../domain/result');
+const { isDailyTimeControl } = require('../domain/preferences');
 const { gameRoom } = require('./emitter');
 const { log } = require('../observability/log');
 
@@ -81,9 +82,28 @@ function moveMadePayload(request, played, state) {
 }
 
 /**
- * @param {Pick<import('./gameService').GameServiceDeps, 'gameStore' | 'gamesRepo' | 'movesRepo' | 'emitter' | 'now'>} deps
+ * "Your turn (daily games)" (ADR F-140): after a move in a daily game, a bell notification for
+ * the player to move, if their switch is on. Fire-and-forget; the preferences port never throws.
+ * @param {import('./gameService').PreferencesPort | undefined} preferences
+ * @param {string} gameId
+ * @param {any} state state after the move
  */
-function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = () => Date.now() }) {
+function remindPlayerToMove(preferences, gameId, state) {
+    if (!preferences || !isDailyTimeControl(state.timeControl)) return;
+    const userId = state.activeSide === 'w' ? state.whiteId : state.blackId;
+    if (!userId) return;
+    void preferences.notify({
+        userId,
+        column: 'notify_your_turn',
+        type: 'your_turn',
+        payload: { message: 'Your move', game_id: gameId, time_control: state.timeControl },
+    });
+}
+
+/**
+ * @param {Pick<import('./gameService').GameServiceDeps, 'gameStore' | 'gamesRepo' | 'movesRepo' | 'emitter' | 'now' | 'preferences'>} deps
+ */
+function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, preferences, now = () => Date.now() }) {
     /**
      * Fire-and-forget: update the games row (position and both clocks, in the
      * canonical clock columns, so the row alone can restore the game: G2) and
@@ -151,6 +171,7 @@ function createMoveRecorder({ gameStore, gamesRepo, movesRepo, emitter, now = ()
                 moveMadePayload(request, result.played, result.state),
             );
             persist(request.game_id, result.state, result.played);
+            remindPlayerToMove(preferences, request.game_id, result.state);
         }
         return result;
     }

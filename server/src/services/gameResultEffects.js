@@ -23,7 +23,43 @@ const DEFAULT_TIME_CONTROL = '10';
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {import('./emitter').Emitter} emitter
+ * @property {{ notify: (n: { userId: string, column: 'notify_game_results', type: string, payload: object }) =>
+ *   Promise<boolean> }} [preferences] "Game results" bell notifications (ADR F-140)
  */
+
+/** The bell title for one side of a finished game. */
+const TITLES = Object.freeze({ win: 'You won', loss: 'You lost', draw: 'Draw' });
+
+/**
+ * One "game_result" notification per player, each honouring that player's switch.
+ * @param {NonNullable<EffectDeps['preferences']>} preferences
+ * @param {ResultJob} job
+ * @param {{ white?: { change: number }, black?: { change: number } } | null} changes
+ */
+async function notifyResult(preferences, job, changes) {
+    const sides = /** @type {const} */ ([
+        ['white', job.whiteId],
+        ['black', job.blackId],
+    ]);
+    await Promise.all(
+        sides.map(([color, userId]) => {
+            const result = job.outcome === 'draw' ? 'draw' : job.outcome === color ? 'win' : 'loss';
+            const change = changes?.[color]?.change;
+            return preferences.notify({
+                userId,
+                column: 'notify_game_results',
+                type: 'game_result',
+                payload: {
+                    message: TITLES[result],
+                    result,
+                    game_id: job.gameId,
+                    time_control: job.timeControl,
+                    ...(typeof change === 'number' ? { rating_change: change } : {}),
+                },
+            });
+        }),
+    );
+}
 
 /**
  * The job for `game` (server state after the transition).
@@ -52,13 +88,15 @@ function resultJob(gameId, game, outcome) {
  * @param {ResultJob} job
  * @param {{ review: boolean }} options
  */
-async function applyResultEffects({ ratingService, reviewService, emitter }, job, { review }) {
+async function applyResultEffects({ ratingService, reviewService, emitter, preferences }, job, { review }) {
     if (job.outcome === 'aborted') return;
     // Full Game Review in the engine (depth-18 Stockfish per move); fire-and-forget.
     if (review) reviewService.triggerGameReview(job.gameId, job.moveLog, job.timeControl);
     const { gameId, whiteId, blackId, outcome, timeControl, isRated } = job;
     const changes = await ratingService.processGameEnd(gameId, whiteId, blackId, outcome, timeControl, isRated);
     if (changes) emitter.toRoom(gameRoom(gameId), 'rating_updated', changes);
+    // Once per game: only the call whose write finished the row (the same rule as the review).
+    if (review && preferences) await notifyResult(preferences, job, changes);
 }
 
 module.exports = { resultJob, applyResultEffects };

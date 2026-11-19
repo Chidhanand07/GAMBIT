@@ -10,8 +10,9 @@ const { wrap } = require('../wrap');
 /**
  * @typedef {import('../../services/emitter').ClientPort} ClientPort
  * @typedef {object} GameHandlerService
- * @property {(gameId: string, client: ClientPort, userId: string) => Promise<void>} joinGame
- * @property {(gameId: string, client: ClientPort, userId: string) => Promise<void>} spectate
+ * @property {(gameId: string, client: ClientPort, userId: string) => Promise<unknown>} joinGame
+ *   may answer `{ ok: false, error: 'spectating_off' }` (ADR F-140)
+ * @property {(gameId: string, client: ClientPort, userId: string) => Promise<unknown>} spectate
  * @property {(data: any, userId: string, client: ClientPort) => Promise<unknown>} makeMove
  * @property {(data: any, userId: string) => Promise<unknown>} resign
  */

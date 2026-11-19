@@ -4,6 +4,7 @@
  * and use the stored terms [S4] (NODE-10, NODE-11).
  */
 const { createSocialService } = require('../../src/services/socialService');
+const { createPreferencesService } = require('../../src/services/preferencesService');
 const { fakeEmitter, result } = require('./fakes');
 
 /** Map-backed PendingRequests port keyed like the Redis repository. */
@@ -31,14 +32,19 @@ function setup(random = 0.9) {
     };
     const notificationsRepo = { insert: jest.fn(() => result()) };
     const pendingRequests = fakePending();
+    // F-140: the real preferences service over fake tables (no rows = the defaults).
+    const preferencesRepo = { findByUserIds: jest.fn(async () => result([])) };
+    const friendshipsRepo = { findAcceptedBetween: jest.fn(async () => result([])) };
+    const preferences = createPreferencesService({ preferencesRepo, friendshipsRepo, notificationsRepo });
     const svc = createSocialService({
         privateGames,
         notificationsRepo,
         pendingRequests,
         emitter,
+        preferences,
         random: () => random,
     });
-    return { svc, emitter, privateGames, notificationsRepo, pendingRequests };
+    return { svc, emitter, privateGames, notificationsRepo, pendingRequests, preferencesRepo, friendshipsRepo };
 }
 
 const request = { from_user_id: 'a', to_user_id: 'b', time_control: '5', is_rated: true, from_username: 'ay' };

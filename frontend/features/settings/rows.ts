@@ -1,9 +1,10 @@
 // The rows of the "Board & pieces" and "Gameplay" cards (design/Settings.dc.html), as data.
+import { PIECE_SET_LABELS, PIECE_SETS, type PieceSet } from '@/components/chess/pieceSets';
 import { SPEED_BUCKET_LABELS } from '@/lib/chess/timeControl';
 import type { BooleanSetting, UserSettings } from './model';
 import { BOARD_THEMES, PIECE_ANIMATIONS, TIME_CONTROLS } from './model';
 
-export type ChoiceSetting = 'boardTheme' | 'pieceAnimation' | 'defaultTimeControl';
+export type ChoiceSetting = 'boardTheme' | 'pieceSet' | 'pieceAnimation' | 'defaultTimeControl';
 
 export type SettingRowDef =
     | { kind: 'switch'; key: BooleanSetting; label: string; hint: string }
@@ -20,6 +21,13 @@ export const BOARD_ROWS: SettingRowDef[] = [
         label: 'Board theme',
         hint: 'Colours of the squares.',
         options: options(BOARD_THEMES),
+    },
+    {
+        kind: 'choice',
+        key: 'pieceSet',
+        label: 'Piece set',
+        hint: 'Style of the pieces on the board.',
+        options: options(PIECE_SETS, (id) => PIECE_SET_LABELS[id as PieceSet]),
     },
     {
         kind: 'switch',

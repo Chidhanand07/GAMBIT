@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findExistingFriendship, insertFriendRequest } from '@/lib/server/friendships';
 import { requireUser } from '@/lib/server/identity';
+import { notifyFriendRequest } from '@/lib/server/notifications';
 import { findProfileIdByUsername } from '@/lib/server/profiles';
 import { enforceRateLimit, RATE_LIMITS } from '@/lib/server/rateLimit';
 import { createAdminClient } from '@/lib/server/supabase';
@@ -45,5 +46,6 @@ export async function POST(req: NextRequest) {
     const { error } = await insertFriendRequest(admin, meId, them.id);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await notifyFriendRequest(admin, meId, them.id);
     return NextResponse.json({ success: true });
 }

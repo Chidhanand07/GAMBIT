@@ -1,14 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/components/SocketProvider';
 import { useToast } from '@/components/Toast';
+import { useUserSettings } from '@/features/settings/SettingsProvider';
+import { showBackgroundNotification } from '@/lib/browserNotifications';
 import { emitWithAck, rejectionMessage } from '@/lib/socket/ack';
 import type { ChallengeRequestPayload, GameIdPayload } from '@/types/socket';
 import type { NavProfile } from '../types';
 
 const CHALLENGE_DISMISS_MS = 30_000;
+
+/**
+ * "Browser notifications" (ADR F-140): a desktop alert for a challenge while Gambit is in the
+ * background, when both that switch and "Challenges" are on (and the browser allows it).
+ */
+function useBackgroundAlert() {
+    const { notifications } = useUserSettings().account;
+    const enabled = useRef(false);
+    useEffect(() => {
+        enabled.current = notifications.browser && notifications.challenges;
+    });
+    // Stable: reads the switches through the ref, so the socket subscription never re-runs for it.
+    return useCallback((data: ChallengeRequestPayload) => {
+        if (enabled.current) showBackgroundNotification(`${data.from_username ?? 'A player'} challenged you`, 'Gambit');
+    }, []);
+}
 
 /**
  * Incoming challenge toast via socket (challenge_request / _declined / _ready),
@@ -21,6 +39,7 @@ export function useChallengeBanner(profile: NavProfile | null) {
     const { toast } = useToast();
     const toldWhenRefused = { onRejected: (code: string) => toast(rejectionMessage(code), 'error') };
     const [challengeBanner, setChallengeBanner] = useState<ChallengeRequestPayload | null>(null);
+    const alertInBackground = useBackgroundAlert();
     // The subscription re-runs only on [socket, profile], as before; the router is read through a ref.
     const routerRef = useRef(router);
     useEffect(() => {
@@ -35,6 +54,7 @@ export function useChallengeBanner(profile: NavProfile | null) {
         };
         const onChallenge = (data: ChallengeRequestPayload) => {
             setChallengeBanner(data);
+            alertInBackground(data);
             clearTimer();
             dismissTimer = setTimeout(() => setChallengeBanner(null), CHALLENGE_DISMISS_MS);
         };
@@ -56,7 +76,7 @@ export function useChallengeBanner(profile: NavProfile | null) {
             socket.off('challenge_ready', onReady);
             clearTimer();
         };
-    }, [socket, profile]);
+    }, [socket, profile, alertInBackground]);
 
     const accept = () => {
         if (!socket || !challengeBanner || !profile) return;

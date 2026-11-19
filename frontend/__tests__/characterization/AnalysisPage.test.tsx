@@ -17,6 +17,7 @@ import { jsonResponse } from './fakeSocket'
 import AnalysisPage from '@/app/analysis/page'
 import { DEFAULT_SETTINGS } from '@/features/settings/model'
 import { SettingsProvider } from '@/features/settings/SettingsProvider'
+import { settingsStore } from '../helpers/settingsStore'
 
 const ENGINE_URL = 'http://127.0.0.1:3001/api/analysis/engine'
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
@@ -86,7 +87,7 @@ describe('board preferences (Settings)', () => {
     test('coordinates, legal-move dots and the last-move tint follow the settings (the board hard-codes none of them)', () => {
         const stored = { ...DEFAULT_SETTINGS, showCoordinates: false, highlightLegalMoves: false, highlightLastMove: false }
         render(
-            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+            <SettingsProvider store={settingsStore(stored)}>
                 <AnalysisPage />
             </SettingsProvider>,
         )
@@ -184,7 +185,7 @@ describe('moves and navigation', () => {
         // [F-100] coordinates are opt-in now; switched on here so the flipped labels stay checked
         const stored = { ...DEFAULT_SETTINGS, showCoordinates: true }
         render(
-            <SettingsProvider store={{ load: () => stored, save: jest.fn() }}>
+            <SettingsProvider store={settingsStore(stored)}>
                 <AnalysisPage />
             </SettingsProvider>,
         )

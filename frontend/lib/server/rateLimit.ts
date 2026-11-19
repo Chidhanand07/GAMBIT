@@ -36,6 +36,10 @@ export const RATE_LIMITS = {
     signup: { id: 'signup', limit: 5, windowMs: HOUR_MS },
     /** Per verified user: a busy social session, not a spam run. */
     friendRequest: { id: 'friendRequest', limit: 30, windowMs: HOUR_MS },
+    /** Per verified user: each request mails one or two confirmation links (ADR F-143). */
+    changeEmail: { id: 'changeEmail', limit: 5, windowMs: HOUR_MS },
+    /** Per verified user: password guesses against the delete confirmation (ADR F-145). */
+    deleteAccount: { id: 'deleteAccount', limit: 5, windowMs: HOUR_MS },
 } as const satisfies Record<string, RateLimitRule>;
 
 const ALLOWED: LimitResult = { ok: true };
@@ -63,6 +67,36 @@ export async function limit(key: string, rule: RateLimitRule): Promise<LimitResu
     } catch (e: unknown) {
         console.warn(`[rate-limit] store unavailable, allowing the request (${rule.id}):`, (e as Error)?.message);
         return ALLOWED;
+    }
+}
+
+const HTTP_SERVICE_UNAVAILABLE = 503;
+
+/**
+ * For security-sensitive account changes (ADR F-143): like `enforceRateLimit`, but a store that
+ * fails, or no store at all in production, refuses the request with 503 instead of letting it
+ * through (fail closed). Outside production an unconfigured store still allows it (local dev).
+ */
+export async function enforceStrictRateLimit(key: string, rule: RateLimitRule): Promise<NextResponse | null> {
+    const store = rateLimitStore();
+    const unavailable = () =>
+        NextResponse.json({ error: 'rate_limit_unavailable' }, { status: HTTP_SERVICE_UNAVAILABLE });
+    if (!store) {
+        if (process.env.NODE_ENV !== 'production') return null;
+        console.error(`[rate-limit] no store configured: refusing ${rule.id} (fail closed)`);
+        return unavailable();
+    }
+    try {
+        const { count, resetMs } = await store.hit(storeKey(key, rule), rule.windowMs);
+        if (count <= rule.limit) return null;
+        const retryAfter = Math.max(MIN_RETRY_AFTER_SECONDS, Math.ceil(resetMs / SECOND_MS));
+        return NextResponse.json(
+            { error: 'rate_limited' },
+            { status: HTTP_TOO_MANY_REQUESTS, headers: { 'Retry-After': String(retryAfter) } },
+        );
+    } catch (e: unknown) {
+        console.error(`[rate-limit] store unavailable, refusing ${rule.id}:`, (e as Error)?.message);
+        return unavailable();
     }
 }
 

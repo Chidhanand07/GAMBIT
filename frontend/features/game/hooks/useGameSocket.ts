@@ -58,7 +58,7 @@ export function useGameSocket(options: Options): void {
         for (const [event, handler] of handlers) socket.on(event, handler);
         // A socket that is still connecting joins from its `connect` handler instead; emitting
         // here too would be buffered and sent as a second join once it connects.
-        if (socket.connected) joinGameRoom(socket, gameId);
+        if (socket.connected) joinGameRoom(socket, gameId, readLive().router);
         return () => {
             for (const [event, handler] of handlers) socket.off(event, handler);
             dispose();

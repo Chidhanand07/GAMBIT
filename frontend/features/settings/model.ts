@@ -1,12 +1,15 @@
 // The user's play preferences (design/Settings.dc.html "Board & pieces" and "Gameplay"): the
 // shape, defaults and a defensive parse of whatever a SettingsStore hands back.
 import type { BoardTheme } from '@/components/chess/boardStyles';
+import { DEFAULT_PIECE_SET, PIECE_SETS, type PieceSet } from '@/components/chess/pieceSets';
 import type { SpeedBucket } from '@/types/timeControl';
 
 export type PieceAnimation = 'off' | 'fast' | 'smooth';
 
 export interface UserSettings {
     boardTheme: BoardTheme;
+    /** "Piece set": Gambit, Classic or Line art (ADR F-147). */
+    pieceSet: PieceSet;
     showCoordinates: boolean;
     highlightLegalMoves: boolean;
     highlightLastMove: boolean;
@@ -24,6 +27,7 @@ export interface UserSettings {
  */
 export const DEFAULT_SETTINGS: Readonly<UserSettings> = {
     boardTheme: 'maple',
+    pieceSet: DEFAULT_PIECE_SET,
     showCoordinates: false,
     highlightLegalMoves: true,
     highlightLastMove: true,
@@ -64,6 +68,7 @@ export function parseSettings(raw: unknown): UserSettings {
     const out: UserSettings = {
         ...DEFAULT_SETTINGS,
         boardTheme: pick(src.boardTheme, BOARD_THEMES, DEFAULT_SETTINGS.boardTheme),
+        pieceSet: pick(src.pieceSet, PIECE_SETS, DEFAULT_SETTINGS.pieceSet),
         pieceAnimation: pick(src.pieceAnimation, PIECE_ANIMATIONS, DEFAULT_SETTINGS.pieceAnimation),
         defaultTimeControl: pick(src.defaultTimeControl, TIME_CONTROLS, DEFAULT_SETTINGS.defaultTimeControl),
     };

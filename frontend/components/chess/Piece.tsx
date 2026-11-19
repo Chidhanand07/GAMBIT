@@ -1,5 +1,6 @@
 import { memo, type ReactElement } from 'react';
 import type { PieceColor, PieceType } from './boardModel';
+import { usePieceSet, type PieceSet } from './pieceSets';
 
 // The GAMBIT piece set (design/HANDOFF.md §4.4): path data from pieceImg() in Main.dc.html on a
 // 45×45 viewBox. Fills, outlines and detail strokes are the piece-* tokens.
@@ -94,8 +95,63 @@ interface PieceProps {
     className?: string;
 }
 
-/** One chess piece as an inline SVG (decorative: the board names the square's contents). */
-function PieceSvg({ color, type, className }: PieceProps) {
+// The Classic and Line art sets (Settings.dc.html, ADR F-147): the mockup draws them as the
+// Unicode chess glyphs in Noto Sans Symbols 2 (the app's `font-symbols`), filled (♚…) for
+// Classic and outlined (♔…) for Line art, followed by U+FE0E (text, not emoji, presentation).
+const TEXT_PRESENTATION = '\uFE0E';
+const FILLED: Record<PieceType, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const OUTLINED: Record<PieceType, string> = { k: '♔', q: '♕', r: '♖', b: '♗', n: '♘', p: '♙' };
+/**
+ * Glyph size in viewBox units: the mockup's 26px glyph in its 44.75px preview square, while the
+ * board draws a piece at 86% of a square on this 45-unit viewBox (26 / (44.75 × 0.86) × 45).
+ */
+const GLYPH_UNITS = 30.4;
+/** Classic white pieces: the mockup's 1px dark text-shadow outline, as a stroke behind the fill. */
+const CLASSIC_OUTLINE_UNITS = 2.3;
+const CENTER = 22.5;
+
+const GLYPH_INK: Record<Exclude<PieceSet, 'gambit'>, Record<PieceColor, string>> = {
+    classic: { w: 'fill-piece-glyph-white stroke-piece-glyph-black', b: 'fill-piece-glyph-black' },
+    lineart: { w: 'fill-piece-glyph-black', b: 'fill-piece-glyph-neo' },
+};
+
+/** A Classic or Line art piece: one glyph centred on the 45×45 viewBox. */
+function GlyphSvg({ color, type, className, set }: PieceProps & { set: Exclude<PieceSet, 'gambit'> }) {
+    const glyph = (set === 'classic' ? FILLED : OUTLINED)[type] + TEXT_PRESENTATION;
+    const outlined = set === 'classic' && color === 'w';
+    return (
+        <svg
+            viewBox="0 0 45 45"
+            aria-hidden="true"
+            data-piece={`${color}${type}`}
+            data-piece-set={set}
+            className={className}
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <text
+                x={CENTER}
+                y={CENTER}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={GLYPH_UNITS}
+                strokeWidth={outlined ? CLASSIC_OUTLINE_UNITS : undefined}
+                paintOrder={outlined ? 'stroke' : undefined}
+                className={`font-symbols ${GLYPH_INK[set][color]}`}
+            >
+                {glyph}
+            </text>
+        </svg>
+    );
+}
+
+/** One chess piece in the current piece set (decorative: the board names the square's contents). */
+function PieceSvg(props: PieceProps) {
+    const set = usePieceSet();
+    return set === 'gambit' ? <GambitSvg {...props} /> : <GlyphSvg {...props} set={set} />;
+}
+
+/** The GAMBIT set as an inline SVG. */
+function GambitSvg({ color, type, className }: PieceProps) {
     const ink = INK[color];
     // The knight's eye is a filled dot; the bishop and rook details are strokes.
     const detail = type === 'n' ? ink.eye : ink.detail;
@@ -104,6 +160,7 @@ function PieceSvg({ color, type, className }: PieceProps) {
             viewBox="0 0 45 45"
             aria-hidden="true"
             data-piece={`${color}${type}`}
+            data-piece-set="gambit"
             className={className}
             xmlns="http://www.w3.org/2000/svg"
         >

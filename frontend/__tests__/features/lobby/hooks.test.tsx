@@ -12,6 +12,7 @@ import { useTimeControlSelection } from '@/features/lobby/hooks/useTimeControlSe
 import { DEFAULT_SETTINGS, type UserSettings } from '@/features/settings/model';
 import { SettingsProvider, useUserSettings } from '@/features/settings/SettingsProvider';
 import type { SettingsStore } from '@/features/settings/store';
+import { settingsStore } from '../../helpers/settingsStore';
 
 const fake = createFakeSocket();
 const socket = fake as unknown as Socket;
@@ -61,7 +62,7 @@ describe('useTimeControlSelection', () => {
     test('preselects the "Default time control" setting until the player picks a card', () => {
         const stored: UserSettings = { ...DEFAULT_SETTINGS, defaultTimeControl: 'rapid' };
         const { result } = renderHook(() => useTimeControlSelection(), {
-            wrapper: withSettings({ load: () => stored, save: jest.fn() }),
+            wrapper: withSettings(settingsStore(stored)),
         });
         expect(result.current.selectedTc).toBe('rapid');
         expect(result.current.playOnlineTimeControl).toBe('10+0');
@@ -69,18 +70,18 @@ describe('useTimeControlSelection', () => {
         expect(result.current.selectedTc).toBe('bullet');
     });
 
-    test("the default setting reproduces the old default (blitz); a card the player picked survives a settings change", () => {
-        let stored: UserSettings = { ...DEFAULT_SETTINGS };
-        const store: SettingsStore = { load: () => stored, save: (s) => (stored = s) };
+    test("the default setting reproduces the old default (blitz); a card the player picked survives a settings change", async () => {
+        const stored: UserSettings = { ...DEFAULT_SETTINGS };
+        const store = settingsStore(stored);
         const { result } = renderHook(
             () => ({ tc: useTimeControlSelection(), settings: useUserSettings() }),
             { wrapper: withSettings(store) },
         );
         expect(result.current.tc.selectedTc).toBe('blitz');
-        act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'classical' }));
+        await act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'classical' }));
         expect(result.current.tc.selectedTc).toBe('classical');
         act(() => result.current.tc.setSelectedTc('bullet'));
-        act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'rapid' }));
+        await act(() => result.current.settings.save({ ...stored, defaultTimeControl: 'rapid' }));
         expect(result.current.tc.selectedTc).toBe('bullet');
     });
 });

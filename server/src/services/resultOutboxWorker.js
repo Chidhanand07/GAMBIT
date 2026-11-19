@@ -39,6 +39,7 @@ const MS_PER_SECOND = 1000;
  * @property {{ processGameEnd: Function }} ratingService
  * @property {{ triggerGameReview: (gameId: string, moveLog: any, timeControl: unknown) => void }} reviewService
  * @property {import('./emitter').Emitter} emitter
+ * @property {import('./gameResultEffects').EffectDeps['preferences']} [preferences] result notifications (F-140)
  * @property {() => number} [now]
  * @property {() => string} [newToken] lock token per pass
  * @property {number} [intervalMs]

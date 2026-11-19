@@ -4,6 +4,7 @@
 import type { Dispatch, MutableRefObject } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { Chess, Square } from 'chess.js';
+import { onRejected } from '@/lib/socket/ack';
 import { playGameEndSound } from '@/lib/sounds';
 import type { SeatColor } from '@/types/game';
 import type {
@@ -49,12 +50,26 @@ export interface SocketHandlerContext {
     markReconnected: () => void;
 }
 
+/** The server's refusal when a player of this game turned "Allow spectators" off (ADR F-140). */
+export const SPECTATING_OFF = 'spectating_off';
+
 /**
  * Re-emitted on every (re)connect; the server treats re-joins as idempotent. The server
  * already knows who we are from the handshake token, so nothing identifies the user here.
+ * A spectator the players do not allow is sent back to the lobby.
  */
-export function joinGameRoom(socket: Socket, gameId: string): void {
-    socket.emit('join_game', gameId);
+export function joinGameRoom(socket: Socket, gameId: string, router?: { push: (href: string) => void }): void {
+    if (!router) {
+        socket.emit('join_game', gameId);
+        return;
+    }
+    socket.emit(
+        'join_game',
+        gameId,
+        onRejected((code) => {
+            if (code === SPECTATING_OFF) router.push('/lobby');
+        }),
+    );
 }
 
 /** Leaving the page stops watching; the server ignores it for a player's own game (F-130). */
@@ -194,7 +209,7 @@ function handlerList(ctx: SocketHandlerContext, expiry: RematchExpiry): Array<[s
             () => {
                 // Fires on initial connect AND on every reconnect.
                 dispatch({ type: 'connectionChanged', connected: true });
-                joinGameRoom(ctx.socket, ctx.gameId);
+                joinGameRoom(ctx.socket, ctx.gameId, ctx.router);
             },
         ],
         ['game_state_sync', onGameStateSync(ctx)],

@@ -125,6 +125,17 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-126](#f-126) | Board country chip: two-letter code derived from `profiles.country` via Intl | B1 | COUNTRY-CHIP |
 | [F-127](#f-127) | Public-profile fields (city, website, favourites, pronouns, style, experience): CHECK + zod, owner-only grants | B1 | PROFILE-FIELDS |
 | [F-160](#f-160) | Achievements "N in a row" and "Top N" from the longest win streak and the best pool's `leaderboard_rank` | STACK | ACHIEVEMENTS |
+| [F-140](#f-140) | Preferences live in `public.user_preferences` (owner-only RLS, column grants); browser copy uploaded once | B3 | SETTINGS-PREFS |
+| [F-141](#f-141) | What each Notifications / Privacy switch does, and where it is enforced | B3 | SETTINGS-PREFS |
+| [F-142](#f-142) | Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet | B3 | SETTINGS-PREFS |
+| [F-143](#f-143) | Change e-mail: `updateUser` on the session client, token-hash confirm route, strict rate limit | B3 | CHANGE-EMAIL |
+| [F-144](#f-144) | Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced on account changes and at sign-in | B3 | TWO-FACTOR |
+| [F-145](#f-145) | Delete account: re-authenticate, ban, one SQL transaction (games anonymised to NULL), then the auth user | B3 | DELETE-ACCOUNT |
+| [F-146](#f-146) | `premoves` / `allow_takebacks` stored as typed preference columns for the game server | B3 | SETTINGS-PREFS |
+| [F-147](#f-147) | Piece sets Gambit / Classic / Line art: SVG artwork and the mockup's Unicode glyphs, via a piece-set context | B3 | PIECE-SETS |
+| [F-163](#f-163) | One leaderboard: the opt-out view carries B1's columns and `leaderboard_rank` counts only listed players | STACK | LEADERBOARD-AGREE |
+| [F-164](#f-164) | `delete_account` re-checked on the stacked schema; a uuid-column guard joins the FK guard | STACK | DELETE-ACCOUNT |
+| [F-168](#f-168) | Root-layout account code keeps the landing lean: lazy Supabase client, no `/api/settings` without a session | STACK | LANDING-LEAN |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3312,3 +3323,286 @@ their owner (B1 item 8).**
   Review affordance in the mockup and stay as they are.
 - Tests: `ProfilePage.test.tsx` (Review → `/analysis?game=g-row`, was `/game/g-row`; aborted row keeps
   `/game/<id>`), `GameResultPage.test.tsx` ("Open in analysis"), `features/analysis/links.test.ts`.
+
+## F-140
+
+**Preferences live in `public.user_preferences`; the browser copy is uploaded once.** (Track B3,
+item 1; SEC-03, SEC-08, NX-07.)
+
+- **Context.** Settings.dc.html shows play preferences (Board & pieces, Gameplay), Notifications,
+  Privacy and the Account switches. The play preferences lived only in localStorage behind the
+  `SettingsStore` port; the rest had no storage at all.
+- **Options.** (a) columns on `profiles` (world-readable; would need column-level SELECT revokes on a
+  table everyone reads); (b) one JSON blob per user; (c) a table keyed by user id with typed
+  columns for what servers enforce and one `play` JSON object for the client-only board settings.
+- **Decision.** (c), migration `20261118300000_user_preferences.sql`. RLS on; policies select /
+  insert / update own row only (`(select auth.uid()) = user_id`), no DELETE policy; `authenticated`
+  gets SELECT, INSERT and UPDATE on the preference columns only (never `user_id` on UPDATE, never the
+  timestamps); `service_role` gets SELECT only (the game server and the web app's privacy filters
+  read, nobody but the owner writes). `challenge_policy` is a CHECK-ed enum; `play` must be an object
+  of at most 4 KB and is normalised with `parseSettings` before it is stored. pgTAP:
+  `supabase/tests/080_user_preferences.test.sql` (25 assertions).
+- **Writes** go through `PATCH /api/settings` on the caller's session client (as the profile edits
+  do, F-086): UPDATE first, INSERT when there is no row, one retry of the UPDATE when a concurrent
+  first save wins the INSERT. Not an upsert: PostgREST's `DO UPDATE` would need UPDATE on `user_id`.
+- **Client.** The `SettingsStore` port is kept; `load()` may now return a promise and `save()`
+  rejects on failure. `createAccountSettingsStore` reads `/api/settings`; signed out (401) it falls
+  back to localStorage as before. When a signed-in user has no row yet (`stored: false`), the
+  browser's play preferences are PATCHed once and then removed from localStorage; a failed upload
+  keeps them for the next load. The provider reloads on SIGNED_IN / SIGNED_OUT / USER_UPDATED and
+  keeps the old object when the copy did not change, so an open draft survives a token refresh.
+- **Fail closed.** The provider exposes `status`; privacy behaviour that runs in the browser (not
+  announcing presence) waits for `ready` and stays off on `error`.
+
+## F-141
+
+**What each Notifications / Privacy switch does, and where it is enforced.**
+
+| Switch | Effect | Enforced in |
+|---|---|---|
+| Challenges | the bell row for an incoming challenge (the live challenge toast is kept: it is how a challenge is accepted) and the desktop alert | game server `socialService` via `preferencesService.notify`; browser `useChallengeBanner` |
+| Friend requests | the `friend_request` bell row (new: nothing created one before) | `POST /api/friends/request` → `notifyFriendRequest` |
+| Game results | a `game_result` bell row per player ("You won" / "You lost" / "Draw", time control, rating change); only the call that finished the row sends it, so an outbox re-drive cannot duplicate it | game server `gameResultEffects` |
+| Your turn (daily games) | a `your_turn` bell row for the player to move after each move in a game with ≥ 1440 minutes on the clock | game server `moveRecorder` |
+| Browser notifications | asks the browser for permission when switched on; then a desktop notification for an incoming challenge while the tab is hidden (in the foreground the in-app toast shows) | browser only (`lib/browserNotifications`) |
+| Show when I am online | the user is not tracked in the shared presence channel (presence is self-announced, so not announcing is what hides the badge) | `PresenceProvider`; untracks live when switched off |
+| Who can challenge me | `nobody` → `challenges_closed`; `friends` → `friends_only` unless an accepted friendship exists; refused challenges are neither stored nor relayed | game server `socialService.requestChallenge` |
+| Show on leaderboard | left out of the leaderboard list and its count | view `public.leaderboard_profiles` (service_role only) read by `GET /api/leaderboard` |
+| Allow spectators | a non-player is refused `join_game` / `spectate_game` for an active game (`spectating_off`, the game page returns to the lobby); the game is left out of `GET /api/games/live` | game server `gameService`; web app `listLiveGames` |
+
+- **Fail closed.** Privacy checks that cannot read the preferences refuse (`preferences_unavailable`
+  for a challenge, `spectating_off` for a spectator, an empty live list). A notification whose
+  switch cannot be read is not sent.
+- **Not covered.** Finished games stay public history (`games` is world-readable under RLS since the
+  initial schema): "Allow spectators" guards the live room and the live list, not the archive.
+- **Defaults.** Without a provider (isolated components) the defaults are `ready`; in the app the
+  provider starts `loading`.
+
+## F-142
+
+**Weekly digest, "Appear in search" and sign-in e-mails are stored but have nothing to drive yet.**
+
+- **Context.** The brief: a shown preference with no feature behind it gets the minimal real
+  behaviour or an ADR. Three switches have no feature in the app today:
+  - *Weekly email digest*: the app sends no e-mail of its own (Supabase Auth sends only auth mail);
+    a digest needs a mail provider, a scheduler and a template.
+  - *Appear in search*: there is no player search. Usernames are looked up only exactly (profile
+    URLs, "Add friend" on a profile); hiding those lookups would break adding a friend from their
+    profile, which is not what the switch says.
+  - *Email me on new sign-ins*: needs device recognition and a mailer; Supabase Auth has no
+    "new sign-in" notification.
+- **Decision.** The three are real, stored, server-side preferences (columns `notify_email_digest`,
+  `appear_in_search`, `email_on_new_sign_in`) shown and saved exactly as the mockup has them, so the
+  feature that later sends a digest, adds search or sends sign-in mail reads the user's existing
+  choice. Nothing reads them today. Revisit with the first of those features; the search feature
+  must filter on `appear_in_search` server-side (lib/server, like the leaderboard view).
+
+## F-143
+
+**Change e-mail: `updateUser({ email })` on the session client, a token-hash confirm route, and a
+rate limit that fails closed.** (Track B3, item 2; NX-07, SEC-09, NODE-12.)
+
+- **Context.** Settings.dc.html shows the Account e-mail as an editable field ("Used for sign-in and
+  account recovery."). Until now it was read-only.
+- **Decision.**
+  - `POST /api/account/email` (body `{ email }`, trimmed, lower-cased, ≤ 254, `z.email()`):
+    `requireFreshUser()` → strict rate limit → `auth.updateUser({ email }, { emailRedirectTo })` on
+    the caller's **session** client (never the admin API, which would skip confirmation). The
+    current address is refused (400). Supabase errors map to fixed messages (409 exists, 429 mail
+    limit, 400 invalid, else 500, logged without the address).
+  - Supabase mails the link(s) per the project's settings (one to the new address; one to the
+    current address too with *Secure email change*). Nothing changes until they are followed.
+  - `GET /auth/confirm?token_hash&type=email_change&next`: `verifyOtp({ type: 'email_change',
+    token_hash })` on a response-cookie client, then a redirect to `next` (same-site paths only, S6)
+    with `?email=confirmed`, or `?email=link_invalid`. Token-hash rather than the PKCE `?code=` link:
+    the PKCE verifier lives in the cookie of the browser that asked, so a link opened from another
+    device or mail client would fail. Only `email_change` is accepted.
+  - UI: the field shows the pending address ("Confirmation sent to …") from Supabase's `new_email`
+    (so it survives a reload), the error when refused, and the link result when the user comes back.
+    The Account card's Save sends the e-mail first, then the switches; a refused e-mail saves nothing.
+  - Rate limit `changeEmail` 5 / user / hour through `enforceStrictRateLimit`: unlike the other
+    limits (which fail open, RATE-LIMITS ADR), a store error refuses with 503, and so does a missing
+    store in production; development without Upstash still works.
+- **Templates** and redirect URLs: DEPLOY.md §1b-2.
+- **When 2FA is on** the change additionally needs an AAL2 session (F-144).
+
+## F-144
+
+**Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced by the server on account changes
+and by the app at sign-in.** (Track B3, item 3; NX-07, NX-10, SEC-09.)
+
+- **Context.** Settings.dc.html: Account → "Two-factor authentication — Ask for a code when you sign
+  in", and a "6-digit code" box in the sign-in preview. Supabase Auth's MFA API (enrol, challenge,
+  verify, unenrol, assurance level) is a client API on the user's own session.
+- **Decision.**
+  - *Enrol* (`lib/mfa.ts`): `mfa.enroll({ factorType: 'totp', issuer: 'Gambit' })` → dialog with
+    the QR code (Supabase's SVG data URL) and the secret → `challengeAndVerify` with the code. An
+    abandoned enrolment is unenrolled on Cancel and any stale unverified factor is removed before a
+    new one. The switch shows the real factor state (it is not part of the Save draft).
+  - *Turn off*: always asks for a code first (proves the factor and raises the session to AAL2,
+    which Supabase requires to remove a verified factor), then `unenroll` and a session refresh.
+  - *Server*: `requireFreshUser()` (every account-changing route) now also reads the factors of the
+    user Supabase Auth returns; with a verified factor the token's `aal` claim must be `aal2`, else
+    403 `mfa_required`. Covered: profile edits, settings, change e-mail (F-143), delete account
+    (F-145).
+  - *Sign-in*: after `signInWithPassword` the login page checks
+    `getAuthenticatorAssuranceLevel()`; `aal1` → `aal2` shows a code step and only a verified code
+    continues. `SecondFactorGate` (layout) sends an AAL1 session with a factor (e.g. after Google)
+    from any page to `/login?mfa=1`. Both are optimistic, like the proxy (NX-09).
+- **Residual risk (accepted, revisit).** Read-only route handlers use `requireUser()` (verified
+  claims, no network call) and do not look at factors, so a stolen password alone could read the
+  data those routes return until AAL2 is required everywhere. Doing that per request needs either a
+  `getUser()` round trip or a Custom Access Token Hook that adds a "has verified factor" claim; the
+  hook is the planned follow-up (DEPLOY.md would gain one dashboard step).
+- **Operations.** MFA (TOTP) must be enabled in the Supabase project: DEPLOY.md §1b-3.
+
+## F-145
+
+**Delete account: re-authenticate, ban, remove the data in one SQL transaction (finished games kept
+with the player's side set to NULL), then delete the auth user.** (Track B3, item 4; SEC-03,
+SEC-04, SEC-01, NODE-12.)
+
+- **Context.** Settings.dc.html's Account card ends with a red "Delete account" zone. `games`
+  references `profiles` three times (`white_id`, `black_id`, `winner_id`) and `messages.user_id`
+  once, all without an ON DELETE action, so a profile with games could not be deleted at all;
+  `profiles.id` references `auth.users`, so the auth user cannot go first either.
+- **Options for the games.** (a) delete them (removes the opponents' history and their rating
+  context); (b) a shared "deleted player" tombstone profile (needs a fake `auth.users` row, because
+  `profiles.id` references it, and would aggregate strangers' games under one name); (c) set the
+  deleted player's side to NULL and keep `result` (which already says who won).
+- **Decision.** (c), in `public.delete_account(uuid)` (migration `20261118300100`, SECURITY DEFINER,
+  `search_path=''`, EXECUTE for `service_role` only): locks the profile; refuses with SQLSTATE 55000
+  `active_game` while the user plays a live game (no game loses a player mid-way); deletes the
+  user's never-started private invites (cascades their moves, chat, invite token), their chat lines,
+  friendships, their notifications and other users' notifications that name them, their
+  preferences and the profile; nulls their side and `winner_id` in every other game. One
+  transaction: all or nothing. The UI already shows a missing opponent as "Unknown".
+- **The route** `POST /api/account/delete` (body `{ confirmUsername, password? }`):
+  `requireFreshUser()` (AAL2 when two-factor is on, F-144) → strict rate limit 5/user/hour (fails
+  closed, F-143) → the username typed exactly (case-sensitive) → re-authentication: the password
+  for accounts that have one (checked on a throwaway client with no session storage, then signed
+  out), else a sign-in less than 10 minutes old (the token's `amr` timestamp) → **ban** the auth
+  user (`ban_duration`) so nobody can sign in or refresh while data goes → `delete_account` (on
+  failure: unban, 409/500) → avatar files in `avatars/<id>/` (best effort) → `auth.admin.deleteUser`
+  (on failure: 500 `auth_delete_failed`, the user stays banned and holds no data) → session cookies
+  cleared. Logs carry `ref <12 hex of sha256(user id)>` only.
+- **Why not delete `auth.users` inside the SQL function.** The brief asks for the Auth admin API,
+  which also revokes sessions and identities the way Supabase Auth expects; the ban closes the gap
+  between the transaction and that call.
+- **Guard.** pgTAP 081 fails when any foreign key to `profiles` neither cascades nor is one of the
+  four handled columns, so a table added later (e.g. by another track) must be added to the function
+  before it ships.
+
+## F-146
+
+**`premoves` and `allow_takebacks` are typed `user_preferences` columns (default off), in the
+settings DTO as `gameplay: { premoves, allowTakebacks }`.**
+
+- **Context.** The game-actions track adds the Gameplay rows "Premoves" and "Allow takeback
+  requests" as browser preferences. Takeback requests and premoves involve the other player, so
+  the game server must read the player's choice (NODE-11: it cannot trust a client's claim).
+- **Decision.** Migration `20261118300200_user_preferences_gameplay.sql` adds both columns with the
+  same privileges as the other preferences (owner insert/update under RLS, `service_role` SELECT
+  only); pgTAP 082. `PATCH /api/settings` accepts `gameplay`, `GET` returns it, and the game
+  server's `preferencesOf` / `PREFERENCE_COLUMNS` already read them (nothing enforces them yet).
+  When that track's rows land, they save through `saveAccount` (section `gameplay`) instead of
+  the `play` blob.
+
+## F-147
+
+**Piece sets: Gambit (SVG artwork), Classic and Line art (the mockup's Unicode glyphs drawn in SVG
+with the bundled Noto Sans Symbols 2), selected in Settings and applied through a piece-set
+context.** (Track B3, item 5; SOLID-01.)
+
+- **Context.** Settings.dc.html's "Board & pieces" has "Piece set: Gambit / Classic / Line art".
+  Its `pieceImg()` has path artwork only for Gambit (already the app's `Piece`). Classic and Line
+  art have no paths: the mockup renders them as Unicode chess glyphs in `Noto Sans Symbols 2` at
+  26px, Classic filled (♚…, white `#FFF9EC` with a 1px `#1B1512` text-shadow outline, black
+  `#1B1512`), Line art outlined (♔…, white `#1B1512`, black `#5A3A1E`).
+- **Options.** (a) ship only Gambit (the one with path artwork) and drop the row; (b) draw new SVG
+  paths for the other two (invented artwork, not the design); (c) render exactly the mockup's
+  artwork, the glyphs, as SVG `<text>` in the same 45×45 piece box.
+- **Decision.** (c): the mockup does carry artwork for all three, it is just glyph-based, and the
+  font is already bundled (`font-symbols`). `components/chess/Piece.tsx` draws the set the nearest
+  `PieceSetProvider` names (`components/chess/pieceSets.tsx`, default Gambit); the settings provider
+  supplies the saved `pieceSet` app-wide (every Board and the promotion picker), the Settings
+  preview supplies the draft. Colours are the existing `piece-glyph-*` tokens; the Classic outline is
+  a stroke painted behind the fill; the glyph size (30.4 units) reproduces 26px in the mockup's
+  44.75px preview square at the board's 86% piece size. `pieceSet` is part of the play preferences
+  (`parseSettings`), so it is stored on the server with them (F-140).
+
+## F-163
+
+**The leaderboard list, its count and every rank agree on who is listed (stacking follow-up d).**
+
+- **Context.** B1 (F-125) added `profiles.rating_all`, the per-pool `rated_games_*` counters and
+  `public.leaderboard_rank()`, all over `public.profiles`. B3 (F-140) made the list read
+  `public.leaderboard_profiles`, a view that leaves out players who turned "Show on leaderboard" off,
+  but the view had none of B1's columns, and the rank function still counted hidden players: an
+  opted-out player kept a rank (shown on the leaderboard's "Your standing" and the profile's "Top N")
+  and pushed everyone below them down a place.
+- **Decision.** Migration `20261118300300_leaderboard_opt_out_ranking.sql`:
+  1. `leaderboard_profiles` gains `rating_all` and `rated_games_{bullet,blitz,rapid,classical}`
+     (appended, so `CREATE OR REPLACE VIEW` keeps the existing columns; grants re-stated:
+     service_role SELECT only). The web app's list and its `X-Total-Count` read the view (B3's
+     intent, kept when B3 was stacked on B1: `lib/server/leaderboard.ts` `LEADERBOARD_SOURCE`).
+  2. `leaderboard_rank` reads the player and counts the players ahead in the view. A player not in
+     it (opted out, or unknown) gets NULL. Same signature, STABLE, SECURITY INVOKER, service_role
+     only.
+- **What an opted-out player sees.** The leaderboard does not list them; "Your standing" shows the
+  design's no-rank state ("—") with their rating; their profile earns no "Top N" (F-160). The
+  Settings privacy preview now asks the server for the rank (`GET /api/leaderboard/me`, any place,
+  not only the top 50) and shows "#N · rating" or, without a rank, "Listed · rating"; with the
+  switch off it shows "Not listed" as before.
+- **Rollout.** Apply the migration before the web app of this stack (the list selects the new view
+  columns). Rollback: drop and re-create the view from `20261118300000` (columns cannot be dropped by
+  CREATE OR REPLACE), re-grant, and re-create `leaderboard_rank` from `20261118100300`.
+- Tests: pgTAP `083_leaderboard_opt_out_ranking` (view columns incl. everything the list selects,
+  grants, opted-out player neither listed nor ranked nor counted, opting back in, rank = list place);
+  `accountTabs.test.tsx` (preview rank from `/api/leaderboard/me`, was the top-50 list; beyond 50; no
+  rank); `api/misc.test.ts` (list and count read `leaderboard_profiles`).
+
+## F-164
+
+**`delete_account` still covers every user reference once B1, B2 and B4 are stacked (follow-up e).**
+
+- **Check.** On the stacked schema (all migrations replayed in order on a scratch Postgres 17) the only
+  references to `public.profiles` are the ones F-145 handles: `games.white_id/black_id/winner_id`
+  (nulled), `messages.user_id` (deleted), and the cascading `friendships`, `notifications`,
+  `user_preferences`. B1 added columns, a view and functions but no new reference: the rating
+  snapshots (`white/black_rating_before/after`, `rating_category`, `rated_at`), `end_reason`, the
+  per-pool counters and `rating_all` live on `games`/`profiles` rows; `leaderboard_profiles` and
+  `leaderboard_rank` read `profiles`, so a deleted profile simply leaves them. B2 and B4 keep their
+  state in Redis (spectators, presence, draw/takeback/premove requests) and add no tables. The
+  function needed no change.
+- **Decision.** The kept game keeps its snapshot and end reason (the opponent's history and rating
+  chart need them; the deleted side is anonymised to NULL, so the numbers name nobody). pgTAP 081 now
+  covers B1's data in its fixtures (a rated game with snapshot and end reason, per-pool counters and
+  profile fields) and checks that the deleted player leaves the leaderboard view and ranks while the
+  opponent moves up. A second guard lists every `uuid` column of every public table: a user id
+  stored without a foreign key (which the FK guard cannot see) fails the test until it is listed and
+  handled by `delete_account`.
+- pgTAP `081_delete_account` (22 → 28 assertions; no assertion removed).
+
+## F-168
+
+**B3's account code in the root layout follows the landing's first-paint rules (F-111).**
+
+- **Context.** The landing track (F-111) loads supabase-js on first use (`lib/supabase/lazyClient`),
+  skips `/api/profile/me` when the browser holds no session (a guest's 401 is logged by browsers on
+  every public page), and opens no guest presence socket on `/`. B3, built before it, put three
+  pieces in the root layout that broke those rules once stacked: the settings provider's auth
+  watcher (`authChanges.ts`) and the two-factor gate (`SecondFactorGate`) imported the eager
+  client, and the account settings store asked `/api/settings` on every page, guests included.
+- **Decision.**
+  - `subscribeToAuthChanges` and `SecondFactorGate` use `loadBrowserClient()` (the gate was changed
+    while resolving the B3-3 rebase; the watcher in this commit). The watcher can be stopped before
+    the client has loaded.
+  - The account store takes `hasSession`; the provider passes `lib/supabase/session.hasBrowserSession`
+    (moved out of ProfileProvider, which now imports it). Without a session the store uses the
+    browser copy and the defaults and sends no request; a failing check counts as no session.
+  - PresenceProvider (resolved during the rebase): lazy client and no guest socket on `/` (F-111),
+    the tab's idle status (F-131), and the "Show when I am online" gate (F-140) together.
+- Tests: `accountStore.test.ts` (no request without a session), `authChanges.test.ts` (lazy, never
+  the eager client), `HomeSettingsPages.test.tsx` (its client double has a session),
+  `presencePrivacy.test.tsx` and `PresenceProvider.test.tsx` (wait for the lazy client).

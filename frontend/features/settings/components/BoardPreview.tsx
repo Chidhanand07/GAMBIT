@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { Board } from '@/components/chess/Board';
+import { PieceSetProvider } from '@/components/chess/pieceSets';
 import { playPreviewMoveSound } from '@/lib/sounds';
 import { boardPrefsOf, type UserSettings } from '../model';
 import { PreviewCard } from './PreviewCard';
@@ -22,21 +23,28 @@ export function BoardPreview({ settings }: { settings: UserSettings }) {
     };
     return (
         <PreviewCard>
-            <div style={slide}>
-                <Board
-                    fen={moved ? AFTER : BEFORE}
-                    frame="preview"
-                    theme={prefs.theme}
-                    animate={prefs.animate}
-                    showCoordinates={prefs.showCoordinates}
-                    lastMove={
-                        prefs.highlightLastMove ? (moved ? { from: 'e2', to: 'e4' } : { from: 'e7', to: 'e5' }) : null
-                    }
-                    selectedSquare={prefs.highlightLegalMoves ? 'g1' : null}
-                    legalDestinations={prefs.highlightLegalMoves ? KNIGHT_TARGETS : []}
-                    label="Board preview"
-                />
-            </div>
+            {/* The draft's piece set, before it is saved app-wide. */}
+            <PieceSetProvider value={settings.pieceSet}>
+                <div style={slide}>
+                    <Board
+                        fen={moved ? AFTER : BEFORE}
+                        frame="preview"
+                        theme={prefs.theme}
+                        animate={prefs.animate}
+                        showCoordinates={prefs.showCoordinates}
+                        lastMove={
+                            prefs.highlightLastMove
+                                ? moved
+                                    ? { from: 'e2', to: 'e4' }
+                                    : { from: 'e7', to: 'e5' }
+                                : null
+                        }
+                        selectedSquare={prefs.highlightLegalMoves ? 'g1' : null}
+                        legalDestinations={prefs.highlightLegalMoves ? KNIGHT_TARGETS : []}
+                        label="Board preview"
+                    />
+                </div>
+            </PieceSetProvider>
             <button
                 type="button"
                 onClick={play}

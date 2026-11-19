@@ -32,6 +32,9 @@ const { createMessagesRepository } = require('./repositories/messagesRepository'
 const { createProfilesRepository } = require('./repositories/profilesRepository');
 const { createNotificationsRepository } = require('./repositories/notificationsRepository');
 const { createPendingRequestsRepository } = require('./repositories/pendingRequestsRepository');
+const { createPreferencesRepository } = require('./repositories/preferencesRepository');
+const { createFriendshipsRepository } = require('./repositories/friendshipsRepository');
+const { createPreferencesService } = require('./services/preferencesService');
 const { createIoEmitter } = require('./services/emitter');
 const { createReviewService } = require('./services/reviewService');
 const { createClockService } = require('./services/clockService');
@@ -96,11 +99,19 @@ const matchmaking = new MatchmakingService(io);
 
 const sessions = createSessionRegistry();
 const emitter = createIoEmitter(io);
+const notificationsRepo = createNotificationsRepository(supabase);
+// Who may challenge or watch a player, and which notifications they want (ADR F-140).
+const preferences = createPreferencesService({
+    preferencesRepo: createPreferencesRepository(supabase),
+    friendshipsRepo: createFriendshipsRepository(supabase),
+    notificationsRepo,
+});
 const socialService = createSocialService({
     privateGames,
-    notificationsRepo: createNotificationsRepository(supabase),
+    notificationsRepo,
     pendingRequests: createPendingRequestsRepository(redis),
     emitter,
+    preferences,
 });
 // One finalizer for every way a game ends: moves and resignations (gameService)
 // and flag falls and abandonment (the clock) share it (G3).
@@ -115,6 +126,7 @@ const finalizer = createGameFinalizer({
     sessions,
     emitter,
     resultOutbox,
+    preferences,
 });
 const resultOutboxWorker = createResultOutboxWorker({
     outbox: resultOutbox,
@@ -122,6 +134,7 @@ const resultOutboxWorker = createResultOutboxWorker({
     ratingService,
     reviewService,
     emitter,
+    preferences,
 });
 // Who watches each game, shared by every instance (ADR F-130).
 const spectatorService = createSpectatorService({
@@ -138,6 +151,7 @@ const gameService = createGameService({
     emitter,
     finalizer,
     spectators: spectatorService,
+    preferences,
 });
 
 // Start single global clock ticker (replaces all per-game setInterval timers)
