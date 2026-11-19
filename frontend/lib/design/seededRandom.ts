@@ -47,3 +47,26 @@ export function splashParticle(i: number): SplashParticle {
 export function splashParticles(count: number = SPLASH_PARTICLE_COUNT): SplashParticle[] {
     return Array.from({ length: count }, (_, i) => splashParticle(i));
 }
+
+/** Wordmark letter-spacing at the start and end of `.gsw` (Home.dc.html), in em. */
+export const WORDMARK_SPACING_EM = { from: 0.7, to: 0.3 } as const;
+
+export interface WordmarkLetter {
+    letter: string;
+    /** Horizontal offset at the start of the animation, in em, relative to the final layout. */
+    offsetEm: number;
+}
+
+/**
+ * Per-letter start offsets that reproduce the `.gsw` letter-spacing animation with transforms.
+ * In a centred line where every letter carries trailing spacing `s`, letter `i` of `n` sits at
+ * `const + (i − n/2)·s`, so widening `s` by Δ moves it by `(i − n/2)·Δ`, and an eased spacing
+ * equals the same easing on that translate.
+ */
+export function wordmarkLetters(word: string): WordmarkLetter[] {
+    const letters = Array.from(word);
+    const delta = WORDMARK_SPACING_EM.from - WORDMARK_SPACING_EM.to;
+    const centre = letters.length / 2;
+    // Rounded so float noise (e.g. -1.2000000000000002) never reaches the style attribute.
+    return letters.map((letter, i) => ({ letter, offsetEm: Math.round((i - centre) * delta * 1000) / 1000 }));
+}

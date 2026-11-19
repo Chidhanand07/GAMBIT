@@ -127,6 +127,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-110](#f-110) | Home.dc.html is the landing page; signed-in and signed-out variants; hero claims | v2 | C |
 | [F-111](#f-111) | Landing performance: lazy Supabase/socket.io, no guest 401, lazy audio, 2 KB symbol font, no trail on touch | v2 | C |
 | [F-112](#f-112) | The landing resolves its viewer on the server and renders a seeded header | v2 | C |
+| [F-113](#f-113) | Intro splash: composited wordmark, Escape, 44 px Replay hit area | v2 | C |
 
 **Redesign v2 — landing** (branch `v2/landing`, track C; F-110–F-119).
 
@@ -2697,3 +2698,23 @@ the Dependabot part of F-057).**
 - **Trade-off.** The landing's header is rendered inside the layout's `<main>`, so it is not a
   `banner` landmark there (and the footer is not `contentinfo`); the navigation keeps its "Main"
   label. Rejected: reading cookies in the root layout (would make every route dynamic).
+
+## F-113
+
+**Intro splash: composited wordmark, Escape, a 44 px hit area for "Replay intro".**
+
+- **Context.** Home.dc.html animates the wordmark's `letter-spacing` from .7em to .3em. That relayouts
+  every frame, moves the centred column (Lighthouse counted layout shifts) and, at 64 px, makes
+  "GAMBIT" the page's largest text when it fades in at 2.6 s, so Lighthouse reported it as the LCP
+  (6.0 s). "Replay intro" is drawn 40 px tall, under the 44 px touch target.
+- **Decision.**
+  - The wordmark keeps `letter-spacing: .3em`; each letter is an inline-block that starts at
+    `translateX((i − n/2)·0.4em)` and slides to 0 with the same easing, delay and duration. In a
+    centred line with trailing spacing that is exactly the letter-spacing animation (unit-tested for
+    any letter widths), but composited: no relayout, no shift, and each letter is too small to be an
+    LCP candidate. The wordmark is one `role="img"` named "GAMBIT".
+  - Escape ends the splash, like Skip. It still mounts after hydration, plays once per session
+    (sessionStorage) and never under `prefers-reduced-motion`.
+  - "Replay intro" stays drawn at 40 px; a `::before` strip 3 px above and below makes the hit area
+    44 px without painting anything.
+- **Measured.** Splash key frames (0.5–4.6 s) differ from the mockup by ≤ 0.17% at 375 and 1440 px.

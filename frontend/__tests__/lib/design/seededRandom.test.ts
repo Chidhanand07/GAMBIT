@@ -1,4 +1,4 @@
-import { rnd, splashParticle, splashParticles, SPLASH_PARTICLE_COUNT } from '@/lib/design/seededRandom';
+import { rnd, splashParticle, splashParticles, SPLASH_PARTICLE_COUNT, WORDMARK_SPACING_EM, wordmarkLetters } from '@/lib/design/seededRandom';
 
 describe('rnd (HANDOFF §4.3)', () => {
     test('is frac(sin(n*91.7+13.3)*43758.5453)', () => {
@@ -44,5 +44,33 @@ describe('splash particles', () => {
             expect(size).toBeGreaterThanOrEqual(2);
             expect(size).toBeLessThanOrEqual(5);
         }
+    });
+});
+
+describe('wordmark letters (F-113)', () => {
+    test('each letter starts where .7em letter-spacing put it, relative to its .3em place', () => {
+        expect(wordmarkLetters('GAMBIT')).toEqual([
+            { letter: 'G', offsetEm: -1.2 },
+            { letter: 'A', offsetEm: -0.8 },
+            { letter: 'M', offsetEm: -0.4 },
+            { letter: 'B', offsetEm: 0 },
+            { letter: 'I', offsetEm: 0.4 },
+            { letter: 'T', offsetEm: 0.8 },
+        ]);
+        expect(WORDMARK_SPACING_EM).toEqual({ from: 0.7, to: 0.3 });
+    });
+
+    test('the offsets reproduce a centred line laid out with the wider spacing', () => {
+        // Letter widths are arbitrary: the offset of each letter does not depend on them.
+        const widths = [41, 39, 52, 37, 14, 33];
+        const left = (spacing: number) => {
+            const total = widths.reduce((a, b) => a + b, 0) + widths.length * spacing;
+            let x = -total / 2;
+            return widths.map((w) => { const at = x; x += w + spacing; return at; });
+        };
+        const em = 64;
+        const wide = left(0.7 * em);
+        const tight = left(0.3 * em);
+        wordmarkLetters('GAMBIT').forEach(({ offsetEm }, i) => expect(tight[i] + offsetEm * em).toBeCloseTo(wide[i], 9));
     });
 });

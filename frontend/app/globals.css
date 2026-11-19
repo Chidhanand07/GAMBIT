@@ -428,8 +428,13 @@
   @keyframes gspc { 0% { transform: translate(var(--x), var(--y)); opacity: 0; } 15% { opacity: .95; } 85% { opacity: .9; } 100% { transform: translate(0, 0); opacity: 0; } }
   .gsk { opacity: 0; transform: scale(.86); animation: gsk var(--duration-900) var(--ease-splash) 1.9s forwards; }
   @keyframes gsk { to { opacity: 1; transform: scale(1); } }
-  .gsw { opacity: 0; letter-spacing: .7em; animation: gsw var(--duration-1100) var(--ease-splash) 2.6s forwards; }
-  @keyframes gsw { to { opacity: 1; letter-spacing: .3em; } }
+  /* Home.dc.html animates letter-spacing .7em → .3em on .gsw. Here the wordmark keeps .3em and
+     each letter (.gsl) slides from its .7em position (--o) instead: identical frames, but on the
+     compositor, so no relayout, no layout shift and no large text paint at 2.6 s (F-113). */
+  .gsw { opacity: 0; letter-spacing: .3em; animation: gsw var(--duration-1100) var(--ease-splash) 2.6s forwards; }
+  @keyframes gsw { to { opacity: 1; } }
+  .gsl { display: inline-block; transform: translateX(var(--o)); animation: gsl var(--duration-1100) var(--ease-splash) 2.6s forwards; }
+  @keyframes gsl { to { transform: translateX(0); } }
   .gst { opacity: 0; animation: gst var(--duration-700) ease 3.5s forwards; }
   @keyframes gst { to { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {

@@ -32,7 +32,12 @@ describe('IntroSplash', () => {
         expect(splash.querySelectorAll('.gsp')).toHaveLength(90);
         expect((splash.querySelector('.gsp') as HTMLElement).style.getPropertyValue('--x')).toBe('-354px');
         expect(splash.querySelector('.gsk svg')).not.toBeNull();
-        expect(screen.getByText('GAMBIT')).toHaveClass('gsw');
+        // F-113: the wordmark is one image of six composited letters (no letter-spacing animation).
+        const wordmark = screen.getByRole('img', { name: 'GAMBIT' })
+        expect(wordmark).toHaveClass('gsw')
+        expect([...wordmark.querySelectorAll('.gsl')].map((l) => [l.textContent, (l as HTMLElement).style.getPropertyValue('--o')])).toEqual([
+            ['G', '-1.2em'], ['A', '-0.8em'], ['M', '-0.4em'], ['B', '0em'], ['I', '0.4em'], ['T', '0.8em'],
+        ]);
         expect(screen.getByText('Chess, perfected.')).toHaveClass('gst');
         expect(screen.getByRole('button', { name: 'Skip' })).toBeInTheDocument();
         expect(window.sessionStorage.getItem(INTRO_SEEN_KEY)).toBe('1');
@@ -87,4 +92,19 @@ describe('IntroSplash', () => {
         expect(screen.queryByTestId('intro-splash')).not.toBeInTheDocument();
         getItem.mockRestore();
     });
+
+    test('[F-113] Escape ends the splash like Skip', () => {
+        render(<IntroSplash />)
+        fireEvent.keyDown(document, { key: 'Enter' })
+        expect(screen.getByTestId('intro-splash')).toBeInTheDocument()
+        fireEvent.keyDown(document, { key: 'Escape' })
+        expect(screen.queryByTestId('intro-splash')).not.toBeInTheDocument()
+    })
+
+    test('[F-113] Replay intro is drawn 40px tall with a 44px hit area that adds no pixels', () => {
+        window.sessionStorage.setItem(INTRO_SEEN_KEY, '1')
+        render(<IntroSplash />)
+        const replay = screen.getByRole('button', { name: 'Replay intro' })
+        expect(replay).toHaveClass('min-h-[40px]', 'fixed', 'before:absolute', 'before:-inset-y-[3px]', "before:content-['']")
+    })
 });
