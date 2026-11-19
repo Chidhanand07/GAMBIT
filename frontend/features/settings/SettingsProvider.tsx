@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { PieceSetProvider } from '@/components/chess/pieceSets';
 import { setSoundsEnabled } from '@/lib/sounds';
 import type { AccountPreferences } from '@/types/preferences';
 import { subscribeToAuthChanges } from './authChanges';
@@ -114,7 +115,12 @@ export function SettingsProvider({ children, store = defaultStore }: { children:
         () => ({ settings: prefs.play, account: prefs.account, status, save, saveAccount }),
         [prefs, status, save, saveAccount],
     );
-    return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
+    // The piece set applies app-wide: every Board / Piece below reads it (ADR F-147).
+    return (
+        <SettingsContext.Provider value={value}>
+            <PieceSetProvider value={prefs.play.pieceSet}>{children}</PieceSetProvider>
+        </SettingsContext.Provider>
+    );
 }
 
 /** The saved preferences, their load status, `save` and `saveAccount`. */

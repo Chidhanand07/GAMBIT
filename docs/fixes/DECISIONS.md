@@ -132,6 +132,7 @@ instead of one file per ADR under `docs/refactor/adr/`.
 | [F-144](#f-144) | Two-factor: Supabase TOTP enrolled in the browser; AAL2 enforced on account changes and at sign-in | B3 | TWO-FACTOR |
 | [F-145](#f-145) | Delete account: re-authenticate, ban, one SQL transaction (games anonymised to NULL), then the auth user | B3 | DELETE-ACCOUNT |
 | [F-146](#f-146) | `premoves` / `allow_takebacks` stored as typed preference columns for the game server | B3 | SETTINGS-PREFS |
+| [F-147](#f-147) | Piece sets Gambit / Classic / Line art: SVG artwork and the mockup's Unicode glyphs, via a piece-set context | B3 | PIECE-SETS |
 
 **Redesign v2 — parity fixes** (branch `v2/parity-fixes`, track A2–A4; F-100–F-109).
 
@@ -3503,4 +3504,27 @@ settings DTO as `gameplay: { premoves, allowTakebacks }`.**
   server's `preferencesOf` / `PREFERENCE_COLUMNS` already read them (nothing enforces them yet).
   When that track's rows land, they save through `saveAccount` (section `gameplay`) instead of
   the `play` blob.
+
+## F-147
+
+**Piece sets: Gambit (SVG artwork), Classic and Line art (the mockup's Unicode glyphs drawn in SVG
+with the bundled Noto Sans Symbols 2), selected in Settings and applied through a piece-set
+context.** (Track B3, item 5; SOLID-01.)
+
+- **Context.** Settings.dc.html's "Board & pieces" has "Piece set: Gambit / Classic / Line art".
+  Its `pieceImg()` has path artwork only for Gambit (already the app's `Piece`). Classic and Line
+  art have no paths: the mockup renders them as Unicode chess glyphs in `Noto Sans Symbols 2` at
+  26px, Classic filled (♚…, white `#FFF9EC` with a 1px `#1B1512` text-shadow outline, black
+  `#1B1512`), Line art outlined (♔…, white `#1B1512`, black `#5A3A1E`).
+- **Options.** (a) ship only Gambit (the one with path artwork) and drop the row; (b) draw new SVG
+  paths for the other two (invented artwork, not the design); (c) render exactly the mockup's
+  artwork, the glyphs, as SVG `<text>` in the same 45×45 piece box.
+- **Decision.** (c): the mockup does carry artwork for all three, it is just glyph-based, and the
+  font is already bundled (`font-symbols`). `components/chess/Piece.tsx` draws the set the nearest
+  `PieceSetProvider` names (`components/chess/pieceSets.tsx`, default Gambit); the settings provider
+  supplies the saved `pieceSet` app-wide (every Board and the promotion picker), the Settings
+  preview supplies the draft. Colours are the existing `piece-glyph-*` tokens; the Classic outline is
+  a stroke painted behind the fill; the glyph size (30.4 units) reproduces 26px in the mockup's
+  44.75px preview square at the board's 86% piece size. `pieceSet` is part of the play preferences
+  (`parseSettings`), so it is stored on the server with them (F-140).
 

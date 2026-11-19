@@ -346,7 +346,8 @@ describe('settings page', () => {
     test('[A4] every settings section has no axe violations', async () => {
         const { container } = render(<SettingsProvider><SettingsPage /></SettingsProvider>)
         await expectAccessible(container)
-        for (const section of ['Board & pieces', 'Gameplay', 'Account']) {
+        // F-140 (was Board & pieces, Gameplay, Account): + the Notifications and Privacy tabs.
+        for (const section of ['Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account']) {
             fireEvent.click(screen.getByRole('button', { name: section }))
             await expectAccessible(container)
         }
@@ -385,13 +386,14 @@ describe('settings page', () => {
     // `change email` in both lists): the Account e-mail is editable and changed through Supabase.
     // F-144 (was `two-factor|2fa` in both lists): two-factor is real Supabase TOTP.
     // F-145 (was `delete account` in both lists): deletion is real (re-authenticated, atomic).
+    // F-147 (was `piece set` in the list): the three piece sets of the mockup are real.
     test('[REDESIGN-INTEGRATION] only settings that work are offered: no unbacked account, gameplay or profile controls', () => {
         render(<SettingsPage />)
         const sections = within(screen.getByRole('group', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
         expect(sections).toEqual(['Public profile', 'Board & pieces', 'Gameplay', 'Notifications', 'Privacy', 'Account'])
         // F-127 (was: pronouns, playing style, experience, favourite, website and city also unbacked):
         // those are real profile columns now; everything else here still has no backing.
-        const unbacked = /premove|takeback|move by|piece set|visib/i
+        const unbacked = /premove|takeback|move by|visib/i
         for (const section of sections) {
             fireEvent.click(screen.getByRole('button', { name: section! }))
             const controls = [...screen.queryAllByRole('switch'), ...screen.queryAllByRole('button'), ...screen.queryAllByRole('textbox')]
